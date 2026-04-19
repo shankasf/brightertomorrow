@@ -11,7 +11,7 @@ const karla = Karla({ subsets: ["latin"], variable: "--font-karla", display: "sw
 const mukta = Mukta_Vaani({ subsets: ["latin"], weight: ["400","500","600","700","800"], variable: "--font-mukta", display: "swap" });
 const radley = Radley({ subsets: ["latin"], weight: ["400"], variable: "--font-radley", display: "swap" });
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300; // cache nav/settings for 5 min
 
 export const metadata: Metadata = {
   title: "Brighter Tomorrow Therapy Collective — Las Vegas Therapy",
