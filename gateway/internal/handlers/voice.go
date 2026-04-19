@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
@@ -69,7 +70,14 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// Upgrade writes the HTTP error itself on failure; just log.
-		slog.Warn("voice: upgrade client connection", "err", err)
+		slog.Warn("voice: upgrade client connection",
+			"err", err,
+			"request_id", chimw.GetReqID(r.Context()),
+			"session_id", sessionID,
+			"upgrade_header", r.Header.Get("Upgrade"),
+			"connection_header", r.Header.Get("Connection"),
+			"user_agent", r.Header.Get("User-Agent"),
+		)
 		return
 	}
 	defer clientConn.Close()

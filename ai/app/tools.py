@@ -187,3 +187,28 @@ ALL_TOOLS = [
     search_faqs,
     request_intake_callback,
 ]
+
+# Named groups — agents import these instead of ALL_TOOLS for tighter scoping.
+# Note: list_specialties and list_services appear in both INFO_TOOLS and MATCHING_TOOLS
+# intentionally; each agent uses them with a different focus.
+INFO_TOOLS = [
+    kb_search,
+    list_services,
+    get_service,
+    list_specialties,
+    list_locations,
+    get_business_hours_and_contact,
+    search_faqs,
+]
+
+MATCHING_TOOLS = [
+    list_team_members,
+    list_specialties,
+    list_services,
+]
+
+INTAKE_TOOLS = [
+    request_intake_callback,
+]
+
+CRISIS_TOOLS: list = []
