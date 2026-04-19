@@ -3,10 +3,8 @@ package handlers
 import (
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"regexp"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
@@ -67,31 +65,18 @@ func (h *ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse the IP before storing it in the INET column. A raw X-Forwarded-For
-	// value can be "unknown", contain zone IDs, or be otherwise malformed; passing
-	// such a string to pgx produces a 500 and drops the whole submission. Store
-	// NULL instead so the row is never lost.
-	var ipVal *string
-	if raw := strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-For"), ",", 2)[0]); raw != "" {
-		if net.ParseIP(raw) != nil {
-			ipVal = &raw
-		}
-		// else: malformed IP header — store NULL
-	}
-
-	ua := r.Header.Get("User-Agent")
-
 	phone := nullableString(body.Phone)
 	subject := nullableString(body.Subject)
 
+	// IP and user_agent removed — HIPAA minimum-necessary (§164.502(b)).
+	// No documented clinical need; storing IP + health-context message = linkable PHI.
 	const query = `
 		INSERT INTO bt.contact_submissions
-			(full_name, email, phone, subject, message, source, ip, user_agent)
-		VALUES ($1,$2,$3,$4,$5,'website',$6,$7)`
+			(full_name, email, phone, subject, message, source)
+		VALUES ($1,$2,$3,$4,$5,'website')`
 
 	if _, err := h.Pool.Exec(r.Context(), query,
 		body.FullName, body.Email, phone, subject, body.Message,
-		ipVal, ua,
 	); err != nil {
 		slog.Error("contact: insert", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
@@ -108,4 +93,3 @@ func nullableString(s string) *string {
 	}
 	return &s
 }
-
