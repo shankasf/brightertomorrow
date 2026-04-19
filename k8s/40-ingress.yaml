@@ -32,7 +32,11 @@ spec:
                 port:
                   number: 80
 ---
-# HTTPS ingress: /v1/* → bt-gateway, everything else → bt-web
+# HTTPS ingress: /v1/* and specific /admin/api/* → bt-gateway, everything else → bt-web
+#
+# Admin HTML pages (/admin/login, /admin/, etc.) are served by Next.js (bt-web via / catch-all).
+# Admin API calls use specific sub-path prefixes routed to bt-gateway.
+# Traefik picks the longest matching prefix, so /admin/auth beats / for API calls.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -48,6 +52,7 @@ spec:
   rules:
     - http:
         paths:
+          # All public API → gateway
           - path: /v1
             pathType: Prefix
             backend:
@@ -55,13 +60,57 @@ spec:
                 name: bt-gateway
                 port:
                   number: 80
-          - path: /admin
+          # Admin API sub-paths → gateway (HTML pages like /admin/login fall through to / → bt-web)
+          - path: /admin/auth
             pathType: Prefix
             backend:
               service:
                 name: bt-gateway
                 port:
                   number: 80
+          - path: /admin/stats
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-gateway
+                port:
+                  number: 80
+          - path: /admin/contacts
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-gateway
+                port:
+                  number: 80
+          - path: /admin/chat
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-gateway
+                port:
+                  number: 80
+          - path: /admin/newsletter
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-gateway
+                port:
+                  number: 80
+          - path: /admin/audit
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-gateway
+                port:
+                  number: 80
+          - path: /admin/content
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-gateway
+                port:
+                  number: 80
+          # Everything else (including /admin/login, /admin/) → Next.js
           - path: /
             pathType: Prefix
             backend:
