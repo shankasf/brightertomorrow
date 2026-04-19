@@ -160,6 +160,193 @@ Three append-only audit tables:
 | `db/migrations/002_hipaa_compliance.sql` | Audit triggers, retention columns, anonymization procedures, DB roles |
 | `db/migrations/003_admin.sql` | Admin users, sessions, access log tables |
 
+## Architecture Diagrams
+
+### High Level Design (HLD)
+
+```mermaid
+graph TB
+    subgraph Client["Client Layer"]
+        B[Browser / Mobile]
+    end
+
+    subgraph Ingress["Ingress — Traefik"]
+        T[Traefik Reverse Proxy<br/>HTTP → HTTPS redirect<br/>TLS termination]
+    end
+
+    subgraph Services["Application Services"]
+        W[web<br/>Next.js 15 / React 19<br/>:3001<br/>Pages + Admin UI]
+        G[gateway<br/>Go 1.23 / chi<br/>:8080<br/>REST API + Admin API]
+        AI[ai<br/>FastAPI / Python<br/>:8001<br/>Chatbot + Voice]
+    end
+
+    subgraph Data["Data Layer"]
+        DB[(PostgreSQL 17<br/>schema: bt<br/>:5432)]
+    end
+
+    subgraph External["External Services"]
+        OAI[OpenAI API<br/>GPT-4o / Realtime]
+    end
+
+    B -->|HTTPS| T
+    T -->|/v1/* /admin/*| G
+    T -->|everything else| W
+    W -->|server-side fetch| G
+    G -->|pgx v5| DB
+    G -->|/v1/chat /v1/voice| AI
+    AI -->|OpenAI SDK| OAI
+    AI -->|pgx| DB
+```
+
+### Low Level Design (LLD)
+
+#### Go Gateway — Middleware Stack & Request Lifecycle
+
+```mermaid
+flowchart TD
+    R[Incoming Request] --> CORS[CORS Middleware]
+    CORS --> LOG[Structured Logger]
+    LOG --> REC[Panic Recoverer]
+    REC --> RT{Route Match}
+
+    RT -->|POST /admin/auth/login| RL[Rate Limit<br/>5 req/min per IP]
+    RL --> LH[Login Handler<br/>bcrypt verify<br/>lockout check<br/>32-byte token → SHA-256 stored]
+
+    RT -->|/admin/* protected| AA[RequireAdmin<br/>Extract Bearer<br/>SHA-256 hash<br/>ValidateToken DB lookup<br/>expiry + revoke check]
+    AA -->|401| ERR[Error Response]
+    AA -->|OK| SA{Superadmin<br/>required?}
+    SA -->|yes| SG[RequireSuperadmin<br/>role check]
+    SG -->|403| ERR
+    SG -->|OK| AH[Admin Handler]
+    SA -->|no| AH
+
+    RT -->|/v1/* public| PH[Public Handler<br/>contact / chat / newsletter]
+
+    AH -->|PHI read| PAL[Log to admin_access_log<br/>admin_email · action<br/>resource_id · ip · ua]
+    PAL --> DB[(PostgreSQL bt schema)]
+    AH --> DB
+    PH --> DB
+```
+
+#### Admin Auth Sequence
+
+```mermaid
+sequenceDiagram
+    participant C as Browser
+    participant G as Go Gateway
+    participant DB as PostgreSQL
+
+    C->>G: POST /admin/auth/login {email, password}
+    G->>DB: SELECT admin_users WHERE email=?
+    DB-->>G: user row (hash, locked_until, failed_attempts)
+    alt account locked
+        G-->>C: 429 locked
+    else
+        G->>G: bcrypt.CompareHashAndPassword
+        alt wrong password
+            G->>DB: UPDATE failed_attempts++, maybe set locked_until
+            G-->>C: 401 invalid credentials
+        else correct
+            G->>G: crypto/rand 32 bytes → base64url token<br/>SHA-256(token) → tokenHash
+            G->>DB: INSERT admin_sessions (token_hash, expires_at=now+8h)
+            G->>DB: UPDATE last_login_at, failed_attempts=0
+            G-->>C: 200 {token, user} — raw token returned once, never stored server-side
+        end
+    end
+
+    C->>G: GET /admin/... Authorization: Bearer <token>
+    G->>G: SHA-256(token) → hash
+    G->>DB: SELECT session WHERE token_hash=hash AND revoked_at IS NULL AND expires_at > now
+    DB-->>G: session + admin_user row
+    G->>G: inject User into request context
+    G->>DB: INSERT admin_access_log (if PHI endpoint)
+    G-->>C: 200 protected resource
+```
+
+#### PHI Audit Trail Flow
+
+```mermaid
+flowchart LR
+    subgraph App["Application Layer"]
+        H[Admin Handler<br/>view_contact / view_chat]
+        AL[admin.LogPHIAccess]
+    end
+
+    subgraph DB["PostgreSQL — bt schema"]
+        PHI[(contact_submissions<br/>chat_sessions<br/>chat_messages)]
+        AAL[(admin_access_log<br/>append-only<br/>UPDATE/DELETE revoked)]
+        PAL[(phi_audit_log<br/>append-only<br/>DB trigger)]
+        TR[TRIGGER on INSERT/UPDATE/DELETE<br/>phi tables → phi_audit_log]
+    end
+
+    H -->|SELECT| PHI
+    H --> AL
+    AL -->|INSERT| AAL
+    PHI -->|mutation| TR
+    TR -->|INSERT| PAL
+```
+
+#### Database ER Diagram (key tables)
+
+```mermaid
+erDiagram
+    admin_users {
+        bigserial id PK
+        text email
+        text password_hash
+        text role
+        smallint failed_attempts
+        timestamptz locked_until
+    }
+    admin_sessions {
+        uuid id PK
+        bigint admin_user_id FK
+        text token_hash
+        timestamptz expires_at
+        timestamptz revoked_at
+    }
+    admin_access_log {
+        bigserial id PK
+        bigint admin_user_id FK
+        text action
+        text resource_type
+        text resource_id
+        inet ip_address
+    }
+    contact_submissions {
+        bigserial id PK
+        text name
+        text email
+        text phone
+        text message
+        timestamptz retain_until
+        timestamptz purged_at
+    }
+    chat_sessions {
+        uuid id PK
+        text visitor_id
+        timestamptz retain_until
+        timestamptz purged_at
+    }
+    chat_messages {
+        bigserial id PK
+        uuid session_id FK
+        text role
+        text content
+    }
+    phi_audit_log {
+        bigserial id PK
+        text table_name
+        text operation
+        bigint record_id
+        timestamptz event_time
+    }
+
+    admin_users ||--o{ admin_sessions : "has"
+    admin_users ||--o{ admin_access_log : "generates"
+    chat_sessions ||--o{ chat_messages : "contains"
+```
+
 To apply all migrations:
 
 ```bash
