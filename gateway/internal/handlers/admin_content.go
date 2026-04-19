@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,7 +13,19 @@ import (
 
 // AdminContentHandler handles all content-management CRUD endpoints.
 type AdminContentHandler struct {
-	Pool *pgxpool.Pool
+	Pool     *pgxpool.Pool
+	AIClient *aiclient.Client // used to trigger FAQ re-embedding after writes
+}
+
+// triggerFAQEmbed fires a non-blocking re-embed of all FAQs.
+// Call after any FAQ create / update / delete so vectors stay current.
+func (h *AdminContentHandler) triggerFAQEmbed() {
+	if h.AIClient == nil {
+		return
+	}
+	go h.AIClient.TriggerFAQEmbed(func(msg string, args ...any) {
+		slog.Warn(msg, args...)
+	})
 }
 
 // ─── FAQs ─────────────────────────────────────────────────────────────────────
@@ -74,6 +87,7 @@ func (h *AdminContentHandler) CreateFAQ(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	h.triggerFAQEmbed()
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -101,6 +115,7 @@ func (h *AdminContentHandler) DeleteFAQ(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteError(w, http.StatusNotFound, "not found")
 		return
 	}
+	h.triggerFAQEmbed()
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

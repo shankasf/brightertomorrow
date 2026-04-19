@@ -54,7 +54,7 @@ func main() {
 	adminChatH := &handlers.AdminChatHandler{Pool: pool}
 	adminNewsletterH := &handlers.AdminNewsletterHandler{Pool: pool}
 	adminAuditH := &handlers.AdminAuditHandler{Pool: pool}
-	adminContentH := &handlers.AdminContentHandler{Pool: pool}
+	adminContentH := &handlers.AdminContentHandler{Pool: pool, AIClient: ai}
 
 	r := chi.NewRouter()
 

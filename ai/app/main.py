@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from .agent import build_agent
 from .db import conn
+from .embed_faqs import embed_all_faqs
 from .voice import run_voice_session
 
 load_dotenv()
@@ -77,6 +78,25 @@ async def chat(req: ChatRequest) -> ChatResponse:
     result = await Runner.run(_agent, history)
     reply = (result.final_output or "").strip() or "I'm here — could you tell me a bit more?"
     return ChatResponse(session_id=session_id, reply=reply)
+
+
+@app.post("/internal/embed-faqs")
+async def internal_embed_faqs() -> dict[str, Any]:
+    """Re-embed all published FAQs. Called by the Go gateway after any FAQ write.
+
+    Cluster-internal only — not exposed through Traefik (/internal/* has no ingress rule).
+    Returns the number of FAQs embedded or an error dict.
+    """
+    import asyncio
+    import logging
+
+    _logger = logging.getLogger(__name__)
+    try:
+        count = await asyncio.get_running_loop().run_in_executor(None, embed_all_faqs)
+        return {"ok": True, "embedded": count}
+    except Exception as exc:
+        _logger.exception("internal_embed_faqs failed")
+        return {"ok": False, "error": str(exc)}
 
 
 @app.websocket("/ws/voice")

@@ -90,17 +90,47 @@ def get_business_hours_and_contact() -> dict[str, Any]:
 
 @function_tool
 def search_faqs(query: str) -> list[dict[str, str]]:
-    """Search the FAQ database. Returns up to 5 matching question/answer pairs."""
+    """Semantic search over the FAQ database using vector similarity.
+
+    Returns up to 5 question/answer pairs most relevant to the query.
+    Falls back to ILIKE keyword search if embeddings have not been generated yet.
+    """
+    # Check whether any embeddings exist yet.
+    with conn() as c, c.cursor() as cur:
+        cur.execute("SELECT 1 FROM bt.faqs WHERE published AND embedding IS NOT NULL LIMIT 1")
+        has_embeddings = cur.fetchone() is not None
+
+    if not has_embeddings:
+        # Graceful degradation while the embed_faqs job is pending.
+        with conn() as c, c.cursor() as cur:
+            cur.execute(
+                """
+                SELECT question, answer FROM bt.faqs
+                WHERE published AND (question ILIKE %s OR answer ILIKE %s)
+                ORDER BY position LIMIT 5
+                """,
+                (f"%{query}%", f"%{query}%"),
+            )
+            return [{"question": q, "answer": a} for q, a in cur.fetchall()]
+
+    resp = _openai().embeddings.create(model=EMBED_MODEL, input=query)
+    qvec = _vec_literal(resp.data[0].embedding)
+
     with conn() as c, c.cursor() as cur:
         cur.execute(
             """
-            SELECT question, answer FROM faqs
-            WHERE published AND (question ILIKE %s OR answer ILIKE %s)
-            ORDER BY position LIMIT 5
+            SELECT question, answer,
+                   1 - (embedding <=> %s::vector) AS score
+            FROM bt.faqs
+            WHERE published AND embedding IS NOT NULL
+            ORDER BY embedding <=> %s::vector
+            LIMIT 5
             """,
-            (f"%{query}%", f"%{query}%"),
+            (qvec, qvec),
         )
-        return [{"question": q, "answer": a} for q, a in cur.fetchall()]
+        rows = cur.fetchall()
+
+    return [{"question": q, "answer": a, "score": round(float(s), 4)} for q, a, s in rows]
 
 
 @function_tool
