@@ -7,11 +7,37 @@ Full-stack rebuild of brightertomorrowtherapy.com — Las Vegas therapy practice
 | Service | Tech | Port |
 | ------- | ---- | ---- |
 | **web** | Next.js 15, React 19, Tailwind, Framer Motion | 3001 (dev) |
-| **gateway** | Go 1.23, chi, pgx v5 — REST API + admin API | 8080 |
+| **gateway** | Go 1.23, chi (HTTP router + middleware), pgx v5, goroutines — REST API + admin API | 8080 |
 | **ai** | FastAPI, OpenAI Agents SDK — chatbot + voice | 8001 |
 | **db** | PostgreSQL 17, schema `bt` | 5432 |
 
 All traffic routes through Traefik: `/v1/*` and `/admin/*` → gateway, everything else → web.
+
+### Go gateway internals
+
+**chi** is the HTTP router — it matches URL patterns (`/admin/contacts/{id}`), chains middleware (auth, rate-limiting, logging), and extracts path params. It has nothing to do with concurrency; it is purely a routing library.
+
+**Goroutines** are used for concurrency in two places:
+
+1. `cmd/gateway/main.go` — the HTTP server runs in a goroutine so the main goroutine can block on OS signals (`SIGINT`/`SIGTERM`) and trigger a graceful shutdown:
+   ```go
+   go func() {
+       srv.ListenAndServe()  // blocks in its own goroutine
+   }()
+   signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+   <-quit  // main goroutine waits here
+   srv.Shutdown(ctx)
+   ```
+
+2. `internal/handlers/chat.go` — after the AI service responds, the assistant reply is persisted using a **background context** (detached from the request context) so a client disconnect after the AI call cannot leave the chat history in a torn state (user message recorded, assistant reply missing):
+   ```go
+   persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+   defer cancel()
+   pool.Exec(persistCtx, "INSERT INTO bt.chat_messages ...", sessionID, reply)
+   ```
+   `net/http` itself also spawns one goroutine per incoming request automatically.
+
+**chi and goroutines are not alternatives** — chi routes requests, goroutines provide concurrency. Both are in use.
 
 ## Local dev
 
