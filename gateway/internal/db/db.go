@@ -19,12 +19,15 @@ func New(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	}
 
 	cfg.MaxConns = 10
-	cfg.MaxConnIdleTime = 30 * time.Second
+	cfg.MinConns = 2                          // keep 2 connections warm; avoid cold-start latency
+	cfg.MaxConnIdleTime = 5 * time.Minute     // hold idle conns longer; 30s was too aggressive
+	cfg.MaxConnLifetime = 30 * time.Minute    // recycle to prevent server-side staleness
+	cfg.HealthCheckPeriod = 30 * time.Second  // detect dead connections before a request hits them
 
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		_, err := conn.Exec(ctx, "SET search_path TO bt, public")
+		_, err := conn.Exec(ctx, "SET search_path TO bt, public; SET statement_timeout = '5s'")
 		if err != nil {
-			return fmt.Errorf("db: set search_path: %w", err)
+			return fmt.Errorf("db: set session config: %w", err)
 		}
 		return nil
 	}

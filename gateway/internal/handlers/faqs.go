@@ -52,5 +52,8 @@ func (h *FAQsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// FAQs change rarely — tell browsers and Traefik to cache for 5 min,
+	// serve stale for up to 1 hour while revalidating in the background.
+	w.Header().Set("Cache-Control", "public, max-age=300, stale-while-revalidate=3600")
 	httpx.WriteJSON(w, http.StatusOK, faqs)
 }
