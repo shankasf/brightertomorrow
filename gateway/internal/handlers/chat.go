@@ -11,7 +11,7 @@ import (
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const chatFallback = "Thanks for reaching out! Our AI assistant is taking a quick break. " +
@@ -25,6 +25,13 @@ const (
 // AIChatter is the minimal interface the chat handler needs from the AI client.
 type AIChatter interface {
 	Chat(ctx context.Context, sessionID, message string) (string, error)
+}
+
+// chatDB is the minimal interface for database operations needed by ChatHandler.
+// *pgxpool.Pool satisfies this interface.
+type chatDB interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
 type chatRequest struct {
@@ -42,7 +49,7 @@ func (b *chatRequest) validate() error {
 }
 
 // ensureVisitor reads the visitor cookie or mints a new UUID and sets it.
-func ensureVisitor(w http.ResponseWriter, r *http.Request) string {
+func ensureVisitor(w http.ResponseWriter, r *http.Request, secure bool) string {
 	if c, err := r.Cookie(visitorCookieName); err == nil && c.Value != "" {
 		if _, uerr := uuid.Parse(c.Value); uerr == nil {
 			return c.Value
@@ -55,15 +62,15 @@ func ensureVisitor(w http.ResponseWriter, r *http.Request) string {
 		Path:     "/",
 		MaxAge:   visitorCookieMaxAge,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 	return id
 }
 
-// EnsureVisitor is exported for testing. It delegates to ensureVisitor.
+// EnsureVisitor is exported for testing. It delegates to ensureVisitor with Secure: true.
 func EnsureVisitor(w http.ResponseWriter, r *http.Request) string {
-	return ensureVisitor(w, r)
+	return ensureVisitor(w, r, true)
 }
 
 // ValidateChatMessage is exported for testing. It validates a message string.
@@ -73,8 +80,9 @@ func ValidateChatMessage(message string) error {
 
 // ChatHandler handles POST /v1/chat.
 type ChatHandler struct {
-	Pool     *pgxpool.Pool
-	AIClient AIChatter
+	Pool         chatDB
+	AIClient     AIChatter
+	CookieSecure bool
 }
 
 func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +105,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	visitorID := ensureVisitor(w, r)
+	visitorID := ensureVisitor(w, r, h.CookieSecure)
 	ctx := r.Context()
 	sessionID := body.SessionID
 

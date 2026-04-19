@@ -12,7 +12,7 @@ export default function NewsletterForm() {
     if (!email) return;
     setState("loading");
     try {
-      const r = await fetch("/api/newsletter", {
+      const r = await fetch("/v1/newsletter", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email }),

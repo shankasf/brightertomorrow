@@ -57,12 +57,9 @@ func main() {
 	// API v1.
 	r.Route("/v1", func(r chi.Router) {
 		r.Get("/faqs", (&handlers.FAQsHandler{Pool: pool}).ServeHTTP)
-		r.Group(func(r chi.Router) {
-			r.Use(httprate.LimitByIP(20, time.Minute))
-			r.Post("/contact", (&handlers.ContactHandler{Pool: pool}).ServeHTTP)
-			r.Post("/newsletter", (&handlers.NewsletterHandler{Pool: pool}).ServeHTTP)
-			r.Post("/chat", (&handlers.ChatHandler{Pool: pool, AIClient: ai}).ServeHTTP)
-		})
+		r.With(httprate.LimitByIP(10, time.Minute)).Post("/contact", (&handlers.ContactHandler{Pool: pool}).ServeHTTP)
+		r.With(httprate.LimitByIP(10, time.Minute)).Post("/newsletter", (&handlers.NewsletterHandler{Pool: pool}).ServeHTTP)
+		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat", (&handlers.ChatHandler{Pool: pool, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 	})
 
 	srv := &http.Server{

@@ -2,12 +2,14 @@ package handlers_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/handlers"
+	pgxmock "github.com/pashagolub/pgxmock/v3"
 )
 
 // mockAIChatter verifies that the exported AIChatter interface is satisfied.
@@ -104,5 +106,97 @@ func TestChatRequestValidate(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestChatHandler_OwnershipMismatch(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("pgxmock.NewPool: %v", err)
+	}
+
+	const sessionID = "550e8400-e29b-41d4-a716-446655440001"
+	const visitorID = "550e8400-e29b-41d4-a716-446655440000"
+	differentOwner := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+	mock.ExpectQuery(`SELECT visitor_id FROM bt\.chat_sessions WHERE id = \$1`).
+		WithArgs(sessionID).
+		WillReturnRows(pgxmock.NewRows([]string{"visitor_id"}).AddRow(&differentOwner))
+
+	body := fmt.Sprintf(`{"session_id":"%s","message":"hello"}`, sessionID)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: "bt_visitor", Value: visitorID})
+	w := httptest.NewRecorder()
+
+	h := &handlers.ChatHandler{Pool: mock, AIClient: &mockAIChatter{}, CookieSecure: false}
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unfulfilled mock expectations: %v", err)
+	}
+}
+
+func TestChatHandler_SessionNotFound(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("pgxmock.NewPool: %v", err)
+	}
+
+	const sessionID = "550e8400-e29b-41d4-a716-446655440002"
+	const visitorID = "550e8400-e29b-41d4-a716-446655440000"
+
+	// Return an empty result set; pgxmock's Row.Scan will return pgx.ErrNoRows.
+	mock.ExpectQuery(`SELECT visitor_id FROM bt\.chat_sessions WHERE id = \$1`).
+		WithArgs(sessionID).
+		WillReturnRows(pgxmock.NewRows([]string{"visitor_id"}))
+
+	body := fmt.Sprintf(`{"session_id":"%s","message":"hello"}`, sessionID)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: "bt_visitor", Value: visitorID})
+	w := httptest.NewRecorder()
+
+	h := &handlers.ChatHandler{Pool: mock, AIClient: &mockAIChatter{}, CookieSecure: false}
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unfulfilled mock expectations: %v", err)
+	}
+}
+
+func TestChatHandler_SessionLookupDBError(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("pgxmock.NewPool: %v", err)
+	}
+
+	const sessionID = "550e8400-e29b-41d4-a716-446655440003"
+	const visitorID = "550e8400-e29b-41d4-a716-446655440000"
+
+	mock.ExpectQuery(`SELECT visitor_id FROM bt\.chat_sessions WHERE id = \$1`).
+		WithArgs(sessionID).
+		WillReturnError(fmt.Errorf("connection reset by peer"))
+
+	body := fmt.Sprintf(`{"session_id":"%s","message":"hello"}`, sessionID)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: "bt_visitor", Value: visitorID})
+	w := httptest.NewRecorder()
+
+	h := &handlers.ChatHandler{Pool: mock, AIClient: &mockAIChatter{}, CookieSecure: false}
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unfulfilled mock expectations: %v", err)
 	}
 }

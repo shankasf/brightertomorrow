@@ -13,6 +13,7 @@ type Config struct {
 	AIServiceURL string
 	LogLevel     string
 	CORSOrigins  []string
+	CookieSecure bool
 }
 
 var ErrMissingDatabaseURL = errors.New("config: DATABASE_URL is required")
@@ -30,6 +31,7 @@ func Load() (*Config, error) {
 	}
 
 	origins := splitTrimmed(rawOrigins, ",")
+	cookieSecure := os.Getenv("COOKIE_SECURE") != "false"
 
 	return &Config{
 		Port:         port,
@@ -37,6 +39,7 @@ func Load() (*Config, error) {
 		AIServiceURL: aiServiceURL,
 		LogLevel:     logLevel,
 		CORSOrigins:  origins,
+		CookieSecure: cookieSecure,
 	}, nil
 }
 

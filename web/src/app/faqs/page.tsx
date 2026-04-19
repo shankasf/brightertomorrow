@@ -10,7 +10,7 @@ export default function FaqsPage() {
   const [faqs, setFaqs] = useState<Faq[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
 
-  useEffect(() => { fetch("/api/faqs").then((r) => r.json()).then(setFaqs); }, []);
+  useEffect(() => { fetch("/v1/faqs").then((r) => r.json()).then(setFaqs); }, []);
 
   return (
     <>

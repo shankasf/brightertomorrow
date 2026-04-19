@@ -32,7 +32,7 @@ spec:
                 port:
                   number: 80
 ---
-# HTTPS ingress
+# HTTPS ingress: /v1/* → bt-gateway, everything else → bt-web
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -48,6 +48,13 @@ spec:
   rules:
     - http:
         paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-gateway
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:

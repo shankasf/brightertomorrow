@@ -23,11 +23,12 @@ export async function POST(req: Request) {
       status: r.status,
       headers: { "content-type": "application/json" },
     });
-    // Forward Set-Cookie for bt_visitor
-    const setCookie = r.headers.get("set-cookie");
-    if (setCookie) res.headers.set("set-cookie", setCookie);
+    for (const cookie of r.headers.getSetCookie()) {
+      res.headers.append("set-cookie", cookie);
+    }
     return res;
-  } catch {
+  } catch (err) {
+    console.error("chat proxy error", err);
     return NextResponse.json(
       {
         session_id: null,
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
           "Thanks for reaching out! Our AI assistant is taking a quick break. " +
           "For immediate help, call 725-238-6990 or use our contact form.",
       },
-      { status: 200 },
+      { status: 503 },
     );
   }
 }
