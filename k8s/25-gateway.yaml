@@ -36,6 +36,18 @@ spec:
               value: "8080"
             - name: LOG_LEVEL
               value: "info"
+            - name: ADMIN_INITIAL_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: ADMIN_INITIAL_EMAIL
+                  optional: true
+            - name: ADMIN_INITIAL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: ADMIN_INITIAL_PASSWORD
+                  optional: true
           readinessProbe:
             httpGet:
               path: /readyz

@@ -8,12 +8,14 @@ import (
 
 // Config holds all runtime configuration for the gateway.
 type Config struct {
-	Port         string
-	DatabaseURL  string
-	AIServiceURL string
-	LogLevel     string
-	CORSOrigins  []string
-	CookieSecure bool
+	Port               string
+	DatabaseURL        string
+	AIServiceURL       string
+	LogLevel           string
+	CORSOrigins        []string
+	CookieSecure       bool
+	AdminInitialEmail  string
+	AdminInitialPassword string
 }
 
 var ErrMissingDatabaseURL = errors.New("config: DATABASE_URL is required")
@@ -34,12 +36,14 @@ func Load() (*Config, error) {
 	cookieSecure := os.Getenv("COOKIE_SECURE") != "false"
 
 	return &Config{
-		Port:         port,
-		DatabaseURL:  databaseURL,
-		AIServiceURL: aiServiceURL,
-		LogLevel:     logLevel,
-		CORSOrigins:  origins,
-		CookieSecure: cookieSecure,
+		Port:                 port,
+		DatabaseURL:          databaseURL,
+		AIServiceURL:         aiServiceURL,
+		LogLevel:             logLevel,
+		CORSOrigins:          origins,
+		CookieSecure:         cookieSecure,
+		AdminInitialEmail:    os.Getenv("ADMIN_INITIAL_EMAIL"),
+		AdminInitialPassword: os.Getenv("ADMIN_INITIAL_PASSWORD"),
 	}, nil
 }
 
