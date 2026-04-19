@@ -1,0 +1,75 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bt-phi-cleanup
+  namespace: bt
+  labels:
+    app: bt-phi-cleanup
+spec:
+  # Runs every Sunday at 02:00 UTC
+  schedule: "0 2 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: phi-cleanup
+              image: postgres:17-alpine
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: bt-config
+                      key: DATABASE_URL
+              command:
+                - sh
+                - -c
+                - |
+                  psql "$DATABASE_URL" <<'SQL'
+                  SET search_path = bt, public;
+
+                  DO $$
+                  DECLARE r RECORD;
+                  BEGIN
+                    FOR r IN
+                      SELECT id FROM bt.contact_submissions
+                      WHERE retain_until < now() AND purged_at IS NULL
+                    LOOP
+                      CALL bt.anonymise_contact(r.id);
+                      RAISE NOTICE 'Anonymised contact_submission %', r.id;
+                    END LOOP;
+                  END $$;
+
+                  DO $$
+                  DECLARE r RECORD;
+                  BEGIN
+                    FOR r IN
+                      SELECT id FROM bt.chat_sessions
+                      WHERE retain_until < now() AND purged_at IS NULL
+                    LOOP
+                      CALL bt.anonymise_chat_session(r.id);
+                      RAISE NOTICE 'Anonymised chat_session %', r.id;
+                    END LOOP;
+                  END $$;
+
+                  DELETE FROM bt.newsletter_subscribers
+                  WHERE unsubscribed_at IS NOT NULL
+                    AND unsubscribed_at < now() - INTERVAL '30 days';
+
+                  SELECT
+                    (SELECT COUNT(*) FROM bt.contact_submissions WHERE purged_at IS NOT NULL) AS contacts_purged,
+                    (SELECT COUNT(*) FROM bt.chat_sessions      WHERE purged_at IS NOT NULL) AS sessions_purged;
+                  SQL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 64Mi

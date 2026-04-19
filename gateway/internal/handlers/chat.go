@@ -19,7 +19,7 @@ const chatFallback = "Thanks for reaching out! Our AI assistant is taking a quic
 
 const (
 	visitorCookieName   = "bt_visitor"
-	visitorCookieMaxAge = 30 * 24 * 60 * 60 // 30 days
+	visitorCookieMaxAge = 8 * 60 * 60 // 8 hours — HIPAA §164.312(a)(2)(iii) automatic logoff
 )
 
 // AIChatter is the minimal interface the chat handler needs from the AI client.
