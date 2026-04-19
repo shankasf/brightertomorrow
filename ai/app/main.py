@@ -5,12 +5,13 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .agent import build_agent
 from .db import conn
+from .voice import run_voice_session
 
 load_dotenv()
 
@@ -76,6 +77,18 @@ async def chat(req: ChatRequest) -> ChatResponse:
     result = await Runner.run(_agent, history)
     reply = (result.final_output or "").strip() or "I'm here — could you tell me a bit more?"
     return ChatResponse(session_id=session_id, reply=reply)
+
+
+@app.websocket("/ws/voice")
+async def voice_ws(ws: WebSocket, session_id: str = "") -> None:
+    await ws.accept()
+    try:
+        await run_voice_session(ws, session_id)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("voice_ws error: %s", e)
 
 
 if __name__ == "__main__":

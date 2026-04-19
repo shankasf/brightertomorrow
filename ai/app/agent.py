@@ -43,5 +43,5 @@ def build_agent() -> Agent:
         name="Brighter Tomorrow Assistant",
         instructions=SYSTEM_PROMPT,
         tools=ALL_TOOLS,
-        model=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"),
+        model=os.environ.get("OPENAI_MODEL"),
     )

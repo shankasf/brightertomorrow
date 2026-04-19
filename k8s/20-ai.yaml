@@ -22,6 +22,8 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_API_KEY } }
             - name: OPENAI_MODEL
               valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_MODEL, optional: true } }
+            - name: REALTIME_MODEL
+              valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_MODEL, optional: true } }
           readinessProbe:
             httpGet: { path: /health, port: 8001 }
             periodSeconds: 5
