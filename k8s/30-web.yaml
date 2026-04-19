@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bt-web
+  namespace: bt
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: bt-web } }
+  template:
+    metadata:
+      labels: { app: bt-web }
+    spec:
+      containers:
+        - name: web
+          image: bt-web:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 3000 }]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: bt-config, key: DATABASE_URL } }
+            - name: AI_SERVICE_URL
+              valueFrom: { secretKeyRef: { name: bt-config, key: AI_SERVICE_URL } }
+            - name: GATEWAY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: GATEWAY_URL
+            - name: NODE_ENV
+              value: production
+          readinessProbe:
+            httpGet: { path: /, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "100m", memory: "192Mi" }
+            limits:   { cpu: "1",    memory: "768Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bt-web
+  namespace: bt
+spec:
+  selector: { app: bt-web }
+  ports:
+    - port: 80
+      targetPort: 3000

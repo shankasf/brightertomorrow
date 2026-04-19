@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bt-kb-ingest
+  namespace: bt
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ingest
+          image: bt-ai:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.ingest"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: bt-config, key: DATABASE_URL } }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_API_KEY } }
+            - name: INGEST_MAX_PAGES
+              value: "200"
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "1Gi"   }

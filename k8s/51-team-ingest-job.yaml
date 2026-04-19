@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bt-team-ingest
+  namespace: bt
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ingest
+          image: bt-ai:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.ingest_team"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: bt-config, key: DATABASE_URL } }
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits:   { cpu: "1",   memory: "512Mi" }

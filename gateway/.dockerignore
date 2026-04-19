@@ -1,0 +1,6 @@
+Dockerfile
+.dockerignore
+.env
+.env.local
+.git
+*.md

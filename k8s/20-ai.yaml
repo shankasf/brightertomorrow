@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bt-ai
+  namespace: bt
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: bt-ai } }
+  template:
+    metadata:
+      labels: { app: bt-ai }
+    spec:
+      containers:
+        - name: ai
+          image: bt-ai:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8001 }]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: bt-config, key: DATABASE_URL } }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_API_KEY } }
+            - name: OPENAI_MODEL
+              valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_MODEL, optional: true } }
+          readinessProbe:
+            httpGet: { path: /health, port: 8001 }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bt-ai
+  namespace: bt
+spec:
+  selector: { app: bt-ai }
+  ports:
+    - port: 8001
+      targetPort: 8001

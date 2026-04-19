@@ -1,0 +1,57 @@
+---
+# HTTP -> HTTPS redirect middleware (Traefik CRD)
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  namespace: bt
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+# HTTP ingress: serves the redirect only
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bt-web-http
+  namespace: bt
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: bt-redirect-to-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-web
+                port:
+                  number: 80
+---
+# HTTPS ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bt-web-https
+  namespace: bt
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: bt-tls
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-web
+                port:
+                  number: 80

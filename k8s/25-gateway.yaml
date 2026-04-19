@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bt-gateway
+  namespace: bt
+  labels:
+    app: bt-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bt-gateway
+  template:
+    metadata:
+      labels:
+        app: bt-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: bt-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: DATABASE_URL
+            - name: AI_SERVICE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: AI_SERVICE_URL
+            - name: PORT
+              value: "8080"
+            - name: LOG_LEVEL
+              value: "info"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            periodSeconds: 5
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bt-gateway
+  namespace: bt
+spec:
+  selector:
+    app: bt-gateway
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: ClusterIP

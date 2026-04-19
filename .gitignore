@@ -1,0 +1,40 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+*.env
+ai/.env
+web/.env.local
+gateway/.env
+
+# k8s secret manifests — use 10-secrets.example.yaml as the template
+k8s/10-secrets.yaml
+
+# Node
+web/node_modules/
+web/.next/
+web/out/
+web/.turbo/
+web/coverage/
+
+# Python
+ai/__pycache__/
+ai/.venv/
+ai/venv/
+ai/*.pyc
+ai/.pytest_cache/
+
+# Go — binaries and test cache
+gateway/out/
+gateway/*.exe
+gateway/*.test
+
+# Docker
+**/.dockerignore.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / AI tooling
+.claude/
