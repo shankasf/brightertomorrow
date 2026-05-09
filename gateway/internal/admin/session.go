@@ -37,6 +37,13 @@ var (
 	ErrSessionExpired     = errors.New("session expired or invalid")
 )
 
+// LockoutError carries the unlock time so the client can render a countdown.
+// errors.Is(err, ErrAccountLocked) still matches.
+type LockoutError struct{ Until time.Time }
+
+func (e *LockoutError) Error() string { return ErrAccountLocked.Error() }
+func (e *LockoutError) Is(target error) bool { return target == ErrAccountLocked }
+
 // HashPassword bcrypt-hashes a plain-text password at cost 12.
 func HashPassword(password string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
@@ -92,7 +99,7 @@ func Login(ctx context.Context, pool *pgxpool.Pool, email, password, ipAddr, ua 
 		return "", nil, ErrInactiveAccount
 	}
 	if lockedUntil != nil && time.Now().Before(*lockedUntil) {
-		return "", nil, ErrAccountLocked
+		return "", nil, &LockoutError{Until: *lockedUntil}
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
@@ -102,11 +109,13 @@ func Login(ctx context.Context, pool *pgxpool.Pool, email, password, ipAddr, ua 
 			_, _ = pool.Exec(ctx,
 				`UPDATE bt.admin_users SET failed_attempts=$1, locked_until=$2 WHERE id=$3`,
 				newAttempts, lockUntil, u.ID)
-		} else {
-			_, _ = pool.Exec(ctx,
-				`UPDATE bt.admin_users SET failed_attempts=$1 WHERE id=$2`,
-				newAttempts, u.ID)
+			// This attempt just tripped the lockout — tell the client now
+			// so they see the countdown instead of a generic "invalid creds".
+			return "", nil, &LockoutError{Until: lockUntil}
 		}
+		_, _ = pool.Exec(ctx,
+			`UPDATE bt.admin_users SET failed_attempts=$1 WHERE id=$2`,
+			newAttempts, u.ID)
 		return "", nil, ErrInvalidCredentials
 	}
 

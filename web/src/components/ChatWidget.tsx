@@ -6,6 +6,38 @@ import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiMic, FiMicOff } f
 
 type Msg = { role: "user" | "assistant"; content: string };
 
+// Marker the booking agent emits when it asks for insurance — the widget
+// strips it out and renders an in-line dropdown of payer names. Mirror of
+// `INSURANCE_PICKER_MARKER` in ai/app/bt_agents/booking_agent.py.
+const INSURANCE_PICKER_MARKER = "[[INSURANCE_PICKER]]";
+
+// Display names mirror `PAYERS` in ai/app/data/payers.py — the source of
+// truth on the backend. The dropdown is ergonomic only; the agent will
+// fuzzy-match whatever the visitor sends, so minor drift is non-fatal.
+const INSURANCE_OPTIONS: string[] = [
+  "UnitedHealthcare",
+  "Aetna",
+  "Cigna",
+  "Humana",
+  "Blue Cross Blue Shield",
+  "Anthem",
+  "Kaiser Permanente",
+  "Medicare",
+  "Medicaid",
+  "Tricare",
+  "Molina Healthcare",
+  "WellCare",
+  "Oscar Health",
+  "Health Net",
+  "Blue Shield of California",
+  "EmblemHealth",
+  "Centene",
+  "Independence Blue Cross",
+  "Ambetter",
+  "Meritain Health",
+  "Self-pay / Out-of-network",
+];
+
 // Cycling capability hints shown next to the closed chat FAB.
 const CAPABILITY_PROMPTS = [
   "Book an appointment",
@@ -14,6 +46,16 @@ const CAPABILITY_PROMPTS = [
   "Check insurance",
   "Share office hours",
   "Answer your FAQs",
+];
+
+// Quick-reply chips shown above the input on first open.
+const QUICK_REPLIES: { label: string; prompt: string }[] = [
+  { label: "Check insurance coverage", prompt: "Can you check if my insurance is covered?" },
+  { label: "Book an appointment", prompt: "I'd like to book an appointment." },
+  { label: "Cancel or reschedule", prompt: "I need to cancel or reschedule my appointment." },
+  { label: "Find an available therapist", prompt: "Which therapists are available?" },
+  { label: "Office hours & location", prompt: "What are your office hours and where are you located?" },
+  { label: "Talk to a human", prompt: "Can someone from your team call me back?" },
 ];
 
 export default function ChatWidget() {
@@ -59,24 +101,138 @@ export default function ChatWidget() {
     void playChime(audioCtxRef);
   }, [msgs, muted]);
 
-  async function send() {
-    const text = input.trim();
+  async function send(override?: string) {
+    const text = (override ?? input).trim();
     if (!text || loading) return;
-    setInput("");
-    const next = [...msgs, { role: "user" as const, content: text }];
+    if (override === undefined) setInput("");
+    const next: Msg[] = [...msgs, { role: "user", content: text }];
     setMsgs(next);
     setLoading(true);
+    const t0 = performance.now();
+    let firstTokenMs: number | null = null;
+    let assistantText = "";
+    let receivedAnyDelta = false;
+
     try {
-      const r = await fetch("/v1/chat", {
+      const r = await fetch("/v1/chat/stream", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", accept: "text/event-stream" },
         body: JSON.stringify({ session_id: sessionId, message: text }),
       });
-      const data = await r.json();
-      if (data.session_id) setSessionId(data.session_id);
-      setMsgs([...next, { role: "assistant", content: data.reply ?? "Sorry — I had trouble responding." }]);
-    } catch {
-      setMsgs([...next, { role: "assistant", content: "Sorry — I had trouble reaching the server." }]);
+
+      if (!r.ok || !r.body) {
+        throw new Error(`stream failed: ${r.status}`);
+      }
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+
+      const upsertAssistant = (content: string) => {
+        setMsgs((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === "assistant") {
+            const copy = prev.slice();
+            copy[copy.length - 1] = { role: "assistant", content };
+            return copy;
+          }
+          return [...prev, { role: "assistant", content }];
+        });
+      };
+
+      const handleEvent = (eventName: string, dataLine: string) => {
+        let payload: Record<string, unknown>;
+        try { payload = JSON.parse(dataLine); } catch { return; }
+
+        if (eventName === "session" && typeof payload.session_id === "string" && payload.session_id) {
+          setSessionId(payload.session_id);
+          return;
+        }
+
+        if (eventName === "delta" && typeof payload.text === "string") {
+          if (firstTokenMs === null) {
+            firstTokenMs = performance.now() - t0;
+            console.debug("chat_stream: first_token", { ttft_ms: Math.round(firstTokenMs) });
+          }
+          assistantText += payload.text;
+          receivedAnyDelta = true;
+          // Hide the typing indicator the moment we have visible content.
+          setLoading(false);
+          upsertAssistant(assistantText);
+          return;
+        }
+
+        if (eventName === "done") {
+          const totalMs = performance.now() - t0;
+          // Prefer server-canonical reply text (covers any normalization on done).
+          const finalReply = (typeof payload.reply === "string" && payload.reply) || assistantText;
+          if (finalReply && finalReply !== assistantText) {
+            assistantText = finalReply;
+            upsertAssistant(assistantText);
+          }
+          console.debug("chat_stream: done", {
+            cached: payload.cached === true,
+            intent: payload.intent,
+            agent: payload.agent,
+            ttft_ms: firstTokenMs !== null ? Math.round(firstTokenMs) : null,
+            total_ms: Math.round(totalMs),
+            chars: typeof payload.chars === "number" ? payload.chars : assistantText.length,
+            usage: payload.usage,
+          });
+          return;
+        }
+
+        if (eventName === "error") {
+          console.warn("chat_stream: error event", payload);
+        }
+      };
+
+      const flushBuffer = () => {
+        // SSE events are separated by blank lines (\n\n).
+        let sep: number;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+
+          let eventName = "message";
+          const dataLines: string[] = [];
+          for (const raw of block.split("\n")) {
+            if (raw.startsWith("event:")) eventName = raw.slice(6).trim();
+            else if (raw.startsWith("data:")) dataLines.push(raw.slice(5).trim());
+          }
+          if (dataLines.length) handleEvent(eventName, dataLines.join("\n"));
+        }
+      };
+
+      // Drain the stream.
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        flushBuffer();
+      }
+      buffer += decoder.decode();
+      flushBuffer();
+
+      if (!receivedAnyDelta && !assistantText) {
+        // Server closed without sending any content.
+        setMsgs((prev) => [...prev, { role: "assistant", content: "Sorry — I had trouble responding." }]);
+      }
+    } catch (err) {
+      console.warn("chat_stream: failed", err);
+      // Replace any partial assistant bubble with a generic failure message,
+      // or append a fresh one if nothing arrived.
+      setMsgs((prev) => {
+        const last = prev[prev.length - 1];
+        const fallback: Msg = { role: "assistant", content: "Sorry — I had trouble reaching the server." };
+        if (last && last.role === "assistant" && !assistantText) {
+          const copy = prev.slice();
+          copy[copy.length - 1] = fallback;
+          return copy;
+        }
+        return assistantText ? prev : [...prev, fallback];
+      });
     } finally {
       setLoading(false);
     }
@@ -363,7 +519,20 @@ export default function ChatWidget() {
             </div>
 
             <div ref={scroller} className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2 bg-surface min-w-0">
-              {msgs.map((m, i) => <Bubble key={i} role={m.role} content={m.content} />)}
+              {msgs.map((m, i) => {
+                // Only let the LAST assistant message render an interactive
+                // picker — older ones get the marker stripped but no dropdown,
+                // so visitors can't re-submit a stale choice.
+                const isLast = i === msgs.length - 1;
+                return (
+                  <Bubble
+                    key={i}
+                    role={m.role}
+                    content={m.content}
+                    onPickInsurance={isLast && !loading ? (name) => void send(name) : undefined}
+                  />
+                );
+              })}
               {loading && (
                 <div className="flex justify-start">
                   <div className="bg-white text-ink rounded-2xl rounded-bl-sm px-3 py-2 text-sm border border-surface-line">
@@ -372,6 +541,27 @@ export default function ChatWidget() {
                 </div>
               )}
             </div>
+
+            {!voiceActive && !msgs.some((m) => m.role === "user") && (
+              <div className="border-t border-surface-line px-3 pt-2.5 pb-2 bg-white">
+                <div className="text-[11px] uppercase tracking-[0.08em] text-ink-soft mb-1.5 px-0.5">
+                  Try asking
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {QUICK_REPLIES.map((q) => (
+                    <button
+                      key={q.label}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => void send(q.prompt)}
+                      className="px-3 py-1.5 rounded-full border border-brand/30 bg-brand/5 text-brand-700 text-[12.5px] font-medium hover:bg-brand hover:text-white hover:border-brand transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {q.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {voiceActive && (
               <div className="border-t border-surface-line px-3 py-2 flex items-center gap-2 bg-brand/5 text-sm text-ink-muted">
@@ -413,8 +603,21 @@ export default function ChatWidget() {
   );
 }
 
-function Bubble({ role, content }: { role: "user" | "assistant"; content: string }) {
+function Bubble({
+  role,
+  content,
+  onPickInsurance,
+}: {
+  role: "user" | "assistant";
+  content: string;
+  onPickInsurance?: (name: string) => void;
+}) {
   const isUser = role === "user";
+  const hasPicker = !isUser && content.includes(INSURANCE_PICKER_MARKER);
+  const visibleText = hasPicker
+    ? content.split(INSURANCE_PICKER_MARKER).join("").replace(/\n{3,}/g, "\n\n").trim()
+    : content;
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -424,8 +627,42 @@ function Bubble({ role, content }: { role: "user" | "assistant"; content: string
             : "bg-white text-ink rounded-bl-sm border border-surface-line"
         }`}
       >
-        {isUser ? <span className="whitespace-pre-wrap">{content}</span> : <RichMarkdown text={content} />}
+        {isUser ? <span className="whitespace-pre-wrap">{content}</span> : <RichMarkdown text={visibleText} />}
+        {hasPicker && onPickInsurance && (
+          <InsurancePicker onPick={onPickInsurance} />
+        )}
       </div>
+    </div>
+  );
+}
+
+function InsurancePicker({ onPick }: { onPick: (name: string) => void }) {
+  return (
+    <div className="mt-2.5">
+      <label
+        htmlFor="bt-insurance-picker"
+        className="block text-[11px] uppercase tracking-[0.08em] text-ink-soft mb-1"
+      >
+        Choose your insurance
+      </label>
+      <select
+        id="bt-insurance-picker"
+        defaultValue=""
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v) onPick(v);
+        }}
+        className="w-full px-3 py-2 rounded-lg border border-surface-line bg-white text-sm text-ink focus:outline-none focus:border-brand"
+      >
+        <option value="" disabled>
+          Select your insurance…
+        </option>
+        {INSURANCE_OPTIONS.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

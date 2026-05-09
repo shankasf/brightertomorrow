@@ -11,9 +11,18 @@ export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+// Gateway exposes admin endpoints under /admin/api/*. Existing call sites
+// pass /admin/<thing>; rewrite to /admin/api/<thing> here so we don't have
+// to touch every caller. (Only rewrites if /api/ isn't already there.)
+function withAdminApi(path: string): string {
+  if (path.startsWith('/admin/api/')) return path;
+  if (path.startsWith('/admin/')) return '/admin/api/' + path.slice('/admin/'.length);
+  return path;
+}
+
 export function adminFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = getStoredToken();
-  return fetch(path, {
+  return fetch(withAdminApi(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -35,7 +44,7 @@ export function useAdminAuth() {
       router.replace('/admin/login');
       return;
     }
-    fetch('/admin/auth/me', {
+    fetch('/admin/api/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => {
@@ -53,7 +62,7 @@ export function useAdminAuth() {
   const logout = useCallback(async () => {
     const token = getStoredToken();
     if (token) {
-      await fetch('/admin/auth/logout', {
+      await fetch('/admin/api/auth/logout', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => {});

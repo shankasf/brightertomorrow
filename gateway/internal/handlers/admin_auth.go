@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 	"unicode/utf8"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
@@ -48,11 +49,25 @@ func (h *AdminAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	ua := r.UserAgent()
 	token, u, err := admin.Login(r.Context(), h.Pool, body.Email, body.Password, ipAddr, ua)
 	if err != nil {
+		var lockErr *admin.LockoutError
 		switch {
+		case errors.As(err, &lockErr):
+			// Lockout: include the unlock timestamp + a plain-English reason
+			// so the UI can render a countdown and explain what happened.
+			retryAfter := int(time.Until(lockErr.Until).Seconds())
+			if retryAfter < 0 {
+				retryAfter = 0
+			}
+			w.Header().Set("Retry-After", time.Until(lockErr.Until).Round(time.Second).String())
+			httpx.WriteJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error":         "account_locked",
+				"message":       "Account temporarily locked",
+				"reason":        "Too many failed sign-in attempts (5). The account is locked for 30 minutes as a security measure (HIPAA §164.312 brute-force protection).",
+				"locked_until":  lockErr.Until.UTC().Format(time.RFC3339),
+				"retry_after_s": retryAfter,
+			})
 		case errors.Is(err, admin.ErrInvalidCredentials):
 			httpx.WriteError(w, http.StatusUnauthorized, "invalid credentials")
-		case errors.Is(err, admin.ErrAccountLocked):
-			httpx.WriteError(w, http.StatusTooManyRequests, err.Error())
 		case errors.Is(err, admin.ErrInactiveAccount):
 			httpx.WriteError(w, http.StatusForbidden, "account inactive")
 		default:
