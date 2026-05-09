@@ -8,7 +8,7 @@ Full-stack rebuild of brightertomorrowtherapy.com — Las Vegas therapy practice
 | ------- | ---- | ---- |
 | **web** | Next.js 15, React 19, Tailwind, Framer Motion | 3001 (dev) |
 | **gateway** | Go 1.23, chi (HTTP router + middleware), pgx v5, goroutines — REST API + admin API | 8080 |
-| **ai** | FastAPI, OpenAI Agents SDK — chatbot + voice | 8001 |
+| **ai** | FastAPI, OpenAI Agents SDK 0.17 (`gpt-realtime-2`) — multi-agent text + voice triage graph | 8001 |
 | **db** | PostgreSQL 17, schema `bt` | 5432 |
 
 All traffic routes through Traefik: `/v1/*` and `/admin/*` → gateway, everything else → web.
@@ -39,19 +39,60 @@ All traffic routes through Traefik: `/v1/*` and `/admin/*` → gateway, everythi
 
 **chi and goroutines are not alternatives** — chi routes requests, goroutines provide concurrency. Both are in use.
 
+### AI service internals
+
+The AI service runs **two parallel agent graphs** sharing the same specialist agents and tools:
+
+| Path | Entry | SDK primitive | Use |
+| ---- | ----- | ------------- | --- |
+| **Text** (`POST /chat`) | `bt_agents/triage_agent.py` | `Agent` + `handoff(...)` | Browser chat widget |
+| **Voice** (`WS /ws/voice`) | `bt_agents/realtime/triage.py` | `RealtimeAgent` + `realtime_handoff(...)` | Mic-button voice mode |
+
+Both flow Triage → one of `{Crisis Support, Info, Therapist Matching, Intake, Booking}`. Each specialist lives in its own file under `ai/app/bt_agents/` (text) and `ai/app/bt_agents/realtime/` (voice). The head Triage agent owns all handoffs; specialists never reach across to peers.
+
+The voice path is driven entirely by `openai-agents` `RealtimeRunner` / `RealtimeSession` — the SDK manages the OpenAI WebSocket, hand-off lifecycle, and tool-calling. `voice.py` only translates browser ↔ session events (audio in/out, user/assistant transcripts, hallucination filtering) and persists transcripts to Postgres.
+
+Realtime model is `gpt-realtime-2` with `gpt-4o-mini-transcribe` for input transcription, semantic-VAD turn detection, and PCM16 audio. Override via secret keys `REALTIME_MODEL`, `REALTIME_TRANSCRIPTION_MODEL`, `REALTIME_VOICE` in `bt-config`.
+
 ## Local dev
 
+The cluster runs in k3d (`bt` cluster), and **Tilt is managed as a systemd user service** (`tilt-bt.service`) that hot-syncs source edits into the running pods. You should not need to run `tilt up` or `kubectl cp` manually.
+
 ```bash
-# DB (already running in postgres_db)
-kubectl -n bt get endpoints bt-web   # if 172.18.0.1:3001, edit & refresh — no rebuild
+# Service status / logs
+systemctl --user status tilt-bt
+journalctl --user -u tilt-bt -f
 
-# Web
-cd web && npm install && npm run dev   # http://localhost:3001
+# Pause / resume the watcher (e.g. to run interactive `tilt up` for the UI on :10350)
+systemctl --user stop tilt-bt
+systemctl --user start tilt-bt
+```
 
-# Gateway
-cd gateway && go run ./cmd/gateway    # needs DATABASE_URL env var
+What edits go live where:
 
-# AI
+| Edit | What happens | Restart needed |
+| ---- | ------------ | -------------- |
+| `web/src/**` | Tilt syncs → Next.js HMR | No |
+| `ai/app/**` | Tilt syncs → `uvicorn --reload` | No |
+| `gateway/**` | Tilt rebuilds image + rolls pod | Automatic |
+| `requirements.txt`, `package.json`, `go.mod` | Full image rebuild + roll | Automatic |
+| `Tiltfile`, `k8s/*.yaml` | Tilt re-applies | Automatic |
+
+First-time install of the dev loop on a fresh box:
+
+```bash
+# Install service unit
+cp ops/systemd/tilt-bt.service ~/.config/systemd/user/   # or write the unit by hand
+sudo loginctl enable-linger ubuntu                       # auto-start at boot
+systemctl --user daemon-reload
+systemctl --user enable --now tilt-bt
+```
+
+Run a service standalone (not via systemd) only if you have a specific reason:
+
+```bash
+cd web && npm install && npm run dev          # http://localhost:3001
+cd gateway && go run ./cmd/gateway            # needs DATABASE_URL
 cd ai && pip install -r requirements.txt && uvicorn app.main:app --port 8001
 ```
 

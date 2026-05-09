@@ -1,0 +1,33 @@
+[Unit]
+Description=Tilt dev loop for brightertomorrowtherapy (k3d cluster: bt)
+Documentation=https://docs.tilt.dev
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/apps/brightertomorrowtherapy
+
+# Tilt needs PATH (kubectl/docker/k3d) and a writable HOME for ~/.tilt-dev
+Environment=HOME=/home/ubuntu
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/ubuntu/.local/bin
+Environment=KUBECONFIG=/home/ubuntu/.kube/config
+
+# --stream  : no TUI; stream all build/pod logs to journald
+ExecStart=/usr/local/bin/tilt up --stream
+ExecStop=/usr/local/bin/tilt down
+
+# Wait for k8s context to be reachable; if it isn't, fail and let systemd retry.
+Restart=on-failure
+RestartSec=10s
+
+# Don't kill child build processes too aggressively
+TimeoutStopSec=30s
+KillSignal=SIGINT
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tilt-bt
+
+[Install]
+WantedBy=default.target
