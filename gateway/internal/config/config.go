@@ -8,14 +8,17 @@ import (
 
 // Config holds all runtime configuration for the gateway.
 type Config struct {
-	Port               string
-	DatabaseURL        string
-	AIServiceURL       string
-	LogLevel           string
-	CORSOrigins        []string
-	CookieSecure       bool
-	AdminInitialEmail  string
+	Port                 string
+	DatabaseURL          string
+	AIServiceURL         string
+	LogLevel             string
+	CORSOrigins          []string
+	CookieSecure         bool
+	AdminInitialEmail    string
 	AdminInitialPassword string
+	// DDB / PHI store.
+	DDBTable  string
+	AWSRegion string
 }
 
 var ErrMissingDatabaseURL = errors.New("config: DATABASE_URL is required")
@@ -44,6 +47,8 @@ func Load() (*Config, error) {
 		CookieSecure:         cookieSecure,
 		AdminInitialEmail:    os.Getenv("ADMIN_INITIAL_EMAIL"),
 		AdminInitialPassword: os.Getenv("ADMIN_INITIAL_PASSWORD"),
+		DDBTable:             envOr("BT_DDB_TABLE", "bt-main"),
+		AWSRegion:            envOr("BT_DDB_REGION", "us-east-1"),
 	}, nil
 }
 

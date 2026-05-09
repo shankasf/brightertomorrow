@@ -42,6 +42,21 @@ def signed_post(path: str, body: Mapping[str, Any], *, timeout: float = 20.0) ->
     return resp.json() if resp.content else {}
 
 
+def gateway_post(path: str, body: Mapping[str, Any], *, timeout: float = 20.0) -> dict[str, Any]:
+    """POST JSON to the gateway pod over cluster-internal HTTP — no SigV4.
+
+    Used for endpoints served by bt-gateway (not API Gateway). The default
+    URL targets the in-cluster service; override BT_GATEWAY_URL for local
+    dev. /internal/* is not exposed via the Traefik ingress, so cluster
+    isolation is the only auth boundary.
+    """
+    base = os.environ.get("BT_GATEWAY_URL", "http://bt-gateway").rstrip("/")
+    url = f"{base}{path}"
+    resp = httpx.post(url, json=dict(body), timeout=timeout)
+    resp.raise_for_status()
+    return resp.json() if resp.content else {}
+
+
 def signed_get(path: str, *, params: Mapping[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
     base = os.environ.get("BT_API_URL", "https://api.brightertomorrowtherapy.cloud").rstrip("/")
     region = os.environ.get("AWS_REGION", "us-east-1")

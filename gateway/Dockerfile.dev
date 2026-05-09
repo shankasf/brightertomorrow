@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Dev image for Tilt — contains the Go toolchain so live_update can recompile
 # in-container without Go on the host. Prod uses ./Dockerfile (distroless).
-FROM golang:1.23-alpine
+FROM golang:1.24-alpine
 RUN apk add --no-cache ca-certificates
 WORKDIR /src
 COPY go.mod go.sum* ./

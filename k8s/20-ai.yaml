@@ -28,6 +28,8 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_MODEL, optional: true } }
             - name: BT_API_URL
               value: "https://api.brightertomorrowtherapy.cloud"
+            - name: BT_GATEWAY_URL
+              value: "http://bt-gateway"
             - name: AWS_ACCESS_KEY_ID
               valueFrom: { secretKeyRef: { name: bt-config, key: AWS_ACCESS_KEY_ID } }
             - name: AWS_SECRET_ACCESS_KEY

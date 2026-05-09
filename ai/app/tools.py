@@ -211,39 +211,37 @@ def request_intake_callback(full_name: str, email: str, phone: str, message: str
                 "error": f"incomplete: {field_name} missing or placeholder — ask the visitor before retrying",
             }
 
-    with _log_call("request_intake_callback"):
-        with conn() as c, c.cursor() as cur:
-            # Idempotency window — if the same email+phone landed in the last
-            # 5 minutes from the chat agent, upsert rather than insert a dup.
-            cur.execute(
-                """
-                SELECT id FROM contact_submissions
-                WHERE email = %s AND phone = %s AND source = 'chat-agent'
-                  AND created_at > now() - interval '5 minutes'
-                ORDER BY id DESC LIMIT 1
-                """,
-                (email, phone),
-            )
-            existing = cur.fetchone()
-            if existing:
-                cur.execute(
-                    "UPDATE contact_submissions SET full_name = %s, message = %s WHERE id = %s",
-                    (full_name, message, existing[0]),
-                )
-                logger.info("intake_callback_updated id=%d (dedup)", existing[0])
-                return {"ok": True, "id": existing[0], "updated": True}
+    parts = full_name.strip().split()
+    first_name = parts[0] if parts else ""
+    last_name = " ".join(parts[1:]) if len(parts) > 1 else first_name
 
-            cur.execute(
-                """
-                INSERT INTO contact_submissions (full_name, email, phone, subject, message, source)
-                VALUES (%s, %s, %s, %s, %s, 'chat-agent')
-                RETURNING id
-                """,
-                (full_name, email, phone, "Intake callback", message),
-            )
-            new_id = cur.fetchone()[0]
-        logger.info("intake_callback_created id=%d", new_id)
-        return {"ok": True, "id": new_id}
+    submit_body = {
+        "flow": "coverage",          # treated as a callback request, not a booking
+        "service": (message or "Intake callback")[:200],
+        "payment_method": "self_pay",  # we don't know yet; staff will follow up
+        "first_name": first_name,
+        "last_name": last_name,
+        # TODO: gateway should accept null DOB on flow=coverage; staff collects DOB on the follow-up call.
+        "date_of_birth": "1900-01-01",
+        "phone": phone,
+        "email": email,
+        "home_address": "Not provided",
+        "sex": "Not provided",
+        "notes": message,
+        "source": "chat-agent",
+    }
+
+    try:
+        with _log_call("request_intake_callback_submit"):
+            resp = gateway_post("/internal/intake/submit", submit_body)
+    except Exception as exc:
+        logger.exception("request_intake_callback_submit_error")
+        return {"ok": False, "error": f"submit_failed: {exc}"}
+
+    if not resp.get("ok"):
+        return {"ok": False, "error": resp.get("error", "submit_failed")}
+
+    return {"ok": True, "id": resp.get("submission_id")}
 
 
 @function_tool
@@ -361,7 +359,7 @@ CRISIS_TOOLS: list = []
 # ---------------------------------------------------------------------------
 # AWS-backed tools — call API Gateway (SigV4) into DynamoDB / CLAIM.MD.
 # ---------------------------------------------------------------------------
-from .aws_signer import signed_post  # noqa: E402
+from .aws_signer import gateway_post, signed_post  # noqa: E402
 
 
 @function_tool
@@ -523,71 +521,51 @@ def book_with_insurance(
     if payer.id != "SELF" and _is_placeholder(member_id):
         return {"ok": False, "error": "incomplete: member_id missing or placeholder — ask the visitor"}
 
-    # Self-pay bypasses the CLAIM.MD call entirely.
-    if payer.id == "SELF":
-        coverage = {"status": "self_pay", "copay": None, "plan": "Self-pay / Out-of-network"}
-        eligible = False
-    else:
-        # Split full_name into first + last for the eligibility request.
-        parts = full_name.strip().split()
-        first_name = parts[0] if parts else ""
-        last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
-        patient_id = email.strip().lower()  # stable per visitor
+    # Convert YYYYMMDD -> YYYY-MM-DD for the gateway.
+    dob_iso = f"{dob[:4]}-{dob[4:6]}-{dob[6:8]}"
 
-        try:
-            with _log_call("book_verify_insurance", patient_id=patient_id, payer=payer.id):
-                coverage = signed_post("/internal/insurance/verify", {
-                    "patient_id": patient_id,
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "dob": dob,
-                    "payer_id": payer.id,
-                    "member_id": member_id,
-                })
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("book_verify_insurance_error")
-            coverage = {"status": "verification_error", "copay": None, "plan": None, "error": str(exc)}
+    # Split full_name (gateway requires first + last separately).
+    parts = full_name.strip().split()
+    first_name = parts[0] if parts else ""
+    last_name = " ".join(parts[1:]) if len(parts) > 1 else first_name
 
-        status = str(coverage.get("status") or "").strip().lower()
-        eligible = status in _ELIGIBLE_STATES
+    payment_method = "self_pay" if payer.id == "SELF" else "insurance"
 
-    # Record the intake callback with eligibility context in the message.
-    tag = "VERIFIED" if eligible else "NEEDS_REVIEW"
-    msg = (
-        f"Reason: {reason}\n"
-        f"DOB: {dob}\n"
-        f"Insurance: {payer.name} (member {member_id})\n"
-        f"Eligibility: {tag} — {coverage.get('status')}"
-    )
-    with _log_call("book_with_insurance_intake"):
-        with conn() as c, c.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id FROM contact_submissions
-                WHERE email = %s AND phone = %s AND source = 'chat-agent'
-                  AND created_at > now() - interval '5 minutes'
-                ORDER BY id DESC LIMIT 1
-                """,
-                (email, phone),
-            )
-            existing = cur.fetchone()
-            if existing:
-                cur.execute(
-                    "UPDATE contact_submissions SET full_name = %s, message = %s WHERE id = %s",
-                    (full_name, msg, existing[0]),
-                )
-                callback_id = existing[0]
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO contact_submissions (full_name, email, phone, subject, message, source)
-                    VALUES (%s, %s, %s, %s, %s, 'chat-agent')
-                    RETURNING id
-                    """,
-                    (full_name, email, phone, f"Booking ({tag})", msg),
-                )
-                callback_id = cur.fetchone()[0]
-    logger.info("booking_recorded id=%d eligible=%s payer=%s", callback_id, eligible, payer.id)
+    submit_body: dict[str, Any] = {
+        "flow": "booking",
+        "service": (reason or "General intake")[:200],
+        "payment_method": payment_method,
+        "first_name": first_name,
+        "last_name": last_name,
+        "date_of_birth": dob_iso,
+        "phone": phone,
+        "email": email,
+        "home_address": "Not provided",   # chat agent doesn't collect this today
+        "sex": "Not provided",
+        "notes": f"Reason: {reason}",
+        "source": "chat-agent",
+    }
+    if payment_method == "insurance":
+        submit_body.update({
+            "insurance_name": payer.name,
+            "insurance_member_id": member_id,
+            "subscriber_name": full_name,           # assume self
+            "subscriber_relationship": "self",
+        })
+
+    try:
+        with _log_call("book_with_insurance_submit"):
+            resp = gateway_post("/internal/intake/submit", submit_body)
+    except Exception as exc:
+        logger.exception("book_with_insurance_submit_error")
+        return {"ok": False, "error": f"submit_failed: {exc}"}
+
+    if not resp.get("ok"):
+        return {"ok": False, "error": resp.get("error", "submit_failed")}
+
+    eligible = bool(resp.get("eligible"))
+    coverage = resp.get("coverage") or {}
+    callback_id = resp.get("submission_id")  # keep field name for back-compat with the agent's response shape
 
     if eligible:
         next_step = (

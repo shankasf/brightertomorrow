@@ -11,12 +11,15 @@ import (
 	"syscall"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/config"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/db"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/handlers"
 	appmw "github.com/brightertomorrowtherapy/bt-gateway/internal/middleware"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
@@ -40,6 +43,28 @@ func main() {
 	}
 	defer pool.Close()
 
+	// Initialise AWS SDK v2 + PHI store. Standard env-var credentials
+	// (AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY) are picked up automatically.
+	awsCfg, err := awsconfig.LoadDefaultConfig(
+		context.Background(),
+		awsconfig.WithRegion(cfg.AWSRegion),
+	)
+	if err != nil {
+		slog.Error("aws config load failed", "err", err)
+		os.Exit(1)
+	}
+	ddbClient := dynamodb.NewFromConfig(awsCfg)
+
+	phiStore, err := phi.New(phi.Config{
+		DDB:       ddbClient,
+		TableName: cfg.DDBTable,
+		Timeout:   3 * time.Second,
+	})
+	if err != nil {
+		slog.Error("phi store init failed", "err", err)
+		os.Exit(1)
+	}
+
 	// Bootstrap initial superadmin if no admin users exist yet.
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	admin.Bootstrap(bootstrapCtx, pool, cfg.AdminInitialEmail, cfg.AdminInitialPassword)
@@ -50,12 +75,16 @@ func main() {
 	// Admin handlers.
 	adminAuthH := &handlers.AdminAuthHandler{Pool: pool}
 	adminStatsH := &handlers.AdminStatsHandler{Pool: pool}
-	adminContactsH := &handlers.AdminContactsHandler{Pool: pool}
+	adminContactsH := &handlers.AdminContactsHandler{Pool: pool, PHI: phiStore}
 	adminChatH := &handlers.AdminChatHandler{Pool: pool}
 	adminNewsletterH := &handlers.AdminNewsletterHandler{Pool: pool}
 	adminAuditH := &handlers.AdminAuditHandler{Pool: pool}
 	adminContentH := &handlers.AdminContentHandler{Pool: pool, AIClient: ai}
-	intakeH := &handlers.IntakeHandler{Pool: pool, CoverageChecker: ai}
+
+	intakeH := &handlers.IntakeHandler{Pool: pool, PHI: phiStore, CoverageChecker: ai}
+	intakeInternalH := &handlers.IntakeInternalHandler{IntakeHandler: intakeH}
+
+	readyzH := &handlers.ReadyzHandler{Pool: pool, PHI: phiStore}
 
 	r := chi.NewRouter()
 
@@ -68,7 +97,7 @@ func main() {
 
 	// Health probes.
 	r.Get("/healthz", handlers.Health)
-	r.Get("/readyz", (&handlers.ReadyzHandler{Pool: pool}).ServeHTTP)
+	r.Get("/readyz", readyzH.ServeHTTP)
 
 	// API v1.
 	r.Route("/v1", func(r chi.Router) {
@@ -77,7 +106,17 @@ func main() {
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/intake", intakeH.ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/newsletter", (&handlers.NewsletterHandler{Pool: pool}).ServeHTTP)
 		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat", (&handlers.ChatHandler{Pool: pool, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
+		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat/stream", (&handlers.ChatStreamHandler{Pool: pool, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Get("/voice", (&handlers.VoiceHandler{Pool: pool, AIServiceURL: cfg.AIServiceURL, CookieSecure: cfg.CookieSecure}).ServeHTTP)
+	})
+
+	// Internal routes — cluster-internal callers only (the bt-ai pod).
+	// IMPORTANT: /internal/* MUST NOT be added to k8s/40-ingress.yaml.
+	// Traefik does not route /internal/*, so these endpoints are only
+	// reachable from inside the bt namespace. That network boundary is
+	// the auth boundary; do not expose without adding signature auth.
+	r.Route("/internal", func(r chi.Router) {
+		r.Post("/intake/submit", intakeInternalH.ServeHTTP)
 	})
 
 	// Admin API — /admin/api/* routes to gateway (see k8s/40-ingress.yaml).
@@ -98,6 +137,10 @@ func main() {
 			// PHI: contacts (access logged on detail view §164.312(b)).
 			r.Get("/contacts", adminContactsH.List)
 			r.Get("/contacts/{id}", adminContactsH.Get)
+
+			// PHI: intake pointers + DDB-backed full records.
+			r.Get("/intake-pointers", adminContactsH.ListIntakePointers)
+			r.Get("/intake-pointers/{id}", adminContactsH.GetIntakePointer)
 
 			// PHI: chat sessions (access logged on detail view).
 			r.Get("/chat/sessions", adminChatH.ListSessions)

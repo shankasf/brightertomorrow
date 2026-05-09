@@ -48,6 +48,32 @@ spec:
                   name: bt-config
                   key: ADMIN_INITIAL_PASSWORD
                   optional: true
+            # Use least-privilege bt-gateway-vm IAM user (DynamoDB only).
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: BT_GATEWAY_AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: BT_GATEWAY_AWS_SECRET_ACCESS_KEY
+            - name: AWS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: AWS_REGION
+            - name: BT_DDB_TABLE
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: BT_DDB_TABLE
+            - name: BT_DDB_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: BT_DDB_REGION
           readinessProbe:
             httpGet:
               path: /readyz

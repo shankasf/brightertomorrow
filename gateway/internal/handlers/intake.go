@@ -12,6 +12,8 @@ import (
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -40,11 +42,30 @@ type intakeRequest struct {
 	SubscriberName         string `json:"subscriber_name"`
 	SubscriberRelationship string `json:"subscriber_relationship"`
 	Notes                  string `json:"notes"`
+	// Source is only honoured on the internal endpoint; on the public
+	// endpoint it is derived from Flow.
+	Source string `json:"source,omitempty"`
+}
+
+type intakeResponse struct {
+	OK             bool           `json:"ok"`
+	SubmissionID   int64          `json:"submission_id"`
+	SubmissionUUID string         `json:"submission_uuid"`
+	Eligible       bool           `json:"eligible"`
+	CoverageStatus string         `json:"coverage_status"`
+	Coverage       map[string]any `json:"coverage"`
+	NextStep       string         `json:"next_step"`
 }
 
 type intakeDB interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
+// phiStorer is the subset of phi.Store that the handler needs.
+// Defined by the consumer (this package), not the producer.
+type phiStorer interface {
+	PutIntake(ctx context.Context, r phi.IntakeRecord) error
 }
 
 type CoverageChecker interface {
@@ -53,6 +74,7 @@ type CoverageChecker interface {
 
 type IntakeHandler struct {
 	Pool            intakeDB
+	PHI             phiStorer
 	CoverageChecker CoverageChecker
 }
 
@@ -63,7 +85,7 @@ var (
 	errIntakePaymentCoverage   = errors.New("coverage flow requires payment_method=insurance")
 	errIntakeFirstName         = errors.New("first_name must be 1–100 characters")
 	errIntakeLastName          = errors.New("last_name must be 1–100 characters")
-	errIntakeDOB              = errors.New("date_of_birth must be a valid YYYY-MM-DD date")
+	errIntakeDOB               = errors.New("date_of_birth must be a valid YYYY-MM-DD date")
 	errIntakePhone             = errors.New("phone must be 1–50 characters")
 	errIntakeEmail             = errors.New("email must be valid and at most 200 characters")
 	errIntakeHomeAddress       = errors.New("home_address must be 1–300 characters")
@@ -178,7 +200,20 @@ func (h *IntakeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullName := strings.TrimSpace(body.FirstName + " " + body.LastName)
+	// Public endpoint: source is always derived from flow.
+	body.Source = intakeSource(body.Flow)
+
+	resp, status, err := h.submit(r.Context(), body)
+	if err != nil {
+		httpx.WriteError(w, status, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, status, resp)
+}
+
+// submit is the shared core used by both the public IntakeHandler and the
+// internal IntakeInternalHandler. Source must be set on body before calling.
+func (h *IntakeHandler) submit(ctx context.Context, body intakeRequest) (intakeResponse, int, error) {
 	coverage := map[string]any{
 		"status": "self_pay",
 		"plan":   "Self-pay / Out-of-network",
@@ -189,11 +224,10 @@ func (h *IntakeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if body.PaymentMethod == intakePaymentInsurance {
 		if h.CoverageChecker == nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
-			return
+			return intakeResponse{}, http.StatusInternalServerError, fmt.Errorf("internal server error")
 		}
 
-		checkResp, err := h.CoverageChecker.CheckCoverage(r.Context(), aiclient.CoverageCheckRequest{
+		checkResp, err := h.CoverageChecker.CheckCoverage(ctx, aiclient.CoverageCheckRequest{
 			PatientID: body.Email,
 			FirstName: body.FirstName,
 			LastName:  body.LastName,
@@ -218,31 +252,86 @@ func (h *IntakeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	subject := intakeSubject(body, coverageStatus, eligible)
-	message := intakeMessage(body, fullName, payerName, coverageStatus, eligible, coverage)
-	source := intakeSource(body.Flow)
+	submissionUUID := uuid.NewString()
+	emailHash := phi.HashEmail(body.Email)
+	now := time.Now().UTC()
 
-	var submissionID int64
-	row := h.Pool.QueryRow(r.Context(), `
-		INSERT INTO bt.contact_submissions
-			(full_name, email, phone, subject, message, source)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id
-	`, fullName, body.Email, body.Phone, subject, message, source)
-	if err := row.Scan(&submissionID); err != nil {
-		slog.Error("intake: insert", "err", err, "flow", body.Flow)
-		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
-		return
+	// Normalise coverage map for DDB storage (map[string]string).
+	coverageDDB := make(map[string]string, len(coverage))
+	for k, v := range coverage {
+		coverageDDB[k] = cleanValue(v)
 	}
 
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":              true,
-		"submission_id":   submissionID,
-		"eligible":        eligible,
-		"coverage_status": coverageStatus,
-		"coverage":        coverage,
-		"next_step":       intakeNextStep(body.Flow, body.PaymentMethod, coverageStatus, eligible),
-	})
+	rec := phi.IntakeRecord{
+		SubmissionUUID:         submissionUUID,
+		EmailHash:              emailHash,
+		Flow:                   body.Flow,
+		Service:                body.Service,
+		PaymentMethod:          body.PaymentMethod,
+		Source:                 body.Source,
+		FirstName:              body.FirstName,
+		LastName:               body.LastName,
+		DateOfBirth:            body.DateOfBirth,
+		Phone:                  body.Phone,
+		Email:                  body.Email,
+		HomeAddress:            body.HomeAddress,
+		Sex:                    body.Sex,
+		InsuranceName:          body.InsuranceName,
+		InsuranceMemberID:      body.InsuranceMemberID,
+		SubscriberName:         body.SubscriberName,
+		SubscriberRelationship: body.SubscriberRelationship,
+		Notes:                  body.Notes,
+		CoverageStatus:         coverageStatus,
+		Eligible:               eligible,
+		Coverage:               coverageDDB,
+		CreatedAt:              now,
+		RetainUntil:            now.AddDate(10, 0, 0),
+	}
+
+	// Fail-closed: if DynamoDB is unavailable, we do NOT accept the intake.
+	if h.PHI != nil {
+		if err := h.PHI.PutIntake(ctx, rec); err != nil {
+			slog.Error("intake: phi store put failed",
+				"err", err,
+				"flow", body.Flow,
+				"submission_uuid", submissionUUID,
+			)
+			return intakeResponse{}, http.StatusServiceUnavailable, fmt.Errorf("phi_store_unavailable")
+		}
+	}
+
+	// Insert non-PHI pointer into Postgres. If this fails after Dynamo
+	// succeeded, log for operator remediation but return 200 — Dynamo is
+	// the source of truth.
+	var submissionID int64
+	if h.Pool != nil {
+		ddbPK := "PATIENT#" + emailHash
+		ddbSK := "INTAKE#" + submissionUUID
+		row := h.Pool.QueryRow(ctx, `
+			INSERT INTO bt.intake_pointers
+				(submission_uuid, email_hash, flow, payment_method, status, source, ddb_pk, ddb_sk)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			RETURNING id
+		`, submissionUUID, emailHash, body.Flow, body.PaymentMethod, coverageStatus, body.Source, ddbPK, ddbSK)
+		if err := row.Scan(&submissionID); err != nil {
+			slog.Error("intake: pointer insert failed — DynamoDB record exists, manual reconciliation required",
+				"err", err,
+				"submission_uuid", submissionUUID,
+				"email_hash", emailHash,
+			)
+			// Return 200 — Dynamo is source of truth.
+		}
+	}
+
+	return intakeResponse{
+		OK:             true,
+		SubmissionID:   submissionID,
+		SubmissionUUID: submissionUUID,
+		Eligible:       eligible,
+		CoverageStatus: coverageStatus,
+		Coverage:       coverage,
+		NextStep:       intakeNextStep(body.Flow, body.PaymentMethod, coverageStatus, eligible),
+	}, http.StatusOK, nil
 }
 
 func coverageState(coverage map[string]any) string {
@@ -261,86 +350,6 @@ func intakeSource(flow string) string {
 		return "website-coverage-flow"
 	}
 	return "website-booking-flow"
-}
-
-func intakeSubject(req intakeRequest, coverageStatus string, eligible bool) string {
-	if req.Flow == intakeFlowCoverage {
-		switch {
-		case eligible:
-			return "Coverage Check (Eligible)"
-		case coverageStatus == "verification_error":
-			return "Coverage Check (Needs Review)"
-		default:
-			return "Coverage Check (Follow Up Needed)"
-		}
-	}
-
-	if req.PaymentMethod == intakePaymentSelfPay {
-		return "Appointment Request (Self-Pay)"
-	}
-	if eligible {
-		return "Appointment Request (Insurance Verified)"
-	}
-	if coverageStatus == "verification_error" {
-		return "Appointment Request (Insurance Review Needed)"
-	}
-	return "Appointment Request (Coverage Follow Up)"
-}
-
-func intakeMessage(
-	req intakeRequest,
-	fullName, payerName, coverageStatus string,
-	eligible bool,
-	coverage map[string]any,
-) string {
-	lines := []string{
-		"Flow: " + intakeFlowLabel(req.Flow),
-		"Service: " + req.Service,
-		"Payment method: " + intakePaymentLabel(req.PaymentMethod),
-		"Full name: " + fullName,
-		"Date of birth: " + req.DateOfBirth,
-		"Phone: " + req.Phone,
-		"Email: " + req.Email,
-		"Home address: " + req.HomeAddress,
-		"Sex: " + req.Sex,
-	}
-
-	if req.PaymentMethod == intakePaymentInsurance {
-		lines = append(lines,
-			"Insurance name: "+payerName,
-			"Insurance ID number: "+req.InsuranceMemberID,
-			"Subscriber name: "+req.SubscriberName,
-			"Relationship to subscriber: "+req.SubscriberRelationship,
-			"Eligibility status: "+coverageStatus,
-			"Eligible: "+yesNo(eligible),
-		)
-		if plan := cleanValue(coverage["plan"]); plan != "" {
-			lines = append(lines, "Plan: "+plan)
-		}
-		if copay := cleanValue(coverage["copay"]); copay != "" {
-			lines = append(lines, "Copay: "+copay)
-		}
-	}
-
-	if req.Notes != "" {
-		lines = append(lines, "Notes: "+req.Notes)
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func intakeFlowLabel(flow string) string {
-	if flow == intakeFlowCoverage {
-		return "Insurance coverage check"
-	}
-	return "Appointment booking"
-}
-
-func intakePaymentLabel(payment string) string {
-	if payment == intakePaymentSelfPay {
-		return "Self-pay / Out-of-network"
-	}
-	return "Insurance"
 }
 
 func intakeNextStep(flow, paymentMethod, coverageStatus string, eligible bool) string {

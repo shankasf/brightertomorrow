@@ -7,9 +7,10 @@ Full-stack rebuild of brightertomorrowtherapy.com — Las Vegas therapy practice
 | Service | Tech | Port |
 | ------- | ---- | ---- |
 | **web** | Next.js 15, React 19, Tailwind, Framer Motion | 3001 (dev) |
-| **gateway** | Go 1.23, chi (HTTP router + middleware), pgx v5, goroutines — REST API + admin API | 8080 |
+| **gateway** | Go 1.24, chi (HTTP router + middleware), pgx v5, AWS SDK v2 (DynamoDB) — REST API + admin API | 8080 |
 | **ai** | FastAPI, OpenAI Agents SDK 0.17 (`gpt-realtime-2`) — multi-agent text + voice triage graph | 8001 |
-| **db** | PostgreSQL 17, schema `bt` | 5432 |
+| **db** | PostgreSQL 17, schema `bt` — non-PHI metadata, FAQ embeddings, admin sessions | 5432 |
+| **PHI store** | DynamoDB `bt-main` (us-east-1), CMK `alias/bt-phi`, PITR enabled | AWS |
 
 All traffic routes through Traefik: `/v1/*` and `/admin/*` → gateway, everything else → web.
 
@@ -200,6 +201,144 @@ Three append-only audit tables:
 | `db/migrations/001_perf_indexes.sql` | Query performance indexes |
 | `db/migrations/002_hipaa_compliance.sql` | Audit triggers, retention columns, anonymization procedures, DB roles |
 | `db/migrations/003_admin.sql` | Admin users, sessions, access log tables |
+
+## Intake PHI Storage — DynamoDB-backed (HIPAA)
+
+Identifying patient information collected through the chat widget, voice agent, or website intake forms (`first_name`, `last_name`, `date_of_birth`, `phone`, `email`, `home_address`, `sex`, `insurance_name`, `insurance_member_id`) is **never persisted to local Postgres**. PHI lives in a CMK-encrypted DynamoDB table (`bt-main`) on AWS; Postgres holds only a non-PHI pointer row that admin lists query.
+
+### Why this split
+
+The Postgres instance runs in a Docker container on the application VM (Hostinger). That container is fine for non-PHI workflow data — admin sessions, FAQ vectors, contact-form metadata — but it is **not** a HIPAA-eligible PHI store: no AWS BAA, no customer-managed key, no PITR, no cross-AZ replication. The right place for PHI is AWS DynamoDB with the existing `alias/bt-phi` customer-managed key.
+
+### Data flow with security boundaries
+
+```mermaid
+flowchart TB
+    subgraph EXT["Untrusted Internet"]
+        VISITOR["Website visitor<br/>(chat / voice / form)"]
+    end
+
+    subgraph TRAEFIK["Traefik Ingress · TLS"]
+        INGRESS["TLS 1.3 termination<br/>cert-manager / LetsEncrypt prod<br/>routes /v1/*, /admin/* → gateway<br/>routes /chat, /ws/voice → ai<br/>NEVER routes /internal/*"]
+    end
+
+    subgraph BT["k3s 'bt' namespace · cluster-internal traffic"]
+        WEB["bt-web<br/>Next.js"]
+        AI["bt-ai (FastAPI)<br/>tools.py:<br/>book_with_insurance<br/>request_intake_callback"]
+        GW["bt-gateway (Go 1.24)<br/>handlers/intake.go<br/>handlers/intake_internal.go<br/>internal/phi/store.go"]
+        PG[("Postgres 17<br/>(Docker on host)<br/>bt.intake_pointers<br/>NO PHI columns")]
+    end
+
+    subgraph AWS["AWS · account 689517798275 · us-east-1"]
+        IAM["IAM user<br/>bt-gateway-vm<br/>scoped to bt-main + GSI1<br/>+ kms:Decrypt via DDB only"]
+        SM["Secrets Manager<br/>bt/gateway/aws-credentials<br/>CMK-encrypted"]
+        CMK["KMS CMK<br/>alias/bt-phi<br/>1-yr rotation"]
+        DDB[("DynamoDB bt-main<br/>encryption: CUSTOMER_MANAGED<br/>PITR enabled<br/>deletion protection on<br/>streams: NEW_AND_OLD_IMAGES")]
+        TRAIL[("CloudTrail<br/>S3 · object lock 365d<br/>encrypted with bt-phi CMK")]
+    end
+
+    VISITOR -- "HTTPS" --> INGRESS
+    INGRESS -- "TLS in-cluster" --> WEB
+    INGRESS -- "TLS in-cluster" --> AI
+    WEB -- "POST /v1/intake (form)" --> GW
+    AI -- "POST /internal/intake/submit<br/>cluster-only HTTP, network-isolated" --> GW
+
+    GW -. "load env at startup" .-> SM
+    SM -. "rotate via CDK redeploy" .-> IAM
+    GW == "TLS · SigV4 · KMS data key" ==> DDB
+    DDB -- "encrypts/decrypts<br/>every item with" --> CMK
+    DDB -- "every API call audited" --> TRAIL
+    GW -- "INSERT pointer row<br/>(submission_uuid, email_hash, status)<br/>NO PHI" --> PG
+
+    classDef phi fill:#ffe5e5,stroke:#c00
+    classDef pointer fill:#e5f5ff,stroke:#06c
+    classDef key fill:#fff4d6,stroke:#c80
+    class DDB,SM phi
+    class PG pointer
+    class CMK,IAM key
+```
+
+### Security controls at every layer
+
+| Layer | Control | Protects against |
+|---|---|---|
+| **Transit · visitor → ingress** | TLS 1.3, HSTS, LE-prod cert via cert-manager | Eavesdropping on the public internet |
+| **Transit · gateway → DynamoDB** | TLS to `dynamodb.us-east-1.amazonaws.com`, SigV4 request signing | Man-in-the-middle, request tampering, replay |
+| **Transit · ai → gateway** | Cluster-internal only; `/internal/*` is not in the Traefik ingress at all | External callers reaching internal endpoints |
+| **AuthN · gateway → DynamoDB** | IAM user `bt-gateway-vm` with static access key (rotated via CDK redeploy) | Unauthorised AWS API access |
+| **AuthZ · IAM policy scope** | Only `PutItem/GetItem/Query/UpdateItem/DescribeTable` on `bt-main` + GSI1; `kms:Decrypt` only `ViaService = dynamodb.*.amazonaws.com` | Lateral movement to other AWS resources if the key leaks |
+| **At rest · DynamoDB** | `TableEncryption.CUSTOMER_MANAGED` with `alias/bt-phi` (KMS, 1-yr rotation) | AWS insider access, disk-image exfiltration |
+| **At rest · Secrets Manager** | Same `alias/bt-phi` CMK encrypts the gateway access key secret | Secret leakage from CloudFormation history |
+| **At rest · Postgres pointer table** | No PHI columns. Stores only `submission_uuid`, `sha256(email)`, `status`, `created_at`, `retain_until` | Nothing identifying to leak even if the VM is compromised |
+| **Audit · DynamoDB** | CloudTrail (data events on bt-main → S3 with object lock 365 d) | Tampering with the audit trail |
+| **Audit · Postgres** | `phi_audit_trigger` on `bt.intake_pointers` writes every INSERT/UPDATE/DELETE to `bt.phi_audit_log` (append-only) | Silent admin actions |
+| **Audit · admin PHI access** | `GetIntakePointer` writes to `bt.phi_audit_log` with admin email + row id every time PHI is fetched from DynamoDB on detail view | §164.312(b) "audit controls" |
+| **Retention** | 10-year `retain_until` set on insert (Nevada NRS 629.051); weekly CronJob purges expired rows from both stores | Over-retention liability |
+| **Right to erasure** | `bt.mark_intake_pointer_purged(id)` + DynamoDB `DeleteItem` | NRS 603A erasure request |
+| **Fail-closed** | `/v1/intake` returns 503 if DynamoDB write fails; pointer row is **never** written without DynamoDB success first | Silently downgrading PHI to local Postgres if AWS is unreachable |
+| **Reachability** | `/readyz` pings `DescribeTable` on `bt-main`; pod is removed from k8s service rotation if AWS is unreachable | Sending traffic to a pod that can't store PHI |
+
+### Intake submission lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant V as Visitor
+    participant W as bt-web
+    participant GW as bt-gateway
+    participant DDB as DynamoDB bt-main
+    participant PG as Postgres pointer table
+    participant CL as CLAIM.MD eligibility
+
+    V->>W: Fill intake form (9 fields)
+    W->>GW: POST /v1/intake
+    GW->>GW: Validate, normalise, generate submission_uuid (v4)
+    opt payment_method = insurance
+        GW->>CL: POST /internal/intake/check-coverage (via bt-ai)
+        CL-->>GW: {status, plan, copay}
+    end
+    GW->>GW: Build phi.IntakeRecord (CreatedAt, RetainUntil = +10y)
+    GW->>+DDB: PutItem PK=PATIENT#sha256(email) SK=INTAKE#uuid<br/>(condition: attribute_not_exists)
+    Note over GW,DDB: TLS · SigV4 · CMK envelope encryption
+    DDB-->>-GW: 200 OK
+    alt DDB write failed
+        GW-->>W: 503 phi_store_unavailable
+        Note over GW: FAIL CLOSED — Postgres untouched.
+    else DDB write OK
+        GW->>PG: INSERT bt.intake_pointers<br/>(uuid, email_hash, status, ddb_pk, ddb_sk)
+        PG-->>GW: id (BIGSERIAL)
+        Note over PG: phi_audit_trigger writes append-only audit row.
+        GW-->>W: 200 {submission_id, submission_uuid, eligible, next_step}
+    end
+    W-->>V: "We'll contact you within 1 business day."
+```
+
+### Admin PHI access lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Admin (browser)
+    participant GW as bt-gateway
+    participant PG as Postgres
+    participant DDB as DynamoDB
+    participant AUD as bt.phi_audit_log
+
+    A->>GW: GET /admin/api/intake-pointers (list)
+    GW->>PG: SELECT non-PHI cols FROM bt.intake_pointers ORDER BY created_at DESC
+    PG-->>GW: rows (status, flow, email_hash, created_at)
+    GW-->>A: 200 — list view never carries PHI
+    Note over A,GW: List view is pointer-only. No DynamoDB call.
+
+    A->>GW: GET /admin/api/intake-pointers/{id}
+    GW->>PG: SELECT pointer WHERE id=?
+    PG-->>GW: pointer row (gives ddb_pk, ddb_sk)
+    GW->>DDB: GetItem PK,SK
+    DDB-->>GW: full PHI record
+    GW->>AUD: INSERT (table='intake_pointers_phi_access', actor=admin_email, row_id=uuid)
+    GW-->>A: 200 — pointer + PHI merged
+    Note over GW,AUD: Every PHI fetch is logged before the response is returned.
+```
 
 ## Architecture Diagrams
 

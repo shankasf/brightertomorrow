@@ -4,6 +4,7 @@ import * as cdk from "aws-cdk-lib";
 import { SecurityStack } from "../lib/security-stack";
 import { DataStack } from "../lib/data-stack";
 import { SecretsStack } from "../lib/secrets-stack";
+import { GatewayIamStack } from "../lib/gateway-iam-stack";
 import { AuthStack } from "../lib/auth-stack";
 import { ApiStack } from "../lib/api-stack";
 import { SpaStack } from "../lib/spa-stack";
@@ -27,6 +28,14 @@ const secrets = new SecretsStack(app, "BtSecrets", {
   phiKey: security.phiKey,
 });
 secrets.addDependency(security);
+
+const gatewayIam = new GatewayIamStack(app, "BtGatewayIam", {
+  env,
+  phiKey: security.phiKey,
+  tableArn: data.table.tableArn,
+});
+gatewayIam.addDependency(security);
+gatewayIam.addDependency(data);
 
 new ObservabilityStack(app, "BtObservability", {
   env,

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	pgxmock "github.com/pashagolub/pgxmock/v3"
 )
 
@@ -21,6 +22,15 @@ type stubCoverageChecker struct {
 func (s *stubCoverageChecker) CheckCoverage(_ context.Context, in aiclient.CoverageCheckRequest) (aiclient.CoverageCheckResponse, error) {
 	s.lastRequest = in
 	return s.response, s.err
+}
+
+// stubPHIStore is a no-op phi store used in tests so we don't need real DynamoDB.
+type stubPHIStore struct {
+	putErr error
+}
+
+func (s *stubPHIStore) PutIntake(_ context.Context, _ phi.IntakeRecord) error {
+	return s.putErr
 }
 
 func TestIntakeRequestValidate(t *testing.T) {
@@ -114,14 +124,17 @@ func TestIntakeHandlerInsuranceBooking(t *testing.T) {
 		},
 	}
 
-	mock.ExpectQuery(`INSERT INTO bt\.contact_submissions`).
+	// New path: INSERT INTO bt.intake_pointers, RETURNING id.
+	mock.ExpectQuery(`INSERT INTO bt\.intake_pointers`).
 		WithArgs(
-			"Alice Doe",
-			"alice@example.com",
-			"702-555-0100",
-			"Appointment Request (Insurance Verified)",
-			pgxmock.AnyArg(),
-			"website-booking-flow",
+			pgxmock.AnyArg(),       // submission_uuid
+			pgxmock.AnyArg(),       // email_hash
+			"booking",              // flow
+			"insurance",            // payment_method
+			"active",               // status (from coverage response)
+			"website-booking-flow", // source
+			pgxmock.AnyArg(),       // ddb_pk
+			pgxmock.AnyArg(),       // ddb_sk
 		).
 		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(42)))
 
@@ -146,11 +159,11 @@ func TestIntakeHandlerInsuranceBooking(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	h := &IntakeHandler{Pool: mock, CoverageChecker: checker}
+	h := &IntakeHandler{Pool: mock, PHI: &stubPHIStore{}, CoverageChecker: checker}
 	h.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
 	if checker.lastRequest.DOB != "19900510" {
@@ -159,6 +172,7 @@ func TestIntakeHandlerInsuranceBooking(t *testing.T) {
 
 	var resp struct {
 		OK             bool   `json:"ok"`
+		SubmissionUUID string `json:"submission_uuid"`
 		CoverageStatus string `json:"coverage_status"`
 		NextStep       string `json:"next_step"`
 	}
@@ -170,6 +184,9 @@ func TestIntakeHandlerInsuranceBooking(t *testing.T) {
 	}
 	if resp.CoverageStatus != "active" {
 		t.Errorf("expected coverage_status=active, got %q", resp.CoverageStatus)
+	}
+	if resp.SubmissionUUID == "" {
+		t.Error("expected non-empty submission_uuid")
 	}
 	if !strings.Contains(resp.NextStep, "1 business day") {
 		t.Errorf("expected next_step to mention turnaround, got %q", resp.NextStep)
@@ -185,14 +202,16 @@ func TestIntakeHandlerSelfPayBooking(t *testing.T) {
 		t.Fatalf("pgxmock.NewPool: %v", err)
 	}
 
-	mock.ExpectQuery(`INSERT INTO bt\.contact_submissions`).
+	mock.ExpectQuery(`INSERT INTO bt\.intake_pointers`).
 		WithArgs(
-			"Jamie Doe",
-			"jamie@example.com",
-			"702-555-0101",
-			"Appointment Request (Self-Pay)",
-			pgxmock.AnyArg(),
-			"website-booking-flow",
+			pgxmock.AnyArg(),       // submission_uuid
+			pgxmock.AnyArg(),       // email_hash
+			"booking",              // flow
+			"self_pay",             // payment_method
+			"self_pay",             // status
+			"website-booking-flow", // source
+			pgxmock.AnyArg(),       // ddb_pk
+			pgxmock.AnyArg(),       // ddb_sk
 		).
 		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(43)))
 
@@ -214,13 +233,52 @@ func TestIntakeHandlerSelfPayBooking(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	h := &IntakeHandler{Pool: mock}
+	h := &IntakeHandler{Pool: mock, PHI: &stubPHIStore{}}
 	h.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unfulfilled mock expectations: %v", err)
+	}
+}
+
+func TestIntakeHandlerPHIStoreFailure(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("pgxmock.NewPool: %v", err)
+	}
+	// No DB expectations — pool should NOT be called if PHI store fails.
+
+	body := `{
+		"flow":"booking",
+		"service":"Individual Therapy",
+		"payment_method":"self_pay",
+		"first_name":"Test",
+		"last_name":"User",
+		"date_of_birth":"1990-01-15",
+		"phone":"702-555-0199",
+		"email":"test@example.com",
+		"home_address":"789 Pine Rd, Las Vegas, NV 89103",
+		"sex":"Other"
+	}`
+
+	r := httptest.NewRequest(http.MethodPost, "/v1/intake", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h := &IntakeHandler{
+		Pool: mock,
+		PHI:  &stubPHIStore{putErr: phi.ErrAlreadyExists},
+	}
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on PHI store failure, got %d: %s", w.Code, w.Body.String())
+	}
+	// Pool should not have been called.
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unexpected DB call: %v", err)
 	}
 }
