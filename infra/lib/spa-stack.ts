@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Stack, StackProps, RemovalPolicy, Duration, CfnOutput } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -35,15 +37,22 @@ export class SpaStack extends Stack {
     const cert = acm.Certificate.fromCertificateArn(this, "SpaCertImported", spaCertArn);
 
     // Next.js static export embeds a few executable inline <script> blocks per
-    // page (hydration bootstrap, __next_f streaming chunks). `deploy.sh` hashes
-    // them after each build and passes the list in via context so the CSP can
-    // pin them without falling back to 'unsafe-inline'.
-    const inlineScriptHashesRaw: string = this.node.tryGetContext("spaInlineScriptHashes") || "";
-    const inlineScriptHashes = inlineScriptHashesRaw
-      .split(",")
-      .map((s: string) => s.trim())
-      .filter((s: string) => s.length > 0)
-      .map((s: string) => `'${s}'`);
+    // page (hydration bootstrap, __next_f streaming chunks). admin-spa/scripts/
+    // deploy.py recomputes their sha256 hashes after every build, writes them
+    // to admin-spa/csp-hashes.json, and updates the live CloudFront policy in
+    // the same run. CDK reads the same file so `cdk deploy` and the runtime
+    // policy can never drift apart.
+    //
+    // Falls back to the legacy --context flag if the file isn't there yet.
+    const hashesPath = path.join(__dirname, "..", "..", "admin-spa", "csp-hashes.json");
+    let inlineScriptHashList: string[] = [];
+    if (fs.existsSync(hashesPath)) {
+      inlineScriptHashList = JSON.parse(fs.readFileSync(hashesPath, "utf-8"));
+    } else {
+      const ctx: string = this.node.tryGetContext("spaInlineScriptHashes") || "";
+      inlineScriptHashList = ctx.split(",").map((s: string) => s.trim()).filter(Boolean);
+    }
+    const inlineScriptHashes = inlineScriptHashList.map((s) => `'${s}'`);
     const scriptSrc = ["script-src 'self'", ...inlineScriptHashes].join(" ");
 
     const responseHeaders = new cf.ResponseHeadersPolicy(this, "SecurityHeaders", {

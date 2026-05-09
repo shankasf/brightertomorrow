@@ -2,15 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --font-sans: "Inter", system-ui, sans-serif;
-  --font-display: "Fraunces", serif;
-}
-
 html, body { height: 100%; }
 body {
-  background: #fafafa;
-  color: #1c1917;
-  font-family: var(--font-sans);
+  background: #FBF6EF;
+  color: #1A1A1A;
+  font-family: var(--font-sans), Inter, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Used by the login background — slow drifting gold particles. */
+@keyframes drift {
+  0%   { transform: translate3d(0, 0, 0); }
+  50%  { transform: translate3d(12px, -18px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
 }

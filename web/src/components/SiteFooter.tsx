@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { NavItem, SiteSettings } from "@/lib/queries";
 import {
   FiFacebook, FiInstagram, FiPhone, FiMail, FiMapPin,
-  FiVideo, FiClock, FiArrowUp, FiChevronRight,
+  FiVideo, FiClock, FiArrowUp, FiChevronRight, FiLock,
 } from "react-icons/fi";
 
 const WINE = "#66202A";
@@ -279,6 +279,14 @@ export default function SiteFooter({ settings, nav }: { settings: SiteSettings; 
               />
               In-person &amp; online therapy across Nevada
             </span>
+            <a
+              href="https://admin.brightertomorrowtherapy.cloud"
+              aria-label="Admin login"
+              className="group inline-flex items-center gap-1.5 text-white/65 hover:text-white transition"
+            >
+              <FiLock size={12} style={{ color: GOLD }} />
+              <span>Admin login</span>
+            </a>
             <a
               href="#top"
               aria-label="Back to top"
