@@ -11,14 +11,18 @@ gateway/.env
 k8s/10-secrets.yaml
 
 # Node
-web/node_modules/
+**/node_modules/
 web/.next/
 web/out/
 web/.turbo/
 web/coverage/
+web/*.tsbuildinfo
+admin-spa/.next/
+admin-spa/out/
+admin-spa/*.tsbuildinfo
 
 # Python
-ai/__pycache__/
+**/__pycache__/
 ai/.venv/
 ai/venv/
 ai/*.pyc
@@ -36,6 +40,25 @@ gateway/*.test
 .DS_Store
 Thumbs.db
 
+# CDK
+infra/node_modules/
+infra/cdk.out/
+infra/cdk.out.obs/
+infra/.cdk.staging/
+infra/*.d.ts
+infra/*.js
+!infra/jest.config.js
+
 # IDE / AI tooling
 .claude/
+.vscode/
+.idea/
 image.png
+
+# Sensitive binaries — never commit contracts, intake templates, PHI
+*.pdf
+*.xlsx
+*.xls
+*.docx
+*.doc
+*.csv
