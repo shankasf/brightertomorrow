@@ -2,7 +2,16 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { FiCheck, FiMapPin, FiPhone, FiMail } from "react-icons/fi";
+import { FiCheck, FiMapPin, FiPhone, FiMail, FiClock, FiArrowUpRight } from "react-icons/fi";
+
+const HOURS = [
+  ["Monday", "8am – 8pm"],
+  ["Tuesday", "8am – 8pm"],
+  ["Wednesday", "8am – 8pm"],
+  ["Thursday", "8am – 8pm"],
+  ["Friday", "8am – 6pm"],
+  ["Saturday", "9am – 2pm"],
+];
 
 export default function ContactPage() {
   const [state, setState] = useState<{ status: "idle" | "sending" | "ok" | "err"; msg?: string }>({ status: "idle" });
@@ -28,58 +37,135 @@ export default function ContactPage() {
 
   return (
     <>
-      <section className="bg-hero-gradient">
-        <div className="container-x py-10 sm:py-14 lg:py-16 text-center">
-          <span className="text-xs uppercase tracking-[0.2em] text-brand font-semibold">Contact</span>
-          <h1 className="mt-2 text-3xl sm:text-4xl md:text-5xl font-bold text-ink">Let's get you matched.</h1>
-          <p className="mt-3 text-ink-muted">Tell us a little about what you're looking for — we'll be in touch within one business day.</p>
+      {/* Page header */}
+      <section className="bg-cream-alt relative overflow-hidden">
+        <div aria-hidden className="absolute inset-0 bg-grid opacity-[0.06]" />
+        <div className="container-narrow relative py-20 sm:py-24 lg:py-28 text-center">
+          <span className="eyebrow center">Contact</span>
+          <h1 className="mt-6 display text-5xl sm:text-6xl lg:text-7xl text-ink">
+            Let&apos;s get you <span className="italic-accent">matched.</span>
+          </h1>
+          <svg aria-hidden viewBox="0 0 200 8" className="mx-auto mt-7 w-36 h-2 text-brand">
+            <path d="M2 5 Q 50 0 100 4 T 198 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <p className="mt-7 text-ink-muted text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto">
+            Tell us a little about what you&apos;re looking for — we&apos;ll be in touch within one business day.
+          </p>
         </div>
       </section>
 
-      <section className="section !py-10 sm:!py-14 lg:!py-20">
-        <div className="container-x grid lg:grid-cols-3 gap-6 lg:gap-8">
-          <div className="lg:col-span-2 order-2 lg:order-1">
+      {/* Editorial split */}
+      <section className="section bg-white">
+        <div className="container-x grid lg:grid-cols-12 gap-10 lg:gap-16">
+          {/* LEFT — info */}
+          <div className="lg:col-span-5 order-2 lg:order-1">
+            <span className="eyebrow">Reach us</span>
+            <h2 className="mt-5 display text-4xl sm:text-5xl text-ink leading-[1.05]">
+              We&apos;re here when
+              <br />
+              you&apos;re <span className="italic-accent">ready.</span>
+            </h2>
+            <p className="mt-5 text-ink-muted leading-relaxed">
+              Call, email, or stop by either of our Las Vegas offices. Telehealth available across Nevada.
+            </p>
+
+            <div className="mt-10 space-y-1">
+              {[
+                { icon: <FiPhone />, label: "Call", value: "725-238-6990", href: "tel:725-238-6990" },
+                { icon: <FiMail />, label: "Email", value: "admin@brightertomorrowtherapy.com", href: "mailto:admin@brightertomorrowtherapy.com" },
+                { icon: <FiMapPin />, label: "E Russell", value: "3430 E Russell Rd Ste 315, Las Vegas, NV 89120" },
+                { icon: <FiMapPin />, label: "N Durango", value: "6955 N Durango Dr Unit 1004, Las Vegas, NV 89149" },
+              ].map((c, i) => (
+                <a
+                  key={i}
+                  href={c.href ?? "#"}
+                  className="group flex items-start gap-5 py-5 border-t border-surface-line hover:border-brand-700/40 transition last:border-b"
+                >
+                  <span className="mt-0.5 w-10 h-10 rounded-full bg-sage-100 text-sage-700 grid place-items-center shrink-0 group-hover:bg-sage-200 transition">
+                    {c.icon}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="eyebrow-bare text-brand-700 text-[11px]">{c.label}</div>
+                    <div className="font-display text-lg text-ink mt-1 break-words [overflow-wrap:anywhere]">
+                      {c.value}
+                    </div>
+                  </div>
+                  {c.href && (
+                    <FiArrowUpRight className="mt-3 text-ink-soft shrink-0 transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-0.5 group-hover:text-brand-700" />
+                  )}
+                </a>
+              ))}
+            </div>
+
+            <div className="mt-12">
+              <span className="eyebrow">
+                <FiClock size={12} className="!w-3 !h-3" /> Hours
+              </span>
+              <ul className="mt-5 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                {HOURS.map(([day, hours]) => (
+                  <li key={day} className="flex justify-between border-b border-surface-line pb-2">
+                    <span className="font-display text-ink">{day}</span>
+                    <span className="text-ink-muted tabular">{hours}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* RIGHT — form */}
+          <div className="lg:col-span-7 order-1 lg:order-2">
             <motion.form
               onSubmit={onSubmit}
-              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-              className="bg-white border border-surface-line rounded-2xl p-5 sm:p-6 md:p-8 shadow-soft space-y-4"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-cream-alt rounded-4xl p-7 sm:p-10 lg:p-12 shadow-soft"
             >
-              <div className="grid sm:grid-cols-2 gap-4">
+              <h3 className="font-display text-2xl sm:text-3xl text-ink">
+                Send us a message
+              </h3>
+              <p className="text-sm text-ink-muted mt-2">
+                We respond within one business day. All messages are confidential.
+              </p>
+
+              <div className="mt-8 grid sm:grid-cols-2 gap-x-6 gap-y-7">
                 <Field name="full_name" label="Full Name" required />
                 <Field name="email" label="Email" type="email" required />
                 <Field name="phone" label="Phone" type="tel" />
                 <Field name="subject" label="Topic" />
               </div>
-              <div>
-                <label className="text-sm font-medium text-ink">Message</label>
-                <textarea name="message" required rows={5} className="mt-1 w-full px-3 py-2.5 rounded-lg border border-surface-line focus:outline-none focus:border-brand bg-surface-alt text-base" />
+
+              <div className="mt-7">
+                <label className="eyebrow-bare text-brand-700 text-[11px]">Message</label>
+                <textarea
+                  name="message"
+                  required
+                  rows={5}
+                  className="mt-2 w-full bg-transparent border-0 border-b border-surface-line focus:border-brand-700 focus:outline-none focus:ring-0 px-0 py-3 text-base text-ink resize-none transition-colors placeholder-ink-soft"
+                  placeholder="Tell us a little about what you're looking for…"
+                />
               </div>
-              <button disabled={state.status === "sending"} className="btn-primary disabled:opacity-60 w-full sm:w-auto py-2.5">
-                {state.status === "sending" ? "Sending…" : "Send Message"}
-              </button>
-              {state.status === "ok" && (
-                <div className="text-emerald-600 text-sm flex items-center gap-2"><FiCheck /> Thanks — we received your message.</div>
-              )}
-              {state.status === "err" && <div className="text-red-600 text-sm">Sorry — please try again.</div>}
+
+              <div className="mt-9 flex flex-wrap items-center gap-4">
+                <button
+                  disabled={state.status === "sending"}
+                  className="btn-primary disabled:opacity-60 disabled:hover:translate-y-0"
+                >
+                  {state.status === "sending" ? "Sending…" : (
+                    <>Send message <FiArrowUpRight /></>
+                  )}
+                </button>
+
+                {state.status === "ok" && (
+                  <span className="text-sage-700 text-sm flex items-center gap-2 font-medium">
+                    <FiCheck /> Thanks — we received your message.
+                  </span>
+                )}
+                {state.status === "err" && (
+                  <span className="text-red-700 text-sm">Sorry — please try again.</span>
+                )}
+              </div>
             </motion.form>
           </div>
-
-          <aside className="space-y-4 order-1 lg:order-2">
-            {[
-              { icon: <FiPhone />, label: "Call", value: "725-238-6990", href: "tel:725-238-6990" },
-              { icon: <FiMail />, label: "Email", value: "admin@brightertomorrowtherapy.com", href: "mailto:admin@brightertomorrowtherapy.com" },
-              { icon: <FiMapPin />, label: "E Russell", value: "3430 E Russell Rd Ste 315, Las Vegas, NV 89120" },
-              { icon: <FiMapPin />, label: "N Durango", value: "6955 N Durango Dr Unit 1004, Las Vegas, NV 89149" },
-            ].map((c, i) => (
-              <a key={i} href={c.href ?? "#"} className="flex items-start gap-3 bg-white border border-surface-line p-4 rounded-2xl hover:border-brand transition min-h-[40px]">
-                <span className="text-brand text-lg mt-0.5 flex-shrink-0">{c.icon}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs text-ink-muted uppercase tracking-wider">{c.label}</div>
-                  <div className="font-display text-ink break-words [overflow-wrap:anywhere]">{c.value}</div>
-                </div>
-              </a>
-            ))}
-          </aside>
         </div>
       </section>
     </>
@@ -89,8 +175,15 @@ export default function ContactPage() {
 function Field({ name, label, type = "text", required }: { name: string; label: string; type?: string; required?: boolean }) {
   return (
     <div>
-      <label className="text-sm font-medium text-ink">{label}{required && <span className="text-brand"> *</span>}</label>
-      <input name={name} type={type} required={required} className="mt-1 w-full px-3 py-2.5 rounded-lg border border-surface-line focus:outline-none focus:border-brand bg-surface-alt text-base" />
+      <label className="eyebrow-bare text-brand-700 text-[11px]">
+        {label}{required && <span className="text-brand"> *</span>}
+      </label>
+      <input
+        name={name}
+        type={type}
+        required={required}
+        className="mt-2 w-full bg-transparent border-0 border-b border-surface-line focus:border-brand-700 focus:outline-none focus:ring-0 px-0 py-3 text-base text-ink transition-colors placeholder-ink-soft"
+      />
     </div>
   );
 }

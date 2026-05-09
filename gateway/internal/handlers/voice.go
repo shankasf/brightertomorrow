@@ -45,6 +45,7 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	visitorID := ensureVisitor(w, r, h.CookieSecure)
 
 	// 3. IDOR check: session must exist and belong to this visitor.
+	//    If the session doesn't exist yet (voice-first flow), create it now.
 	ctx := r.Context()
 	var owner *string
 	err := h.Pool.QueryRow(ctx,
@@ -52,10 +53,18 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sessionID,
 	).Scan(&owner)
 	if errors.Is(err, pgx.ErrNoRows) {
-		httpx.WriteError(w, http.StatusNotFound, "session not found")
-		return
-	}
-	if err != nil {
+		// Voice-first: create the session for this visitor so the IDOR check passes.
+		_, insertErr := h.Pool.Exec(ctx,
+			`INSERT INTO bt.chat_sessions (id, visitor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			sessionID, visitorID,
+		)
+		if insertErr != nil {
+			slog.Error("voice: create session", "err", insertErr)
+			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		owner = &visitorID
+	} else if err != nil {
 		slog.Error("voice: lookup session", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return

@@ -48,11 +48,18 @@ async def crisis_guardrail(
                 if isinstance(content, str):
                     text += content.lower()
 
-    matched = any(kw in text for kw in CRISIS_KEYWORDS)
+    matched_keywords = sorted(kw for kw in CRISIS_KEYWORDS if kw in text)
+    matched = bool(matched_keywords)
+
     if matched:
-        logger.warning("crisis_guardrail: keyword match — routing to Crisis Support")
+        logger.warning(
+            "crisis_guardrail matched keywords=%s agent=%s — routing to Crisis Support",
+            matched_keywords, agent.name,
+        )
+    else:
+        logger.debug("crisis_guardrail clear agent=%s", agent.name)
 
     return GuardrailFunctionOutput(
-        output_info={"triggered": matched},
+        output_info={"triggered": matched, "matched_keywords": matched_keywords},
         tripwire_triggered=False,
     )

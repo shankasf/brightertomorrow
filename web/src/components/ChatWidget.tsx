@@ -6,10 +6,20 @@ import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiMic, FiMicOff } f
 
 type Msg = { role: "user" | "assistant"; content: string };
 
+// Cycling capability hints shown next to the closed chat FAB.
+const CAPABILITY_PROMPTS = [
+  "Book an appointment",
+  "Reschedule a session",
+  "Find a therapist",
+  "Check insurance",
+  "Share office hours",
+  "Answer your FAQs",
+];
+
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([
-    { role: "assistant", content: "Hi! I'm the Brighter Tomorrow assistant. Ask me about services, locations, or how to get matched with a therapist." },
+    { role: "assistant", content: "Hi — I'm the Brighter Tomorrow assistant. This chat is HIPAA-compliant and your data is secure. How can I help?" },
   ]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -17,6 +27,7 @@ export default function ChatWidget() {
   const [muted, setMuted] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "connecting" | "active" | "error">("idle");
+  const [promptIdx, setPromptIdx] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const initialMount = useRef(true);
@@ -28,6 +39,16 @@ export default function ChatWidget() {
   const playingRef = useRef(false);
 
   useEffect(() => { scroller.current?.scrollTo({ top: 9e9, behavior: "smooth" }); }, [msgs, open, loading]);
+
+  // Cycle the capability tooltip every ~2.4s while the chat is closed.
+  useEffect(() => {
+    if (open) return;
+    const t = setInterval(
+      () => setPromptIdx((i) => (i + 1) % CAPABILITY_PROMPTS.length),
+      2400,
+    );
+    return () => clearInterval(t);
+  }, [open]);
 
   // Play a soft two-note chime when a new assistant message arrives (skip first render).
   useEffect(() => {
@@ -236,15 +257,77 @@ export default function ChatWidget() {
 
   return (
     <>
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setOpen(!open)}
-        className="fixed bottom-6 right-6 z-50 bg-brand text-white rounded-full w-14 h-14 shadow-soft flex items-center justify-center"
-        aria-label="Open chat"
-      >
-        {open ? <FiX size={22} /> : <FiMessageCircle size={22} />}
-      </motion.button>
+      {/* Animated capability tooltip — sits left of the FAB while chat is closed */}
+      <AnimatePresence>
+        {!open && (
+          <motion.button
+            type="button"
+            onClick={() => setOpen(true)}
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 16 }}
+            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            className="hidden sm:flex fixed bottom-[1.85rem] right-[5.5rem] z-50 items-center gap-2 bg-white border border-surface-line rounded-full pl-4 pr-3.5 py-2.5 shadow-card hover:shadow-glow group max-w-[280px]"
+            aria-label="Open chat — see what I can help with"
+          >
+            {/* Pulse dot */}
+            <span className="relative inline-flex w-2 h-2 shrink-0">
+              <span
+                className="absolute inline-flex w-full h-full rounded-full opacity-70 animate-ping"
+                style={{ backgroundColor: "#E1B878" }}
+              />
+              <span
+                className="relative inline-flex w-2 h-2 rounded-full"
+                style={{ backgroundColor: "#E1B878" }}
+              />
+            </span>
+
+            <span className="text-[13px] text-ink-soft whitespace-nowrap">
+              Ask me to
+            </span>
+
+            {/* Cycling word — height locked to prevent layout jump */}
+            <span className="relative inline-flex items-center h-[18px] overflow-hidden">
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.span
+                  key={promptIdx}
+                  initial={{ y: 14, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: -14, opacity: 0 }}
+                  transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                  className="text-[13px] font-semibold whitespace-nowrap"
+                  style={{ color: "#66202A" }}
+                >
+                  {CAPABILITY_PROMPTS[promptIdx]}
+                </motion.span>
+              </AnimatePresence>
+            </span>
+
+            {/* Speech-tail pointing at the FAB */}
+            <span
+              aria-hidden
+              className="absolute right-[-6px] top-1/2 -translate-y-1/2 w-3 h-3 rotate-45 bg-white border-t-0 border-l-0 border border-surface-line"
+            />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {!open && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            whileHover={{ scale: 1.06 }}
+            whileTap={{ scale: 0.94 }}
+            onClick={() => setOpen(true)}
+            className="fixed bottom-6 right-6 z-50 bg-brand text-white rounded-full w-14 h-14 shadow-glow ring-1 ring-brand-700/30 flex items-center justify-center hover:bg-brand-600 transition-colors"
+            aria-label="Open chat"
+          >
+            <FiMessageCircle size={22} />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {open && (
@@ -252,7 +335,7 @@ export default function ChatWidget() {
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-24 right-6 z-50 w-[380px] max-w-[calc(100vw-2rem)] h-[560px] max-h-[calc(100vh-7rem)] bg-white rounded-2xl shadow-card border border-surface-line flex flex-col overflow-hidden"
+            className="fixed bottom-6 right-6 z-50 w-[380px] max-w-[calc(100vw-2rem)] h-[600px] max-h-[calc(100vh-3rem)] bg-white rounded-2xl shadow-card border border-surface-line flex flex-col overflow-hidden"
           >
             <div className="bg-brand text-white px-4 py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -267,6 +350,14 @@ export default function ChatWidget() {
                   title={muted ? "Sound off" : "Sound on"}
                 >
                   {muted ? <FiVolumeX size={18} /> : <FiVolume2 size={18} />}
+                </button>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="opacity-80 hover:opacity-100 transition shrink-0 p-1"
+                  aria-label="Close chat"
+                  title="Close chat"
+                >
+                  <FiX size={18} />
                 </button>
               </div>
             </div>
@@ -294,7 +385,7 @@ export default function ChatWidget() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Type a message…"
-                className="flex-1 min-w-0 px-3 py-2 rounded-full bg-surface border border-surface-line text-sm focus:outline-none focus:border-brand"
+                className="flex-1 min-w-0 px-3 py-2 rounded-full bg-surface border border-surface-line text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:border-brand"
               />
               <button
                 type="button"
@@ -327,9 +418,9 @@ function Bubble({ role, content }: { role: "user" | "assistant"; content: string
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
+        className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-[1.6] tracking-[-0.005em] break-words [overflow-wrap:anywhere] shadow-sm ${
           isUser
-            ? "bg-brand text-white rounded-br-sm"
+            ? "bg-brand text-white rounded-br-sm font-medium"
             : "bg-white text-ink rounded-bl-sm border border-surface-line"
         }`}
       >
@@ -339,47 +430,114 @@ function Bubble({ role, content }: { role: "user" | "assistant"; content: string
   );
 }
 
-/** Tiny markdown-ish renderer — handles **bold**, links, lists, paragraphs.
- *  Built so very long URLs / words don't blow out the bubble width. */
+/** Tiny markdown-ish renderer — handles **bold**, *italic*, `code`, links, bullet & numbered lists,
+ *  headings, paragraphs. Built so very long URLs / words don't blow out the bubble width. */
 function RichMarkdown({ text }: { text: string }) {
   const blocks: React.ReactNode[] = [];
   const lines = text.split("\n");
-  let listBuf: string[] = [];
+  let ulBuf: string[] = [];
+  let olBuf: string[] = [];
 
-  const flushList = () => {
-    if (!listBuf.length) return;
+  const flushUl = () => {
+    if (!ulBuf.length) return;
     blocks.push(
-      <ul key={blocks.length} className="list-disc pl-5 space-y-1 my-1">
-        {listBuf.map((li, i) => <li key={i}>{renderInline(li)}</li>)}
+      <ul key={`ul-${blocks.length}`} className="my-2 space-y-1.5 pl-1">
+        {ulBuf.map((li, i) => (
+          <li key={i} className="flex gap-2.5">
+            <span aria-hidden className="mt-[0.55em] inline-block w-1.5 h-1.5 rounded-full bg-brand-300 shrink-0" />
+            <span className="flex-1">{renderInline(li)}</span>
+          </li>
+        ))}
       </ul>,
     );
-    listBuf = [];
+    ulBuf = [];
   };
+
+  const flushOl = () => {
+    if (!olBuf.length) return;
+    blocks.push(
+      <ol key={`ol-${blocks.length}`} className="my-2 space-y-1.5">
+        {olBuf.map((li, i) => (
+          <li key={i} className="flex gap-2.5">
+            <span aria-hidden className="font-display font-semibold text-brand-700 tabular shrink-0 min-w-[1.25rem]">
+              {i + 1}.
+            </span>
+            <span className="flex-1">{renderInline(li)}</span>
+          </li>
+        ))}
+      </ol>,
+    );
+    olBuf = [];
+  };
+
+  const flushAll = () => { flushUl(); flushOl(); };
 
   for (const raw of lines) {
     const line = raw.trim();
-    const m = line.match(/^[-*]\s+(.*)$/);
-    if (m) { listBuf.push(m[1]); continue; }
-    flushList();
-    if (!line) { blocks.push(<div key={blocks.length} className="h-2" />); continue; }
-    blocks.push(<p key={blocks.length} className="my-1">{renderInline(line)}</p>);
+    const ul = line.match(/^[-*]\s+(.*)$/);
+    const ol = line.match(/^(\d+)[.)]\s+(.*)$/);
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+
+    if (ul) { flushOl(); ulBuf.push(ul[1]); continue; }
+    if (ol) { flushUl(); olBuf.push(ol[2]); continue; }
+    flushAll();
+    if (!line) { blocks.push(<div key={blocks.length} className="h-1.5" />); continue; }
+    if (h) {
+      const level = h[1].length;
+      const cls =
+        level === 1 ? "font-display text-[1.05rem] font-semibold text-ink mt-1.5 mb-1"
+        : level === 2 ? "font-display text-[1rem] font-semibold text-ink mt-1.5 mb-1"
+        : "font-display text-[0.95rem] font-semibold text-ink-soft uppercase tracking-[0.08em] mt-1.5 mb-0.5";
+      blocks.push(<div key={blocks.length} className={cls}>{renderInline(h[2])}</div>);
+      continue;
+    }
+    blocks.push(<p key={blocks.length} className="my-1.5 first:mt-0 last:mb-0">{renderInline(line)}</p>);
   }
-  flushList();
+  flushAll();
   return <>{blocks}</>;
 }
 
 function renderInline(s: string): React.ReactNode {
-  // Split on bold then on URLs.
-  const out: React.ReactNode[] = [];
+  // Order: code → bold → italic → links. Each pass tokenizes around the prior.
+  const codeRe = /`([^`]+)`/g;
   const boldRe = /\*\*([^*]+)\*\*/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = boldRe.exec(s))) {
-    if (m.index > last) out.push(...linkify(s.slice(last, m.index), `b-${last}`));
-    out.push(<strong key={`s-${m.index}`}>{m[1]}</strong>);
-    last = m.index + m[0].length;
-  }
-  if (last < s.length) out.push(...linkify(s.slice(last), `t-${last}`));
+  const italicRe = /(?<![*\w])\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g;
+
+  type Tok = { kind: "text" | "code" | "bold" | "italic"; value: string };
+  let toks: Tok[] = [{ kind: "text", value: s }];
+
+  const splitWith = (re: RegExp, kind: Tok["kind"]) => {
+    const next: Tok[] = [];
+    for (const t of toks) {
+      if (t.kind !== "text") { next.push(t); continue; }
+      let last = 0;
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(t.value))) {
+        if (m.index > last) next.push({ kind: "text", value: t.value.slice(last, m.index) });
+        next.push({ kind, value: m[1] });
+        last = m.index + m[0].length;
+      }
+      if (last < t.value.length) next.push({ kind: "text", value: t.value.slice(last) });
+    }
+    toks = next;
+  };
+
+  splitWith(codeRe, "code");
+  splitWith(boldRe, "bold");
+  splitWith(italicRe, "italic");
+
+  const out: React.ReactNode[] = [];
+  toks.forEach((t, i) => {
+    if (t.kind === "text") out.push(...linkify(t.value, `t-${i}`));
+    else if (t.kind === "bold") out.push(<strong key={`b-${i}`} className="font-semibold text-ink">{t.value}</strong>);
+    else if (t.kind === "italic") out.push(<em key={`i-${i}`} className="italic text-ink-soft">{t.value}</em>);
+    else if (t.kind === "code") out.push(
+      <code key={`c-${i}`} className="px-1.5 py-0.5 rounded-md bg-surface-line/60 text-[0.9em] font-mono text-ink">
+        {t.value}
+      </code>,
+    );
+  });
   return out;
 }
 
@@ -393,7 +551,7 @@ function linkify(s: string, key: string): React.ReactNode[] {
     if (m.index > last) parts.push(<span key={`${key}-t-${i++}`}>{s.slice(last, m.index)}</span>);
     parts.push(
       <a key={`${key}-a-${i++}`} href={m[1]} target="_blank" rel="noopener noreferrer"
-         className="text-brand underline underline-offset-2 break-all">
+         className="text-brand-700 font-medium underline decoration-brand-300 underline-offset-[3px] decoration-2 hover:decoration-brand transition break-all">
         {m[1]}
       </a>,
     );

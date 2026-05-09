@@ -1,50 +1,87 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
-import { FiArrowRight, FiAward, FiHeart } from "react-icons/fi";
+import { FiArrowRight } from "react-icons/fi";
 
 export default function AboutIntro() {
   return (
     <section className="section">
-      <div className="container-x grid lg:grid-cols-12 gap-10 items-start">
+      <div className="container-x grid lg:grid-cols-12 gap-12 lg:gap-16 items-start">
+        {/* LEFT — narrative */}
         <Reveal className="lg:col-span-7">
-          <span className="text-xs uppercase tracking-[0.2em] text-brand font-semibold">About Brighter Tomorrow Therapy</span>
-          <h2 className="mt-2 text-3xl md:text-4xl font-bold text-ink">You Are Ready. The Right Therapist Is Here.</h2>
-          <p className="mt-5 text-ink-muted leading-relaxed">
+          <span className="eyebrow text-brand-700">About Brighter Tomorrow Therapy</span>
+
+          <h2 className="mt-5 display text-4xl md:text-5xl lg:text-[3.75rem] text-ink leading-[1.04]">
+            You Are Ready.
+            <br />
+            <span className="italic-accent">The Right Therapist Is Here.</span>
+          </h2>
+
+          <p className="mt-7 text-ink-muted text-lg leading-relaxed max-w-xl">
             Brighter Tomorrow Therapy Collective is built on a simple belief: the right therapist
             changes everything. Our clinicians are trained specialists who have each chosen the
             populations and challenges they are best equipped to serve — trauma, grief, anxiety,
             relationships, and more.
           </p>
-          <p className="mt-4 text-ink-muted leading-relaxed">
+
+          <p className="mt-5 text-ink-muted text-lg leading-relaxed max-w-xl">
             We are rooted in Las Vegas and North Las Vegas, and we serve clients across all of
             Nevada through telehealth.
           </p>
-          <Link href="/about" className="btn-ghost mt-6 inline-flex">
-            Learn more about us <FiArrowRight />
+
+          <Link
+            href="/about"
+            className="mt-8 inline-flex items-center gap-2 text-brand-700 hover:text-brand font-semibold border-b border-brand-300 hover:border-brand pb-1 transition-colors"
+          >
+            Read more about us <FiArrowRight />
           </Link>
         </Reveal>
 
+        {/* RIGHT — editorial stat panel */}
         <Reveal delay={0.1} className="lg:col-span-5">
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div className="bg-white rounded-2xl border border-surface-line p-6 shadow-soft">
-              <div className="w-11 h-11 rounded-full bg-brand-50 text-brand grid place-items-center mb-4">
-                <FiAward size={20} />
+          <div className="relative">
+            {/* Decorative wavy ornament */}
+            <svg
+              aria-hidden
+              viewBox="0 0 120 12"
+              className="w-24 h-3 mb-6 text-brand"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <path d="M2 6 Q 18 0, 34 6 T 66 6 T 98 6 T 118 6" />
+            </svg>
+
+            <div className="bg-cream rounded-4xl border border-surface-line shadow-soft overflow-hidden">
+              <div className="px-8 py-9 sm:px-10 sm:py-11">
+                <div className="text-[5rem] sm:text-[6rem] leading-none font-display text-brand-700 tabular">
+                  7
+                </div>
+                <div className="mt-3 font-display text-xl text-ink">Focus areas</div>
+                <p className="mt-3 text-sm text-ink-muted leading-relaxed">
+                  Licensed Specialists Across 7 Focus Areas — clinicians matched to your needs,
+                  not generalists.
+                </p>
               </div>
-              <h4 className="font-display font-semibold text-ink">Licensed Specialists Across 7 Focus Areas</h4>
-              <p className="text-sm text-ink-muted mt-2">
-                Clinicians matched to your needs — not generalists.
-              </p>
-            </div>
-            <div className="bg-white rounded-2xl border border-surface-line p-6 shadow-soft">
-              <div className="w-11 h-11 rounded-full bg-brand-50 text-brand grid place-items-center mb-4">
-                <FiHeart size={20} />
+
+              <div className="border-t border-surface-line/80" />
+
+              <div className="px-8 py-9 sm:px-10 sm:py-11">
+                <div className="text-[5rem] sm:text-[6rem] leading-none font-display text-brand-700 tabular">
+                  100<span className="text-brand-400">%</span>
+                </div>
+                <div className="mt-3 font-display text-xl text-ink">Holistic care</div>
+                <p className="mt-3 text-sm text-ink-muted leading-relaxed">
+                  Personalized care that addresses your specific needs, so you feel understood,
+                  supported, and empowered.
+                </p>
               </div>
-              <h4 className="font-display font-semibold text-ink">Holistic Approach</h4>
-              <p className="text-sm text-ink-muted mt-2">
-                Personalized care that addresses your specific needs, so you feel understood,
-                supported, and empowered.
-              </p>
             </div>
+
+            {/* Tiny script caption under the panel */}
+            <p className="script mt-5 text-ink-soft text-sm">
+              A collective rooted in care.
+            </p>
           </div>
         </Reveal>
       </div>

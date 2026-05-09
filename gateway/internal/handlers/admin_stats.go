@@ -41,7 +41,16 @@ func (h *AdminStatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		{`SELECT count(*) FROM bt.contact_submissions`, &totalContacts},
 		{`SELECT count(*) FROM bt.contact_submissions WHERE created_at >= current_date`, &contactsToday},
 		{`SELECT count(*) FROM bt.chat_sessions`, &totalChats},
-		{`SELECT count(*) FROM bt.chat_sessions WHERE ended_at IS NULL AND purged_at IS NULL`, &activeChats},
+		// "Active" = open session with activity in the last 20 min (Zendesk Chat web standard).
+		// A separate CronJob (k8s/71-chat-idle-cronjob.yaml) writes ended_at on the same threshold.
+		{`SELECT count(*)
+		  FROM bt.chat_sessions s
+		  WHERE s.ended_at IS NULL
+		    AND s.purged_at IS NULL
+		    AND COALESCE(
+		      (SELECT MAX(m.created_at) FROM bt.chat_messages m WHERE m.session_id = s.id),
+		      s.started_at
+		    ) > now() - INTERVAL '20 minutes'`, &activeChats},
 		{`SELECT count(*) FROM bt.chat_sessions WHERE started_at >= current_date`, &chatsToday},
 		{`SELECT count(*) FROM bt.chat_messages`, &totalMessages},
 		{`SELECT count(*) FROM bt.newsletter_subscribers`, &totalNewsletterSubs},

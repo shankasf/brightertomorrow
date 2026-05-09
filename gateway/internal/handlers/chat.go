@@ -143,14 +143,19 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Persist the user message.
-	if _, err := h.Pool.Exec(ctx,
-		`INSERT INTO bt.chat_messages (session_id, role, content) VALUES ($1, 'user', $2)`,
-		sessionID, body.Message,
-	); err != nil {
-		slog.Error("chat: insert user message", "err", err)
-		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
-		return
+	// Persist the user message — except for the greeting trigger, which is a
+	// synthetic signal from the chat widget asking the AI to produce an opener.
+	// The AI-generated greeting is still persisted below.
+	const greetMarker = "__BT_GREET__"
+	if body.Message != greetMarker {
+		if _, err := h.Pool.Exec(ctx,
+			`INSERT INTO bt.chat_messages (session_id, role, content) VALUES ($1, 'user', $2)`,
+			sessionID, body.Message,
+		); err != nil {
+			slog.Error("chat: insert user message", "err", err)
+			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
 	}
 
 	// Call the AI service; fall back gracefully on any error.

@@ -1,0 +1,14 @@
+# Development image for Tilt hot-reload
+FROM node:20-alpine
+WORKDIR /app
+
+# Install deps first for cache
+COPY package.json package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+
+# Copy sources (Tilt's live_update will sync subsequent edits over this)
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+EXPOSE 3000
+CMD ["npx", "next", "dev", "-p", "3000", "-H", "0.0.0.0", "--turbopack"]

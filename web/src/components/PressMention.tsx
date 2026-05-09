@@ -1,41 +1,42 @@
 import Reveal from "./Reveal";
-import { FiExternalLink } from "react-icons/fi";
 import type { PressMention } from "@/lib/queries";
 
 export default function PressMentionSection({ mentions }: { mentions: PressMention[] }) {
   if (!mentions.length) return null;
   return (
-    <section className="section bg-surface-alt">
+    <section className="bg-cream-alt border-y border-surface-line py-10 md:py-12">
       <div className="container-x">
         <Reveal>
-          <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="text-xs uppercase tracking-[0.2em] text-brand font-semibold">Press Mention</span>
-            <h2 className="mt-2 text-3xl md:text-4xl font-bold text-ink">Featured in the Press</h2>
-            <p className="mt-3 text-ink-muted">See what the media is saying about us.</p>
+          <div className="text-center mb-8">
+            <span className="eyebrow center">As featured in</span>
           </div>
+          <ul className="flex flex-wrap items-center justify-center gap-x-10 gap-y-6 md:gap-x-14 lg:gap-x-16">
+            {mentions.map((m) => (
+              <li key={m.id}>
+                <a
+                  href={m.url}
+                  target="_blank"
+                  rel="noopener"
+                  aria-label={`${m.outlet}${m.title ? ` — ${m.title}` : ""}`}
+                  className="group inline-flex items-center"
+                >
+                  {m.logo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.logo_url}
+                      alt={m.outlet}
+                      className="h-10 md:h-11 w-auto object-contain grayscale opacity-60 transition-all duration-300 group-hover:grayscale-0 group-hover:opacity-100"
+                    />
+                  ) : (
+                    <span className="font-display text-lg md:text-xl text-ink-soft tracking-wide transition-colors duration-300 group-hover:text-brand-700">
+                      {m.outlet}
+                    </span>
+                  )}
+                </a>
+              </li>
+            ))}
+          </ul>
         </Reveal>
-        <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-          {mentions.map((m, i) => (
-            <Reveal key={m.id} delay={i * 0.05}>
-              <a href={m.url} target="_blank" rel="noopener"
-                 className="group flex flex-col h-full bg-white rounded-2xl border border-surface-line p-6 hover:shadow-card hover:-translate-y-1 transition-all duration-300">
-                {m.logo_url && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={m.logo_url} alt={m.outlet} className="h-10 w-auto object-contain mb-4" />
-                )}
-                <div className="text-xs uppercase tracking-wider text-ink-muted">{m.outlet}</div>
-                {m.title && (
-                  <h3 className="font-display text-lg font-semibold text-ink mt-2 group-hover:text-brand transition">
-                    {m.title}
-                  </h3>
-                )}
-                <span className="mt-4 inline-flex items-center gap-1 text-sm text-brand font-semibold">
-                  Read article <FiExternalLink />
-                </span>
-              </a>
-            </Reveal>
-          ))}
-        </div>
       </div>
     </section>
   );

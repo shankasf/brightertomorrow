@@ -55,6 +55,7 @@ func main() {
 	adminNewsletterH := &handlers.AdminNewsletterHandler{Pool: pool}
 	adminAuditH := &handlers.AdminAuditHandler{Pool: pool}
 	adminContentH := &handlers.AdminContentHandler{Pool: pool, AIClient: ai}
+	intakeH := &handlers.IntakeHandler{Pool: pool, CoverageChecker: ai}
 
 	r := chi.NewRouter()
 
@@ -73,13 +74,15 @@ func main() {
 	r.Route("/v1", func(r chi.Router) {
 		r.Get("/faqs", (&handlers.FAQsHandler{Pool: pool}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/contact", (&handlers.ContactHandler{Pool: pool}).ServeHTTP)
+		r.With(httprate.LimitByIP(10, time.Minute)).Post("/intake", intakeH.ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/newsletter", (&handlers.NewsletterHandler{Pool: pool}).ServeHTTP)
 		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat", (&handlers.ChatHandler{Pool: pool, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Get("/voice", (&handlers.VoiceHandler{Pool: pool, AIServiceURL: cfg.AIServiceURL, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 	})
 
-	// Admin API — /admin/* routes to gateway (see k8s/40-ingress.yaml).
-	r.Route("/admin", func(r chi.Router) {
+	// Admin API — /admin/api/* routes to gateway (see k8s/40-ingress.yaml).
+	// Page paths under /admin/* (without /api) are served by Next.js.
+	r.Route("/admin/api", func(r chi.Router) {
 		// Login: rate-limited to prevent brute-force §164.312(d).
 		r.With(httprate.LimitByIP(5, time.Minute)).Post("/auth/login", adminAuthH.Login)
 

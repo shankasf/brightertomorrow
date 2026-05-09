@@ -20,10 +20,20 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: DATABASE_URL } }
             - name: OPENAI_API_KEY
               valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_API_KEY } }
+            - name: OPENAI_BASE_URL
+              valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_BASE_URL, optional: true } }
             - name: OPENAI_MODEL
               valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_MODEL, optional: true } }
             - name: REALTIME_MODEL
               valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_MODEL, optional: true } }
+            - name: BT_API_URL
+              value: "https://api.brightertomorrowtherapy.cloud"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: bt-config, key: AWS_ACCESS_KEY_ID } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: bt-config, key: AWS_SECRET_ACCESS_KEY } }
+            - name: AWS_REGION
+              valueFrom: { secretKeyRef: { name: bt-config, key: AWS_REGION, optional: true } }
           readinessProbe:
             httpGet: { path: /health, port: 8001 }
             periodSeconds: 5

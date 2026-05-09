@@ -1,53 +1,43 @@
-"use client";
+import { getFaqs } from "@/lib/queries";
+import FaqAccordion from "@/components/FaqAccordion";
 
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { FiPlus, FiMinus } from "react-icons/fi";
+export const metadata = { title: "FAQs — Brighter Tomorrow Therapy" };
 
-type Faq = { id: number; question: string; answer: string; category: string | null };
+export default async function FaqsPage() {
+  const faqs = await getFaqs();
 
-export default function FaqsPage() {
-  const [faqs, setFaqs] = useState<Faq[]>([]);
-  const [openId, setOpenId] = useState<number | null>(null);
-
-  useEffect(() => { fetch("/v1/faqs").then((r) => r.json()).then(setFaqs); }, []);
+  const groups = new Map<string, typeof faqs>();
+  for (const f of faqs) {
+    const key = f.category?.trim() || "General";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(f);
+  }
+  const grouped = Array.from(groups.entries());
 
   return (
     <>
-      <section className="bg-hero-gradient">
-        <div className="container-x py-10 sm:py-14 lg:py-16 text-center">
-          <span className="text-xs uppercase tracking-[0.2em] text-brand font-semibold">FAQs</span>
-          <h1 className="mt-2 text-3xl sm:text-4xl md:text-5xl font-bold text-ink">Frequently asked questions.</h1>
+      <section className="bg-cream-alt relative overflow-hidden">
+        <div aria-hidden className="absolute inset-0 bg-grid opacity-[0.06]" />
+        <div className="container-narrow relative py-20 sm:py-28 lg:py-32 text-center">
+          <span className="eyebrow center">FAQs</span>
+          <h1 className="mt-6 display text-5xl sm:text-6xl lg:text-7xl text-ink">
+            Frequently asked
+            <br className="hidden sm:inline" />
+            {" "}<span className="italic-accent">questions.</span>
+          </h1>
+          <svg aria-hidden viewBox="0 0 200 8" className="mx-auto mt-7 w-36 h-2 text-brand">
+            <path d="M2 5 Q 50 0 100 4 T 198 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
         </div>
       </section>
-      <section className="section !py-10 sm:!py-14 lg:!py-20">
-        <div className="container-x max-w-3xl space-y-3">
-          {faqs.map((f) => {
-            const open = openId === f.id;
-            return (
-              <div key={f.id} className="bg-white border border-surface-line rounded-2xl overflow-hidden">
-                <button
-                  onClick={() => setOpenId(open ? null : f.id)}
-                  className="w-full flex items-center justify-between text-left px-4 sm:px-5 py-3.5 sm:py-4 min-h-[44px] gap-3 hover:bg-surface-alt transition"
-                >
-                  <span className="font-display font-semibold text-ink break-words">{f.question}</span>
-                  {open ? <FiMinus className="text-brand flex-shrink-0" /> : <FiPlus className="text-brand flex-shrink-0" />}
-                </button>
-                <AnimatePresence initial={false}>
-                  {open && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden"
-                    >
-                      <div className="px-4 sm:px-5 pb-4 sm:pb-5 text-ink-muted leading-relaxed break-words">{f.answer}</div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            );
-          })}
+
+      <section className="section bg-white">
+        <div className="container-narrow">
+          {grouped.length === 0 ? (
+            <p className="text-center text-ink-muted py-12">No FAQs yet.</p>
+          ) : (
+            <FaqAccordion grouped={grouped} showCategoryLabels={grouped.length > 1} />
+          )}
         </div>
       </section>
     </>

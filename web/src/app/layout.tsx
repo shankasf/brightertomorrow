@@ -8,8 +8,17 @@ import ChatWidget from "@/components/ChatWidget";
 import AccessibilityWidget from "@/components/AccessibilityWidget";
 import { getNav, getSiteSettings } from "@/lib/queries";
 
+// Fonts mirrored from brightertomorrowtherapy.com:
+//   Karla       — headings, eyebrows, buttons
+//   Mukta Vaani — body
+//   Radley      — italic accent
 const karla = Karla({ subsets: ["latin"], variable: "--font-karla", display: "swap" });
-const mukta = Mukta_Vaani({ subsets: ["latin"], weight: ["400","500","600","700","800"], variable: "--font-mukta", display: "swap" });
+const mukta = Mukta_Vaani({
+  subsets: ["latin"],
+  weight: ["200","300","400","500","600","700","800"],
+  variable: "--font-mukta",
+  display: "swap",
+});
 const radley = Radley({ subsets: ["latin"], weight: ["400"], variable: "--font-radley", display: "swap" });
 
 export const revalidate = 300;

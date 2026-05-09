@@ -35,6 +35,22 @@ type chatResponse struct {
 	Reply string `json:"reply"`
 }
 
+type CoverageCheckRequest struct {
+	PatientID string `json:"patient_id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	DOB       string `json:"dob"`
+	PayerName string `json:"payer_name"`
+	MemberID  string `json:"member_id"`
+}
+
+type CoverageCheckResponse struct {
+	OK       bool           `json:"ok"`
+	Payer    string         `json:"payer"`
+	Eligible bool           `json:"eligible"`
+	Coverage map[string]any `json:"coverage"`
+}
+
 // TriggerFAQEmbed asks the AI service to re-embed all published FAQs.
 // It is fire-and-forget: the gateway calls it in a goroutine after FAQ writes
 // so embeddings stay fresh without blocking the admin response.
@@ -90,4 +106,36 @@ func (c *Client) Chat(ctx context.Context, sessionID, message string) (string, e
 	}
 
 	return out.Reply, nil
+}
+
+// CheckCoverage verifies insurance details through the AI service's internal coverage endpoint.
+func (c *Client) CheckCoverage(ctx context.Context, in CoverageCheckRequest) (CoverageCheckResponse, error) {
+	reqBody, err := json.Marshal(in)
+	if err != nil {
+		return CoverageCheckResponse{}, fmt.Errorf("aiclient: marshal coverage request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/intake/check-coverage", bytes.NewReader(reqBody))
+	if err != nil {
+		return CoverageCheckResponse{}, fmt.Errorf("aiclient: build coverage request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return CoverageCheckResponse{}, fmt.Errorf("aiclient: do coverage request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return CoverageCheckResponse{}, fmt.Errorf("aiclient: coverage status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var out CoverageCheckResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return CoverageCheckResponse{}, fmt.Errorf("aiclient: decode coverage response: %w", err)
+	}
+
+	return out, nil
 }

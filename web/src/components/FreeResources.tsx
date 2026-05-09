@@ -1,41 +1,62 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
-import { FiArrowRight, FiBookOpen } from "react-icons/fi";
+import { FiArrowRight, FiFileText, FiDownload } from "react-icons/fi";
 import type { FreeResource } from "@/lib/queries";
 
 export default function FreeResources({ resources }: { resources: FreeResource[] }) {
   if (!resources.length) return null;
+  const cols = resources.length >= 3 ? "lg:grid-cols-3" : "md:grid-cols-2";
+
   return (
-    <section className="section bg-surface-alt">
+    <section className="section bg-white">
       <div className="container-x">
         <Reveal>
-          <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="text-xs uppercase tracking-[0.2em] text-brand font-semibold">Free Resources</span>
-            <h2 className="mt-2 text-3xl md:text-4xl font-bold text-ink">Tools to support your wellbeing.</h2>
+          <div className="text-center max-w-2xl mx-auto mb-14">
+            <span className="eyebrow center">Free Resources</span>
+            <h2 className="display mt-5 text-4xl md:text-5xl text-ink leading-[1.05]">
+              Tools to support{" "}
+              <span className="italic-accent">your wellbeing.</span>
+            </h2>
           </div>
         </Reveal>
-        <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+        <div className={`grid sm:grid-cols-2 ${cols} gap-6 lg:gap-8 max-w-5xl mx-auto`}>
           {resources.map((r, i) => (
             <Reveal key={r.id} delay={i * 0.05}>
-              <div className="h-full bg-white rounded-2xl border border-surface-line overflow-hidden shadow-soft hover:shadow-card transition grid sm:grid-cols-[140px_1fr]">
+              <article className="group relative h-full bg-cream rounded-3xl border border-surface-line p-8 transition-all duration-300 hover:-translate-y-1 hover:shadow-soft hover:border-brand/40 flex flex-col">
                 {r.image_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={r.image_url} alt={r.title} className="w-full h-48 sm:h-full object-cover" />
+                  <img
+                    src={r.image_url}
+                    alt={r.title}
+                    className="w-full h-40 object-cover rounded-2xl mb-6"
+                  />
                 ) : (
-                  <div className="bg-brand-50 grid place-items-center min-h-[160px] sm:min-h-0">
-                    <FiBookOpen size={40} className="text-brand" />
+                  <div className="w-12 h-12 rounded-full bg-brand-50 text-brand-700 grid place-items-center mb-6" aria-hidden>
+                    <FiFileText size={20} />
                   </div>
                 )}
-                <div className="p-6 flex flex-col">
-                  <h3 className="font-display text-lg font-semibold text-ink">{r.title}</h3>
-                  {r.description && <p className="text-sm text-ink-muted mt-2 flex-1">{r.description}</p>}
-                  {r.cta_url && (
-                    <Link href={r.cta_url} className="mt-4 inline-flex items-center gap-1 text-sm text-brand font-semibold">
-                      {r.cta_label ?? "Learn more"} <FiArrowRight />
-                    </Link>
-                  )}
-                </div>
-              </div>
+
+                <h3 className="font-display text-xl md:text-2xl font-medium text-ink leading-snug">
+                  {r.title}
+                </h3>
+
+                {r.description && (
+                  <p className="text-sm text-ink-muted mt-3 leading-relaxed flex-1">
+                    {r.description}
+                  </p>
+                )}
+
+                {r.cta_url && (
+                  <Link
+                    href={r.cta_url}
+                    className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-brand-700 hover:text-brand transition self-start border-b border-brand/30 hover:border-brand pb-0.5"
+                  >
+                    <FiDownload size={14} />
+                    {r.cta_label ?? "Download free"}
+                    <FiArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
+                  </Link>
+                )}
+              </article>
             </Reveal>
           ))}
         </div>

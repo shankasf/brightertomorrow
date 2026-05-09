@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiPlus, FiMinus } from "react-icons/fi";
+import { FiChevronDown } from "react-icons/fi";
 import type { Faq } from "@/lib/queries";
 
 export default function HomeFaqs({ faqs }: { faqs: Faq[] }) {
@@ -10,31 +10,41 @@ export default function HomeFaqs({ faqs }: { faqs: Faq[] }) {
   if (!faqs.length) return null;
 
   return (
-    <section className="section !py-12 sm:!py-16 lg:!py-20 bg-surface-alt">
-      <div className="container-x grid lg:grid-cols-12 gap-10 items-start">
-        <div className="lg:col-span-5">
-          <span className="text-xs uppercase tracking-[0.2em] text-brand font-semibold">FAQs</span>
-          <h2 className="mt-2 text-3xl sm:text-4xl font-bold text-ink leading-tight">
-            Quick answers to the things people ask most.
+    <section className="section bg-white">
+      <div className="container-narrow">
+        <div className="text-center mb-14">
+          <span className="eyebrow center">FAQs</span>
+          <h2 className="display mt-5 text-4xl md:text-5xl text-ink leading-[1.05]">
+            Quick answers to the things{" "}
+            <span className="italic-accent">people ask most.</span>
           </h2>
-          <p className="mt-3 text-ink-muted">
+          <p className="mt-4 text-ink-muted text-base md:text-lg leading-relaxed max-w-xl mx-auto">
             Don't see what you're looking for? Reach out — we're happy to help.
           </p>
         </div>
 
-        <div className="lg:col-span-7 space-y-3">
+        <div className="border-t border-surface-line">
           {faqs.slice(0, 6).map((f) => {
             const open = openId === f.id;
             return (
-              <div key={f.id} className="bg-white border border-surface-line rounded-2xl overflow-hidden">
+              <div key={f.id} className="border-b border-surface-line">
                 <button
                   onClick={() => setOpenId(open ? null : f.id)}
-                  className="w-full flex items-center justify-between text-left px-4 sm:px-5 py-3.5 sm:py-4 min-h-[48px] gap-3 hover:bg-surface transition"
+                  className="w-full flex items-center justify-between text-left py-5 sm:py-6 gap-6 group"
                   aria-expanded={open}
                 >
-                  <span className="font-display font-semibold text-ink break-words">{f.question}</span>
-                  <span className="w-8 h-8 grid place-items-center rounded-full bg-brand-50 text-brand flex-shrink-0">
-                    {open ? <FiMinus /> : <FiPlus />}
+                  <span className={`font-display text-lg md:text-xl leading-snug transition-colors ${open ? "text-brand-700" : "text-ink group-hover:text-brand-700"}`}>
+                    {f.question}
+                  </span>
+                  <span
+                    className={`w-9 h-9 grid place-items-center rounded-full border flex-shrink-0 transition-all duration-300 ${
+                      open
+                        ? "bg-brand text-white border-brand rotate-180"
+                        : "bg-transparent text-ink-muted border-surface-line group-hover:border-brand group-hover:text-brand"
+                    }`}
+                    aria-hidden
+                  >
+                    <FiChevronDown size={16} />
                   </span>
                 </button>
                 <AnimatePresence initial={false}>
@@ -43,9 +53,12 @@ export default function HomeFaqs({ faqs }: { faqs: Faq[] }) {
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: "auto", opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                       className="overflow-hidden"
                     >
-                      <div className="px-4 sm:px-5 pb-5 text-ink-muted leading-relaxed break-words">{f.answer}</div>
+                      <div className="pb-6 pr-12 text-ink-muted leading-relaxed text-base">
+                        {f.answer}
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>

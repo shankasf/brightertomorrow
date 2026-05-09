@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
-import { FiArrowRight } from "react-icons/fi";
+import { FiArrowRight, FiArrowUpRight } from "react-icons/fi";
 
 const CARDS: { title: string; blurb: string; href: string }[] = [
   { title: "Individual Therapy",
@@ -31,37 +31,73 @@ const CARDS: { title: string; blurb: string; href: string }[] = [
 
 export default function HowWeHelp() {
   return (
-    <section className="section bg-surface-alt">
-      <div className="container-x">
+    <section className="section bg-cream-gradient relative overflow-hidden">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-0 opacity-60"
+        style={{
+          backgroundImage:
+            "radial-gradient(900px 480px at 8% 0%, rgba(225,184,120,0.10), transparent 60%), radial-gradient(800px 480px at 92% 100%, rgba(117,172,192,0.10), transparent 60%)",
+        }}
+      />
+      <div className="container-x relative">
         <Reveal>
-          <div className="text-center max-w-2xl mx-auto mb-12">
-            <span className="text-xs uppercase tracking-[0.2em] text-brand font-semibold">How We Help</span>
-            <h2 className="mt-2 text-3xl md:text-4xl font-bold text-ink">
-              How Our Therapists in Las Vegas and North Las Vegas, NV, Can Help
+          <div className="text-center max-w-2xl mx-auto mb-14">
+            <span className="eyebrow center justify-center text-brand-700">How We Help</span>
+            <h2 className="mt-5 display text-3xl md:text-5xl lg:text-[3.5rem] text-ink leading-[1.05]">
+              How Our Therapists in <span className="italic-accent">Las Vegas</span> and North Las Vegas, NV, Can Help
             </h2>
           </div>
         </Reveal>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6">
           {CARDS.map((c, i) => (
             <Reveal key={c.title} delay={i * 0.04}>
-              <Link href={c.href}
-                    className="group flex flex-col h-full bg-white rounded-2xl border border-surface-line p-6 hover:border-brand hover:shadow-soft hover:-translate-y-1 transition-all duration-300">
-                <h4 className="font-display text-lg font-semibold text-ink group-hover:text-brand transition">
+              <Link
+                href={c.href}
+                className="group flex flex-col h-full bg-cream rounded-3xl border border-surface-line p-7 hover:border-brand hover:shadow-card hover:-translate-y-1 transition-all duration-300"
+              >
+                <div className="flex items-center justify-between text-brand-300 mb-5">
+                  <span className="eyebrow-bare text-[0.7rem] tabular text-brand-400">
+                    {String(i + 1).padStart(2, "0")} — {String(CARDS.length).padStart(2, "0")}
+                  </span>
+                  <FiArrowUpRight
+                    className="w-4 h-4 text-brand-300 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300"
+                  />
+                </div>
+
+                <h4 className="font-display text-xl text-ink leading-tight group-hover:text-brand-700 transition-colors">
                   {c.title}
                 </h4>
-                <p className="text-sm text-ink-muted mt-3 flex-1">{c.blurb}</p>
-                <span className="text-sm text-brand mt-4 inline-flex items-center gap-1 font-semibold">
-                  Learn more <FiArrowRight className="group-hover:translate-x-1 transition-transform" />
+
+                <p className="text-sm text-ink-muted mt-3 leading-relaxed flex-1">
+                  {c.blurb}
+                </p>
+
+                <span className="text-sm text-brand-700 mt-6 inline-flex items-center gap-1.5 font-semibold">
+                  Learn more
+                  <FiArrowRight className="group-hover:translate-x-1 transition-transform" />
                 </span>
               </Link>
             </Reveal>
           ))}
         </div>
 
+        {/* Bottom CTA — prominent cream-alt cell */}
         <Reveal delay={0.2}>
-          <div className="mt-12 text-center">
-            <p className="text-ink-muted mb-4">Not Sure Where to Start?</p>
-            <Link href="/contact" className="btn-primary">Find My Therapist <FiArrowRight /></Link>
+          <div className="mt-16 rounded-4xl bg-cream-alt border border-surface-line px-8 py-10 sm:px-12 sm:py-12 text-center sm:text-left sm:flex sm:items-center sm:justify-between gap-8 shadow-soft">
+            <div>
+              <span className="script text-brand-700 text-lg">A gentle next step</span>
+              <h3 className="font-display text-2xl sm:text-3xl text-ink mt-1">
+                Not Sure Where to Start?
+              </h3>
+              <p className="text-ink-muted mt-2 max-w-lg mx-auto sm:mx-0">
+                Tell us a little about what you&rsquo;re looking for and we&rsquo;ll match you with the right therapist.
+              </p>
+            </div>
+            <Link href="/contact" className="btn-primary mt-6 sm:mt-0 shrink-0">
+              Find My Therapist <FiArrowRight />
+            </Link>
           </div>
         </Reveal>
       </div>

@@ -22,7 +22,18 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - http:
+    - host: brightertomorrowtherapy.cloud
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-web
+                port:
+                  number: 80
+    - host: www.brightertomorrowtherapy.cloud
+      http:
         paths:
           - path: /
             pathType: Prefix
@@ -32,11 +43,11 @@ spec:
                 port:
                   number: 80
 ---
-# HTTPS ingress: /v1/* and specific /admin/api/* → bt-gateway, everything else → bt-web
+# HTTPS ingress: /v1/* and /admin/api/* → bt-gateway, everything else → bt-web
 #
-# Admin HTML pages (/admin/login, /admin/, etc.) are served by Next.js (bt-web via / catch-all).
-# Admin API calls use specific sub-path prefixes routed to bt-gateway.
-# Traefik picks the longest matching prefix, so /admin/auth beats / for API calls.
+# Admin HTML pages (/admin, /admin/login, /admin/contacts, etc.) are served by Next.js
+# under the / catch-all. All admin API calls live under /admin/api/* — that single
+# longer prefix wins under Traefik's longest-match rule.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -45,12 +56,17 @@ metadata:
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: traefik
   tls:
     - secretName: bt-tls
+      hosts:
+        - brightertomorrowtherapy.cloud
+        - www.brightertomorrowtherapy.cloud
   rules:
-    - http:
+    - host: brightertomorrowtherapy.cloud
+      http:
         paths:
           # All public API → gateway
           - path: /v1
@@ -60,57 +76,39 @@ spec:
                 name: bt-gateway
                 port:
                   number: 80
-          # Admin API sub-paths → gateway (HTML pages like /admin/login fall through to / → bt-web)
-          - path: /admin/auth
+          # Admin API → gateway
+          - path: /admin/api
             pathType: Prefix
             backend:
               service:
                 name: bt-gateway
                 port:
                   number: 80
-          - path: /admin/stats
+          # Everything else (including all /admin/* HTML pages) → Next.js
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-web
+                port:
+                  number: 80
+    - host: www.brightertomorrowtherapy.cloud
+      http:
+        paths:
+          - path: /v1
             pathType: Prefix
             backend:
               service:
                 name: bt-gateway
                 port:
                   number: 80
-          - path: /admin/contacts
+          - path: /admin/api
             pathType: Prefix
             backend:
               service:
                 name: bt-gateway
                 port:
                   number: 80
-          - path: /admin/chat
-            pathType: Prefix
-            backend:
-              service:
-                name: bt-gateway
-                port:
-                  number: 80
-          - path: /admin/newsletter
-            pathType: Prefix
-            backend:
-              service:
-                name: bt-gateway
-                port:
-                  number: 80
-          - path: /admin/audit
-            pathType: Prefix
-            backend:
-              service:
-                name: bt-gateway
-                port:
-                  number: 80
-          - path: /admin/content
-            pathType: Prefix
-            backend:
-              service:
-                name: bt-gateway
-                port:
-                  number: 80
-          # Everything else (including /admin/login, /admin/) → Next.js
           - path: /
             pathType: Prefix
             backend:

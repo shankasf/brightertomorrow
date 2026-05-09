@@ -7,6 +7,7 @@ from agents import Agent, handoff
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 
 from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, STYLE_TEXT
+from .booking_agent import build_booking_agent
 from .crisis_agent import build_crisis_agent
 from .guardrails import crisis_guardrail
 from .info_agent import build_info_agent
@@ -19,6 +20,7 @@ def build_triage_agent() -> Agent:
     info = build_info_agent()
     matching = build_matching_agent()
     intake = build_intake_agent()
+    booking = build_booking_agent()
 
     instructions = prompt_with_handoff_instructions(
         f"{PRACTICE_CONTEXT}\n\n"
@@ -26,13 +28,30 @@ def build_triage_agent() -> Agent:
         f"{CRISIS_RULE}\n\n"
         "You are the Triage agent for Brighter Tomorrow Therapy. Your only job is to "
         "understand what the visitor needs and route them to the right specialist.\n\n"
-        "Routing rules:\n"
+        "Routing rules — act on what the visitor ALREADY said; do not re-ask.\n"
         "- Any crisis keyword or safety concern → Crisis Support\n"
-        "- 'book', 'appointment', 'callback', 'contact me', 'reach out', 'schedule' → Intake Agent\n"
+        "- Any mention of 'book', 'schedule', 'appointment', 'therapy appointment', "
+        "  'make an appointment', 'get started', 'check coverage', 'verify benefits', "
+        "  or 'use insurance' for a clinical reason (therapy, counseling, anxiety, "
+        "  couples, etc.) → Booking Agent. The Booking Agent collects info conversationally "
+        "  and verifies coverage in chat.\n"
+        "- 'callback', 'contact me', 'reach out' without scheduling intent → Intake Agent\n"
         "- 'therapist', 'match me', 'who treats', 'clinician', 'counselor' → Therapist Matching\n"
         "- Practice questions, services, hours, locations, FAQs, philosophy → Info Agent\n\n"
-        "When the user's intent is unclear, ask one short clarifying question. "
-        "Do not answer questions yourself — route to the appropriate agent."
+        "Rules of engagement:\n"
+        "- Talk like a warm human concierge. Never paste internal URL paths "
+        "  (no '/get-started', '/insurance', '/check-coverage', etc.) into replies — "
+        "  the specialists handle the flow inside the chat. If you must reference a page, "
+        "  use natural language ('our scheduling page') or a full https:// link.\n"
+        "- Honor the visitor's last turn: if they answered a question you already asked, "
+        "  do NOT rephrase the same question back at them. Route based on what they said.\n"
+        "- If the message is a bare greeting ('hi', 'hello') with no intent, respond with "
+        "  ONE short open question listing the main options (book an appointment / "
+        "  get matched with a therapist / practice questions). After that, trust the "
+        "  next answer and route.\n"
+        "- Never ask a compound 'and ... and are you open to ...' gatekeeping question. "
+        "  Route first; the specialist agent handles its own follow-ups.\n"
+        "- Do not answer questions yourself once you've identified intent — hand off."
     )
 
     return Agent(
@@ -55,9 +74,14 @@ def build_triage_agent() -> Agent:
                 "specialty or location.",
             ),
             handoff(
+                booking,
+                tool_description_override="Transfer to book an appointment or check insurance "
+                "coverage. Collects contact info + insurance and verifies eligibility in chat.",
+            ),
+            handoff(
                 intake,
                 tool_description_override="Transfer to collect contact info and submit a "
-                "callback request.",
+                "callback request (no scheduling intent).",
             ),
         ],
         input_guardrails=[crisis_guardrail],
