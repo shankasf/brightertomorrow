@@ -1,23 +1,28 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-// Canonical admin lives at admin.brightertomorrowtherapy.cloud (S3 + Cognito).
-// We're retiring the path-based admin under brightertomorrowtherapy.cloud/admin/*,
-// so redirect any *page* request there to the subdomain. /admin/api/* is left
-// alone — it still routes to the Go gateway via Traefik for any legacy caller.
+// Admin lives at admin.brightertomorrowtherapy.cloud, served by THIS Next.js
+// app under /admin/*. The subdomain is just a different hostname pointing at
+// the same backend — the URL path stays /admin/login, /admin/contacts, etc.
+//
+// On the root domain (brightertomorrowtherapy.cloud), redirect /admin page
+// requests to the subdomain so admin work always happens on its own host
+// (cookie isolation, future WAF). /admin/api/* is left alone so any legacy
+// caller still reaches the Go gateway directly.
 const ADMIN_SUBDOMAIN = 'https://admin.brightertomorrowtherapy.cloud'
 
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl
+  const host = request.headers.get('host') || ''
+  const isAdminHost = host.startsWith('admin.')
 
-  if (pathname === '/admin' || (pathname.startsWith('/admin/') && !pathname.startsWith('/admin/api/'))) {
-    // Strip /admin from the path; /admin/login → /login on the subdomain.
-    const tail = pathname === '/admin' ? '' : pathname.slice('/admin'.length)
-    return NextResponse.redirect(ADMIN_SUBDOMAIN + tail + (search || ''), 302)
+  if (
+    !isAdminHost &&
+    (pathname === '/admin' || (pathname.startsWith('/admin/') && !pathname.startsWith('/admin/api/')))
+  ) {
+    return NextResponse.redirect(ADMIN_SUBDOMAIN + pathname + (search || ''), 302)
   }
 
-  // Default: forward x-pathname so the root layout can detect special routes
-  // (kept for any future path-based gating).
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set('x-pathname', pathname)
   return NextResponse.next({ request: { headers: requestHeaders } })

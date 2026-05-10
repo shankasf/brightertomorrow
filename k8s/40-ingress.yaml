@@ -42,6 +42,16 @@ spec:
                 name: bt-web
                 port:
                   number: 80
+    - host: admin.brightertomorrowtherapy.cloud
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-web
+                port:
+                  number: 80
 ---
 # HTTPS ingress: /v1/* and /admin/api/* → bt-gateway, everything else → bt-web
 #
@@ -64,6 +74,7 @@ spec:
       hosts:
         - brightertomorrowtherapy.cloud
         - www.brightertomorrowtherapy.cloud
+        - admin.brightertomorrowtherapy.cloud
   rules:
     - host: brightertomorrowtherapy.cloud
       http:
@@ -102,6 +113,26 @@ spec:
                 name: bt-gateway
                 port:
                   number: 80
+          - path: /admin/api
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-gateway
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-web
+                port:
+                  number: 80
+    # admin.brightertomorrowtherapy.cloud — fronted by CloudFront, origin is this VM.
+    # Same path routing as the root domain so admin/* pages and admin/api/* work
+    # transparently. Bearer-token auth (no cookies), so cross-subdomain is fine.
+    - host: admin.brightertomorrowtherapy.cloud
+      http:
+        paths:
           - path: /admin/api
             pathType: Prefix
             backend:

@@ -7,7 +7,6 @@ import { SecretsStack } from "../lib/secrets-stack";
 import { GatewayIamStack } from "../lib/gateway-iam-stack";
 import { AuthStack } from "../lib/auth-stack";
 import { ApiStack } from "../lib/api-stack";
-import { SpaStack } from "../lib/spa-stack";
 import { ObservabilityStack } from "../lib/observability-stack";
 import { ACCOUNT, REGION, BOOTSTRAP_ADMIN_EMAIL, DDB_GSI1 } from "../lib/constants";
 
@@ -62,12 +61,9 @@ new ApiStack(app, "BtApi", {
   userPoolId: auth.userPool.userPoolId,
 });
 
-// Phase 4 — Admin SPA
-new SpaStack(app, "BtSpa", {
-  env,
-  hostingerSecretArn: secrets.hostinger.secretArn,
-  phiKeyArn: security.phiKey.keyArn,
-});
+// Phase 4 — Admin SPA: removed. admin.brightertomorrowtherapy.cloud now points
+// directly at the Hostinger VM (k3s/Traefik), serving the full Next.js admin
+// from web/src/app/admin/* with cert-manager/LE TLS. No CloudFront.
 
 cdk.Tags.of(app).add("project", "brightertomorrowtherapy");
 cdk.Tags.of(app).add("env", "prod");
