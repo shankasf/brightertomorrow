@@ -3,10 +3,12 @@ package handlers
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	appmw "github.com/brightertomorrowtherapy/bt-gateway/internal/middleware"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -14,6 +16,7 @@ import (
 // AdminChatHandler handles /admin/chat endpoints.
 type AdminChatHandler struct {
 	Pool *pgxpool.Pool
+	PHI  *phi.Store
 }
 
 // ListSessions handles GET /admin/chat/sessions.
@@ -35,11 +38,9 @@ func (h *AdminChatHandler) ListSessions(w http.ResponseWriter, r *http.Request) 
 		`SELECT s.id, s.visitor_id, s.source,
 		        to_char(s.started_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		        to_char(s.ended_at,   'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        count(m.id) AS message_count,
+		        s.message_count,
 		        to_char(s.purged_at,  'YYYY-MM-DD"T"HH24:MI:SSOF')
 		 FROM bt.chat_sessions s
-		 LEFT JOIN bt.chat_messages m ON m.session_id = s.id
-		 GROUP BY s.id
 		 ORDER BY s.started_at DESC
 		 LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
