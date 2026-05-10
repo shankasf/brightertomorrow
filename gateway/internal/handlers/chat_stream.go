@@ -27,6 +27,7 @@ type AIStreamer interface {
 // upstream SSE body to the client, accumulating the full reply for DB persistence.
 type ChatStreamHandler struct {
 	Pool         chatDB
+	PHI          *phi.Store
 	AIClient     AIStreamer
 	CookieSecure bool
 }
@@ -91,14 +92,11 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Persist the user message — skip the synthetic greeting marker.
+	// Persist the user message to DynamoDB — skip the synthetic greeting marker.
 	const greetMarker = "__BT_GREET__"
 	if body.Message != greetMarker {
-		if _, err := h.Pool.Exec(ctx,
-			`INSERT INTO bt.chat_messages (session_id, role, content) VALUES ($1, 'user', $2)`,
-			sessionID, body.Message,
-		); err != nil {
-			slog.Error("chat_stream: insert user message", "err", err)
+		if err := recordTurn(ctx, h.Pool, h.PHI, sessionID, "user", body.Message); err != nil {
+			slog.Error("chat_stream: ddb put user turn", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -239,15 +237,12 @@ func (h *ChatStreamHandler) fallback(w http.ResponseWriter, ctx context.Context,
 	h.persistReply(sessionID, reply)
 }
 
-// persistReply inserts the assistant reply into bt.chat_messages using a
-// background context so a disconnected client can't leave history in a torn state.
+// persistReply records the assistant reply in DynamoDB using a background
+// context so a disconnected client can't leave history in a torn state.
 func (h *ChatStreamHandler) persistReply(sessionID, reply string) {
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
-	if _, err := h.Pool.Exec(persistCtx,
-		`INSERT INTO bt.chat_messages (session_id, role, content) VALUES ($1, 'assistant', $2)`,
-		sessionID, reply,
-	); err != nil {
+	if err := recordTurn(persistCtx, h.Pool, h.PHI, sessionID, "assistant", reply); err != nil {
 		slog.Error("chat_stream: persist assistant reply", "err", err, "session_id", sessionID)
 	}
 }
