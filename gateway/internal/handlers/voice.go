@@ -55,7 +55,7 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Voice-first: create the session for this visitor so the IDOR check passes.
 		_, insertErr := h.Pool.Exec(ctx,
-			`INSERT INTO bt.chat_sessions (id, visitor_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			`INSERT INTO bt.chat_sessions (id, visitor_id, source) VALUES ($1, $2, 'voice') ON CONFLICT DO NOTHING`,
 			sessionID, visitorID,
 		)
 		if insertErr != nil {
@@ -68,6 +68,14 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("voice: lookup session", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
+	} else {
+		// A chat-first session is being upgraded to voice. Promote the
+		// source so the admin "Chat Sessions" view reflects the latest
+		// modality. Only widens chat→voice; never the reverse.
+		_, _ = h.Pool.Exec(ctx,
+			`UPDATE bt.chat_sessions SET source = 'voice' WHERE id = $1 AND source = 'chat'`,
+			sessionID,
+		)
 	}
 	if owner == nil || *owner != visitorID {
 		slog.Warn("voice: visitor mismatch", "session_id", sessionID)

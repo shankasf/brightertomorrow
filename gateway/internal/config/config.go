@@ -19,6 +19,9 @@ type Config struct {
 	// DDB / PHI store.
 	DDBTable  string
 	AWSRegion string
+	// Cognito (admin login). When unset, /admin/api/auth/exchange returns 503.
+	CognitoUserPoolID string
+	CognitoClientID   string
 }
 
 var ErrMissingDatabaseURL = errors.New("config: DATABASE_URL is required")
@@ -49,6 +52,8 @@ func Load() (*Config, error) {
 		AdminInitialPassword: os.Getenv("ADMIN_INITIAL_PASSWORD"),
 		DDBTable:             envOr("BT_DDB_TABLE", "bt-main"),
 		AWSRegion:            envOr("BT_DDB_REGION", "us-east-1"),
+		CognitoUserPoolID:    os.Getenv("COGNITO_USER_POOL_ID"),
+		CognitoClientID:      os.Getenv("COGNITO_USER_POOL_CLIENT_ID"),
 	}, nil
 }
 

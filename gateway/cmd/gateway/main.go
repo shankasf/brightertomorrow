@@ -73,13 +73,22 @@ func main() {
 	ai := aiclient.New(cfg.AIServiceURL)
 
 	// Admin handlers.
-	adminAuthH := &handlers.AdminAuthHandler{Pool: pool}
+	var cognitoVerifier *admin.CognitoVerifier
+	if cfg.CognitoUserPoolID != "" && cfg.CognitoClientID != "" {
+		cognitoVerifier = admin.NewCognitoVerifier(cfg.AWSRegion, cfg.CognitoUserPoolID, cfg.CognitoClientID)
+		slog.Info("admin Cognito verifier enabled", "pool", cfg.CognitoUserPoolID)
+	} else {
+		slog.Warn("admin Cognito verifier disabled — COGNITO_USER_POOL_ID/COGNITO_CLIENT_ID not set")
+	}
+	adminAuthH := &handlers.AdminAuthHandler{Pool: pool, Cognito: cognitoVerifier}
 	adminStatsH := &handlers.AdminStatsHandler{Pool: pool}
 	adminContactsH := &handlers.AdminContactsHandler{Pool: pool, PHI: phiStore}
 	adminChatH := &handlers.AdminChatHandler{Pool: pool}
 	adminNewsletterH := &handlers.AdminNewsletterHandler{Pool: pool}
 	adminAuditH := &handlers.AdminAuditHandler{Pool: pool}
 	adminContentH := &handlers.AdminContentHandler{Pool: pool, AIClient: ai}
+	adminAppointmentsH := &handlers.AdminAppointmentsHandler{Pool: pool, PHI: phiStore}
+	adminInsuranceChecksH := &handlers.AdminInsuranceChecksHandler{Pool: pool, PHI: phiStore}
 
 	intakeH := &handlers.IntakeHandler{Pool: pool, PHI: phiStore, CoverageChecker: ai}
 	intakeInternalH := &handlers.IntakeInternalHandler{IntakeHandler: intakeH}
@@ -123,7 +132,11 @@ func main() {
 	// Page paths under /admin/* (without /api) are served by Next.js.
 	r.Route("/admin/api", func(r chi.Router) {
 		// Login: rate-limited to prevent brute-force §164.312(d).
+		// Legacy bcrypt path (kept for emergency rollback; UI no longer uses it).
 		r.With(httprate.LimitByIP(5, time.Minute)).Post("/auth/login", adminAuthH.Login)
+		// Cognito ID-token exchange — primary login path. Cognito enforces password + MFA;
+		// gateway verifies the JWT and issues its own session token.
+		r.With(httprate.LimitByIP(10, time.Minute)).Post("/auth/exchange", adminAuthH.Exchange)
 
 		// All other admin routes require a valid session token.
 		r.Group(func(r chi.Router) {
@@ -141,6 +154,16 @@ func main() {
 			// PHI: intake pointers + DDB-backed full records.
 			r.Get("/intake-pointers", adminContactsH.ListIntakePointers)
 			r.Get("/intake-pointers/{id}", adminContactsH.GetIntakePointer)
+
+			// PHI: appointment requests (intake_pointers + DDB hydrated).
+			// List + CSV export both audit each row read in admin_access_log.
+			r.Get("/appointments", adminAppointmentsH.List)
+			r.Get("/appointments.csv", adminAppointmentsH.ExportCSV)
+
+			// PHI: insurance eligibility-check history.
+			// Same audit pattern: every PHI row hydrated is logged.
+			r.Get("/insurance-checks", adminInsuranceChecksH.List)
+			r.Get("/insurance-checks.csv", adminInsuranceChecksH.ExportCSV)
 
 			// PHI: chat sessions (access logged on detail view).
 			r.Get("/chat/sessions", adminChatH.ListSessions)

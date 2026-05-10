@@ -1,36 +1,37 @@
 'use client';
 import { useEffect, useState } from 'react';
-import AdminShell from '@/components/admin/AdminShell';
+import { motion } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
+import {
+  PageHeader, PageWrap, TableCard, THead, TH, TD,
+  EmptyState, SkeletonRows, Button, ErrorBanner,
+} from '@/components/admin/ui';
 
 type PurgeItem = { source: string; row_id: string; retain_until: string };
 
 export default function PurgeQueuePage() {
   const [items, setItems] = useState<PurgeItem[] | null>(null);
-  const [loading, setLoading] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   const load = () => {
-    adminFetch('/admin/audit/purge-queue')
-      .then((r) => r.json())
-      .then((d) => setItems(d.items));
+    adminFetch('/admin/audit/purge-queue').then((r) => r.json()).then((d) => setItems(d.items));
   };
-
   useEffect(load, []);
 
   const purge = async (item: PurgeItem) => {
     if (!confirm(`Anonymize ${item.source} #${item.row_id}? This cannot be undone.`)) return;
     const key = `${item.source}:${item.row_id}`;
-    setLoading(key);
+    setBusy(key);
     setError('');
     const path =
       item.source === 'contact_submissions'
         ? `/admin/audit/purge/contact/${item.row_id}`
         : `/admin/audit/purge/chat/${item.row_id}`;
     const res = await adminFetch(path, { method: 'POST' });
-    setLoading(null);
+    setBusy(null);
     if (!res.ok) {
-      const d = await res.json();
+      const d = await res.json().catch(() => ({}));
       setError(d.error ?? 'Purge failed');
     } else {
       load();
@@ -38,59 +39,66 @@ export default function PurgeQueuePage() {
   };
 
   return (
-    <AdminShell>
-      <div className="p-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Purge Queue</h1>
-        <p className="text-sm text-gray-500 mb-6">
-          Records that have exceeded their 10-year Nevada NRS 629.051 retention period.
-          Use the Anonymize button to invoke the right-to-erasure procedure (Nevada NRS 603A).
-          This action is irreversible and logged.
-        </p>
+      <PageWrap>
+        <PageHeader
+          title="Purge queue"
+          subtitle="Records that have exceeded their 10-year Nevada NRS 629.051 retention period. Anonymizing invokes the right-to-erasure procedure (Nevada NRS 603A) — irreversible and logged."
+        />
 
-        {error && <div className="text-red-600 bg-red-50 rounded-lg p-4 mb-4">{error}</div>}
+        {error && <ErrorBanner>{error}</ErrorBanner>}
 
         {items === null ? (
-          <div className="text-gray-400">Loading…</div>
+          <SkeletonRows rows={4} cols={4} />
         ) : items.length === 0 ? (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center text-green-700">
-            ✓ No records require purging. All retention periods are within compliance.
-          </div>
+          <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+            <div className="rounded-2xl border border-emerald-200/70 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/30 p-8 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 ring-1 ring-inset ring-emerald-200">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m5 13 4 4L19 7" />
+                </svg>
+              </div>
+              <h3 className="text-base font-semibold text-emerald-900">All clear</h3>
+              <p className="mt-1 text-sm text-emerald-700/80">No records require purging — every retention period is within compliance.</p>
+            </div>
+          </motion.div>
         ) : (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-100">
-                <tr>
-                  <th className="text-left px-4 py-3 text-gray-500 font-medium">Source</th>
-                  <th className="text-left px-4 py-3 text-gray-500 font-medium">Row ID</th>
-                  <th className="text-left px-4 py-3 text-gray-500 font-medium">Retain Until</th>
-                  <th className="text-left px-4 py-3 text-gray-500 font-medium">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {items.map((item) => {
-                  const key = `${item.source}:${item.row_id}`;
-                  return (
-                    <tr key={key} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-xs font-mono text-gray-700">{item.source}</td>
-                      <td className="px-4 py-3 text-xs font-mono">{item.row_id}</td>
-                      <td className="px-4 py-3 text-xs text-red-600 font-medium">{item.retain_until.slice(0, 10)}</td>
-                      <td className="px-4 py-3">
-                        <button
-                          disabled={loading === key}
-                          onClick={() => purge(item)}
-                          className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded disabled:opacity-40 transition-colors"
-                        >
-                          {loading === key ? 'Processing…' : 'Anonymize'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <TableCard>
+            <THead>
+              <tr>
+                <TH>Source</TH>
+                <TH>Row ID</TH>
+                <TH>Retain until</TH>
+                <TH className="text-right">Action</TH>
+              </tr>
+            </THead>
+            <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.02 } } }}>
+              {items.map((item) => {
+                const key = `${item.source}:${item.row_id}`;
+                return (
+                  <motion.tr
+                    key={key}
+                    variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
+                    className="border-t border-slate-100 hover:bg-slate-50/70"
+                  >
+                    <TD className="font-mono text-xs text-slate-700">{item.source}</TD>
+                    <TD className="font-mono text-xs text-slate-600">{item.row_id}</TD>
+                    <TD>
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-rose-700">
+                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                        {item.retain_until.slice(0, 10)}
+                      </span>
+                    </TD>
+                    <TD className="text-right">
+                      <Button variant="danger" size="sm" disabled={busy === key} onClick={() => purge(item)}>
+                        {busy === key ? 'Processing…' : 'Anonymize'}
+                      </Button>
+                    </TD>
+                  </motion.tr>
+                );
+              })}
+            </motion.tbody>
+          </TableCard>
         )}
-      </div>
-    </AdminShell>
+      </PageWrap>
   );
 }

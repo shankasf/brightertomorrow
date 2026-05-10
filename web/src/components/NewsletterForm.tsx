@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { FiArrowRight, FiCheck, FiAlertCircle } from "react-icons/fi";
+import { InlineSpinner } from "@/components/Spinner";
 
 type Variant = "light" | "dark";
 
@@ -62,7 +63,11 @@ export default function NewsletterForm({ variant = "light" }: { variant?: Varian
           ) : (
             <span className="inline-flex items-center gap-1.5">
               {state === "loading" ? "Sending" : "Subscribe"}
-              <FiArrowRight size={14} className="transition-transform group-focus-within:translate-x-0.5" />
+              {state === "loading" ? (
+                <InlineSpinner size={14} />
+              ) : (
+                <FiArrowRight size={14} className="transition-transform group-focus-within:translate-x-0.5" />
+              )}
             </span>
           )}
         </button>
@@ -99,8 +104,10 @@ export default function NewsletterForm({ variant = "light" }: { variant?: Varian
           <FiCheck size={15} />
         ) : state === "err" ? (
           <FiAlertCircle size={15} />
+        ) : state === "loading" ? (
+          <InlineSpinner size={14} />
         ) : (
-          <FiArrowRight size={14} className={state === "loading" ? "animate-pulse" : ""} />
+          <FiArrowRight size={14} />
         )}
       </button>
     </form>

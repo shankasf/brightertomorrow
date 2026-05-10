@@ -1,7 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import AdminShell from '@/components/admin/AdminShell';
+import { motion, AnimatePresence } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
+import {
+  PageHeader, PageWrap, Card, Button, Input, Textarea, Field,
+  Pill, EmptyState, Checkbox,
+} from '@/components/admin/ui';
 
 type Post = { id: number; slug: string; title: string; excerpt: string | null; cover_url: string | null; author: string | null; published: boolean; published_at: string };
 type PostForm = { slug: string; title: string; excerpt: string; body_md: string; cover_url: string; author: string; published: boolean };
@@ -11,38 +15,33 @@ export default function BlogPage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [editing, setEditing] = useState<Post | null>(null);
   const [form, setForm] = useState<PostForm>(empty);
+  const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [fullPost, setFullPost] = useState<(PostForm & { id: number }) | null>(null);
 
-  const load = () =>
-    adminFetch('/admin/content/blog').then((r) => r.json()).then((d) => setPosts(d.posts));
-
+  const load = () => adminFetch('/admin/content/blog').then((r) => r.json()).then((d) => setPosts(d.posts));
   useEffect(() => { load(); }, []);
 
+  const startNew = () => { setEditing(null); setForm(empty); setOpen(true); };
   const startEdit = async (p: Post) => {
     const r = await adminFetch(`/admin/content/blog/${p.id}`);
     const d = await r.json();
     setEditing(p);
-    setFullPost(d);
     setForm({
       slug: d.slug, title: d.title, excerpt: d.excerpt ?? '',
       body_md: d.body_md ?? '', cover_url: d.cover_url ?? '',
       author: d.author ?? '', published: d.published,
     });
+    setOpen(true);
   };
+  const close = () => { setOpen(false); setEditing(null); setForm(empty); };
 
   const save = async () => {
     setSaving(true);
     const body = { ...form, excerpt: form.excerpt || null, body_md: form.body_md || null, cover_url: form.cover_url || null, author: form.author || null };
-    if (editing) {
-      await adminFetch(`/admin/content/blog/${editing.id}`, { method: 'PUT', body: JSON.stringify(body) });
-    } else {
-      await adminFetch('/admin/content/blog', { method: 'POST', body: JSON.stringify(body) });
-    }
+    if (editing) await adminFetch(`/admin/content/blog/${editing.id}`, { method: 'PUT', body: JSON.stringify(body) });
+    else await adminFetch('/admin/content/blog', { method: 'POST', body: JSON.stringify(body) });
     setSaving(false);
-    setEditing(null);
-    setFullPost(null);
-    setForm(empty);
+    close();
     load();
   };
 
@@ -52,91 +51,100 @@ export default function BlogPage() {
     load();
   };
 
-  const isEditing = editing !== null || form.title !== '';
-
   return (
-    <AdminShell>
-      <div className="p-6 max-w-5xl">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Blog Posts</h1>
-          <button onClick={() => { setEditing(null); setFullPost(null); setForm(empty); }}
-            className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700">+ New Post</button>
-        </div>
+      <PageWrap max="max-w-5xl">
+        <PageHeader
+          title="Blog posts"
+          subtitle="Long-form articles published on the public blog."
+          action={<Button onClick={startNew}>＋ New post</Button>}
+        />
 
-        {isEditing && (
-          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6 space-y-4">
-            <h2 className="font-semibold text-gray-700">{editing ? 'Edit Post' : 'New Post'}</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Title</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Slug</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={form.slug}
-                  onChange={(e) => setForm({ ...form, slug: e.target.value })} />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Excerpt</label>
-              <textarea className="w-full border rounded-lg px-3 py-2 text-sm h-16 resize-none" value={form.excerpt}
-                onChange={(e) => setForm({ ...form, excerpt: e.target.value })} />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Body (Markdown)</label>
-              <textarea className="w-full border rounded-lg px-3 py-2 text-sm h-48 resize-y font-mono text-xs" value={form.body_md}
-                onChange={(e) => setForm({ ...form, body_md: e.target.value })} />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Cover URL</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={form.cover_url}
-                  onChange={(e) => setForm({ ...form, cover_url: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Author</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={form.author}
-                  onChange={(e) => setForm({ ...form, author: e.target.value })} />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={form.published}
-                onChange={(e) => setForm({ ...form, published: e.target.checked })} />
-              Published
-            </label>
-            <div className="flex gap-2">
-              <button disabled={saving} onClick={save}
-                className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button onClick={() => { setEditing(null); setFullPost(null); setForm(empty); }}
-                className="text-sm px-4 py-2 rounded-lg border hover:bg-gray-50">Cancel</button>
-            </div>
-          </div>
-        )}
-
-        <div className="space-y-2">
-          {posts.map((p) => (
-            <div key={p.id} className="bg-white rounded-xl border border-gray-100 p-4 flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  {p.published
-                    ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Published</span>
-                    : <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Draft</span>}
-                  <span className="text-xs text-gray-400">{p.published_at.slice(0, 10)}</span>
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              initial={{ opacity: 0, y: -6, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: 'auto' }}
+              exit={{ opacity: 0, y: -6, height: 0 }}
+              transition={{ duration: 0.22 }}
+              className="mb-6 overflow-hidden"
+            >
+              <Card className="border-indigo-200/70 bg-gradient-to-br from-indigo-50/40 via-white to-white">
+                <h2 className="mb-4 text-sm font-semibold text-slate-900">{editing ? 'Edit post' : 'New post'}</h2>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Title">
+                      <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+                    </Field>
+                    <Field label="Slug">
+                      <Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className="font-mono" />
+                    </Field>
+                  </div>
+                  <Field label="Excerpt">
+                    <Textarea rows={2} value={form.excerpt} onChange={(e) => setForm({ ...form, excerpt: e.target.value })} />
+                  </Field>
+                  <Field label="Body (Markdown)">
+                    <Textarea rows={10} value={form.body_md} onChange={(e) => setForm({ ...form, body_md: e.target.value })} className="font-mono text-xs" />
+                  </Field>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Cover URL">
+                      <Input value={form.cover_url} onChange={(e) => setForm({ ...form, cover_url: e.target.value })} />
+                    </Field>
+                    <Field label="Author">
+                      <Input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} />
+                    </Field>
+                  </div>
+                  <Checkbox label="Published" checked={form.published} onChange={(e) => setForm({ ...form, published: e.target.checked })} />
                 </div>
-                <p className="text-sm font-medium text-gray-900">{p.title}</p>
-                <p className="text-xs text-gray-500 mt-0.5 font-mono">{p.slug}</p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button onClick={() => startEdit(p)} className="text-xs text-blue-600 hover:underline">Edit</button>
-                <button onClick={() => del(p.id)} className="text-xs text-red-600 hover:underline">Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </AdminShell>
+                <div className="mt-5 flex items-center gap-2">
+                  <Button onClick={save} loading={saving}>{saving ? "Saving…" : "Save"}</Button>
+                  <Button variant="secondary" onClick={close}>Cancel</Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {posts.length === 0 ? (
+          <EmptyState
+            title="No blog posts yet"
+            description="Publish your first post to start building the blog."
+            action={<Button onClick={startNew}>＋ New post</Button>}
+            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" /></svg>}
+          />
+        ) : (
+          <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.025 } } }} className="space-y-2">
+            {posts.map((p) => (
+              <motion.div
+                key={p.id}
+                variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
+                whileHover={{ y: -1 }}
+                className="group flex items-start justify-between gap-4 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
+              >
+                {p.cover_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.cover_url} alt="" className="h-16 w-16 shrink-0 rounded-xl object-cover ring-1 ring-inset ring-slate-200" />
+                ) : (
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-50 to-cyan-50 text-indigo-400 ring-1 ring-inset ring-slate-200">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" /></svg>
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                    {p.published ? <Pill tone="green" dot>Published</Pill> : <Pill tone="slate">Draft</Pill>}
+                    <span className="text-xs tabular-nums text-slate-500">{p.published_at.slice(0, 10)}</span>
+                    {p.author && <span className="text-xs text-slate-500">· {p.author}</span>}
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900">{p.title}</p>
+                  <p className="mt-0.5 font-mono text-[11px] text-slate-400">/{p.slug}</p>
+                </div>
+                <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <Button variant="ghost" size="sm" onClick={() => startEdit(p)}>Edit</Button>
+                  <Button variant="ghost" size="sm" onClick={() => del(p.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </PageWrap>
   );
 }

@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -81,8 +82,36 @@ func ValidateChatMessage(message string) error {
 // ChatHandler handles POST /v1/chat.
 type ChatHandler struct {
 	Pool         chatDB
+	PHI          *phi.Store
 	AIClient     AIChatter
 	CookieSecure bool
+}
+
+// recordTurn writes a chat turn to DynamoDB and bumps the non-PHI counters
+// on bt.chat_sessions. Postgres never sees the message body.
+func recordTurn(ctx context.Context, pool chatDB, store *phi.Store, sessionID, role, content string) error {
+	if store == nil {
+		// Fail-closed: PHI store must be configured for chat to write.
+		return errors.New("phi store not configured")
+	}
+	now := time.Now().UTC()
+	if err := store.PutChatTurn(ctx, phi.ChatTurn{
+		SessionID: sessionID,
+		Role:      role,
+		Content:   content,
+		CreatedAt: now,
+	}); err != nil {
+		return err
+	}
+	// Bump counters. Best-effort; the source of truth is DynamoDB.
+	_, _ = pool.Exec(ctx,
+		`UPDATE bt.chat_sessions
+		 SET message_count = message_count + 1,
+		     last_message_at = $2
+		 WHERE id = $1`,
+		sessionID, now,
+	)
+	return nil
 }
 
 func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -143,16 +172,13 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Persist the user message — except for the greeting trigger, which is a
-	// synthetic signal from the chat widget asking the AI to produce an opener.
-	// The AI-generated greeting is still persisted below.
+	// Persist the user message to DynamoDB — except for the greeting trigger,
+	// which is a synthetic signal from the widget asking the AI to produce
+	// an opener. The AI-generated greeting is still persisted below.
 	const greetMarker = "__BT_GREET__"
 	if body.Message != greetMarker {
-		if _, err := h.Pool.Exec(ctx,
-			`INSERT INTO bt.chat_messages (session_id, role, content) VALUES ($1, 'user', $2)`,
-			sessionID, body.Message,
-		); err != nil {
-			slog.Error("chat: insert user message", "err", err)
+		if err := recordTurn(ctx, h.Pool, h.PHI, sessionID, "user", body.Message); err != nil {
+			slog.Error("chat: ddb put user turn", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -165,15 +191,13 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply = chatFallback
 	}
 
-	// Persist the assistant reply using a background context so a client disconnect
-	// after the AI call cannot leave chat history in a torn state (user message
-	// without the corresponding assistant response).
+	// Persist the assistant reply using a background context so a client
+	// disconnect after the AI call cannot leave history in a torn state.
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
-	_, _ = h.Pool.Exec(persistCtx,
-		`INSERT INTO bt.chat_messages (session_id, role, content) VALUES ($1, 'assistant', $2)`,
-		sessionID, reply,
-	)
+	if err := recordTurn(persistCtx, h.Pool, h.PHI, sessionID, "assistant", reply); err != nil {
+		slog.Warn("chat: ddb put assistant turn", "err", err)
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{
 		"session_id": sessionID,

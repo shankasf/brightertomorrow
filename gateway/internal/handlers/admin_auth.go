@@ -15,7 +15,8 @@ import (
 
 // AdminAuthHandler handles admin authentication endpoints.
 type AdminAuthHandler struct {
-	Pool *pgxpool.Pool
+	Pool     *pgxpool.Pool
+	Cognito  *admin.CognitoVerifier // optional; nil disables /auth/exchange
 }
 
 type loginRequest struct {
@@ -94,6 +95,69 @@ func (h *AdminAuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		_ = admin.RevokeToken(r.Context(), h.Pool, token)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+type exchangeRequest struct {
+	IDToken string `json:"id_token"`
+}
+
+// Exchange handles POST /admin/auth/exchange — accepts a Cognito ID token,
+// verifies it against the user pool's JWKS, looks up the admin in Postgres,
+// and issues a gateway session token. This is the single sign-in path now;
+// password+MFA both happen inside Cognito.
+func (h *AdminAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
+	if h.Cognito == nil {
+		httpx.WriteError(w, http.StatusServiceUnavailable, "cognito not configured")
+		return
+	}
+	var body exchangeRequest
+	if err := httpx.ReadJSON(w, r, &body); err != nil {
+		httpx.WriteValidationError(w, "invalid JSON")
+		return
+	}
+	if body.IDToken == "" {
+		httpx.WriteValidationError(w, "id_token required")
+		return
+	}
+
+	claims, err := h.Cognito.Verify(r.Context(), body.IDToken)
+	if err != nil {
+		slog.Warn("admin cognito verify failed", "err", err)
+		httpx.WriteError(w, http.StatusUnauthorized, "invalid id_token")
+		return
+	}
+
+	u, err := admin.LookupAdminByEmail(r.Context(), h.Pool, claims.Email)
+	if err != nil {
+		switch {
+		case errors.Is(err, admin.ErrInvalidCredentials):
+			// User authenticated to Cognito but isn't provisioned in admin_users.
+			// Don't leak that distinction.
+			httpx.WriteError(w, http.StatusForbidden, "not authorized")
+		case errors.Is(err, admin.ErrInactiveAccount):
+			httpx.WriteError(w, http.StatusForbidden, "account inactive")
+		default:
+			slog.Error("admin lookup", "err", err)
+			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	token, err := admin.IssueSession(r.Context(), h.Pool, u, r.RemoteAddr, r.UserAgent())
+	if err != nil {
+		slog.Error("admin issue session", "err", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"token": token,
+		"user": map[string]any{
+			"id":    u.ID,
+			"email": u.Email,
+			"role":  u.Role,
+		},
+	})
 }
 
 // Me handles GET /admin/auth/me.

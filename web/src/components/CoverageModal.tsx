@@ -63,7 +63,7 @@ export default function CoverageModal({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.96 }}
             transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] w-[min(540px,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] overflow-y-auto bg-white shadow-card"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] w-[min(540px,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain bg-white shadow-card"
             style={{ borderRadius: "24px 0 24px 24px" }}
           >
             {/* Header */}

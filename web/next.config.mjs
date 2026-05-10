@@ -2,6 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  devIndicators: false,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "brightertomorrowtherapy.com" },

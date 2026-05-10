@@ -1,12 +1,42 @@
 package handlers
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"sync"
+	"time"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// seriesDays is the look-back window for the dashboard sparkline / area charts.
+// Returned in the /admin/stats response under `series` so the dashboard can
+// render 14-day sparklines for contacts, chats, messages, newsletter.
+const seriesDays = 14
+
+// dailyCounts runs `SELECT date::date, count(*)::int` against a CTE that
+// generates a complete day range so missing days come back as 0 instead of
+// being dropped — keeps the chart x-axis stable.
+func dailyCounts(ctx context.Context, pool *pgxpool.Pool, sql string) ([]int, error) {
+	rows, err := pool.Query(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]int, 0, seriesDays)
+	for rows.Next() {
+		var d time.Time
+		var n int
+		if err := rows.Scan(&d, &n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
 
 // AdminStatsHandler handles GET /admin/stats.
 type AdminStatsHandler struct {
@@ -32,7 +62,30 @@ func (h *AdminStatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		publishedBlogPosts    int
 		totalTeamMembers      int
 		purgeQueueSize        int
+
+		contactsSeries   []int
+		chatsSeries      []int
+		messagesSeries   []int
+		newsletterSeries []int
 	)
+
+	// Day-bucket CTE: `generate_series(0..13)` so every day in the window appears
+	// even if there's no data — keeps the chart x-axis aligned with reality.
+	seriesQ := func(tbl, ts string) string {
+		return `WITH d AS (
+			SELECT generate_series(
+				(current_date - interval '` + strconv.Itoa(seriesDays-1) + ` days')::date,
+				current_date,
+				interval '1 day'
+			)::date AS day
+		)
+		SELECT d.day, COALESCE(count(t.*), 0)::int
+		FROM d
+		LEFT JOIN ` + tbl + ` t
+			ON t.` + ts + `::date = d.day
+		GROUP BY d.day
+		ORDER BY d.day`
+	}
 
 	queries := []struct {
 		sql  string
@@ -62,12 +115,76 @@ func (h *AdminStatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		{`SELECT count(*) FROM bt.phi_due_for_purge`, &purgeQueueSize},
 	}
 
+	// Fan out the count queries in parallel — each is independent and the
+	// pgxpool can serve them concurrently. Cuts dashboard latency from
+	// O(N · roundtrip) to O(roundtrip).
+	gctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		wg    sync.WaitGroup
+		mu    sync.Mutex
+		first error
+	)
 	for _, q := range queries {
-		if err := h.Pool.QueryRow(ctx, q.sql).Scan(q.dest); err != nil {
-			slog.Error("admin stats query", "sql", q.sql, "err", err)
-			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
+		wg.Add(1)
+		go func(q struct {
+			sql  string
+			dest *int
+		}) {
+			defer wg.Done()
+			if err := h.Pool.QueryRow(gctx, q.sql).Scan(q.dest); err != nil {
+				mu.Lock()
+				if first == nil {
+					first = err
+					slog.Error("admin stats query", "sql", q.sql, "err", err)
+				}
+				mu.Unlock()
+				cancel()
+			}
+		}(q)
+	}
+	// Series queries run in parallel with the counts above.
+	seriesTargets := []struct {
+		sql string
+		out *[]int
+	}{
+		{seriesQ("bt.contact_submissions", "created_at"), &contactsSeries},
+		{seriesQ("bt.chat_sessions", "started_at"), &chatsSeries},
+		{seriesQ("bt.chat_messages", "created_at"), &messagesSeries},
+		{seriesQ("bt.newsletter_subscribers", "created_at"), &newsletterSeries},
+	}
+	for _, q := range seriesTargets {
+		wg.Add(1)
+		go func(q struct {
+			sql string
+			out *[]int
+		}) {
+			defer wg.Done()
+			vals, err := dailyCounts(gctx, h.Pool, q.sql)
+			if err != nil {
+				mu.Lock()
+				if first == nil {
+					first = err
+					slog.Error("admin stats series", "sql", q.sql, "err", err)
+				}
+				mu.Unlock()
+				cancel()
+				return
+			}
+			*q.out = vals
+		}(q)
+	}
+	wg.Wait()
+	if first != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	// Day labels (matches the order of the series arrays).
+	labels := make([]string, seriesDays)
+	start := time.Now().AddDate(0, 0, -(seriesDays - 1))
+	for i := 0; i < seriesDays; i++ {
+		labels[i] = start.AddDate(0, 0, i).Format("2006-01-02")
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -94,5 +211,13 @@ func (h *AdminStatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"compliance": map[string]any{
 			"purge_queue_size": purgeQueueSize,
 		},
+		"series": map[string]any{
+			"days":       labels,
+			"contacts":   contactsSeries,
+			"chats":      chatsSeries,
+			"messages":   messagesSeries,
+			"newsletter": newsletterSeries,
+		},
 	})
 }
+

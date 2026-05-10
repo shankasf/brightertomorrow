@@ -132,6 +132,62 @@ kubectl -n bt rollout restart deployment/bt-gateway
 
 This codebase implements HIPAA Technical Safeguards for a therapy practice handling Protected Health Information (PHI). Nevada state law (NRS 629.051, NRS 603A) adds additional requirements.
 
+### Chatbot data — plain-English end-to-end
+
+What happens to a single message the moment a visitor types it into the chat widget, in language anyone can read.
+
+```mermaid
+flowchart TD
+    A([Visitor types a message<br/>in the chat widget]) --> B[Locked in transit<br/>HTTPS / TLS 1.3<br/>nobody on the network can read it]
+    B --> C[Arrives at our website<br/>brightertomorrowtherapy.cloud]
+    C --> D[Routed inside our private cluster<br/>to the AI service<br/>never exposed to the public internet]
+    D --> E[Sent to OpenAI<br/>HIPAA BAA signed · Zero Data Retention<br/>OpenAI does not keep the message]
+    E --> F[AI reply returned to the visitor]
+    F --> G[Transcript saved to the PHI vault<br/>AWS DynamoDB · CMK-encrypted<br/>alias/bt-phi · 1-year key rotation]
+    G --> H[Local database stores ONLY a pointer<br/>no name, no message, no health info<br/>safe even if the server is stolen]
+
+    H --> I{Does an admin<br/>need to read it?}
+    I -- No --> J[Sits encrypted in the vault<br/>nobody can see it]
+    I -- Yes --> K[Admin signs in<br/>email + password + phone code TOTP MFA<br/>auto sign-out after 8 hours]
+    K --> L[Every single PHI read is written<br/>to a tamper-proof audit log<br/>who · what · when · IP]
+    L --> M[Admin sees the transcript]
+
+    J --> N{Has 10 years passed?<br/>Nevada NRS 629.051}
+    M --> N
+    N -- No --> O[Stays encrypted · audited · retained]
+    N -- Yes --> P[Automatically anonymized<br/>name / message / contact info wiped<br/>audit trail kept forever]
+
+    Q[[Visitor requests deletion<br/>NRS 603A right to erasure]] -.-> P
+
+    classDef visitor fill:#e8f4ff,stroke:#06c,color:#003
+    classDef transit fill:#fff4d6,stroke:#c80,color:#330
+    classDef phi fill:#ffe5e5,stroke:#c00,color:#300
+    classDef audit fill:#e8ffe8,stroke:#080,color:#030
+    classDef purge fill:#f0e5ff,stroke:#60c,color:#202
+
+    class A,F visitor
+    class B,C,D,E transit
+    class G,H,J,M phi
+    class K,L audit
+    class O,P,Q purge
+```
+
+**One-line summary of each safeguard layer:**
+
+| Step | The plain-English promise | The HIPAA control |
+|---|---|---|
+| In transit | "Nobody between the visitor and us can read it." | §164.312(e) Transmission Security — TLS 1.3, HSTS, cert-manager |
+| Inside our cluster | "Internal services can't be reached from the internet." | Traefik ingress never exposes `/internal/*` |
+| At OpenAI | "OpenAI is a HIPAA business associate and throws the message away." | BAA + Zero Data Retention on the OpenAI account |
+| At rest | "Encrypted with a key only we control." | §164.312(a)(2)(iv) — AWS KMS customer-managed key |
+| Local DB | "The server in our datacenter never sees the PHI." | Minimum Necessary (§164.502(b)) — pointer-only schema |
+| Admin login | "Password alone isn't enough — phone code required." | §164.312(d) — TOTP MFA via Cognito |
+| Admin reads | "Every peek is recorded and can't be erased." | §164.312(b) — append-only `admin_access_log` |
+| Retention | "Erased automatically once we no longer need it." | Nevada NRS 629.051 — 10-year auto-purge |
+| Erasure request | "Visitors can ask us to delete their record." | Nevada NRS 603A — anonymisation procedures |
+
+
+
 ### What counts as PHI here
 
 - **`contact_submissions`** — name, email, phone, message (contains health context)

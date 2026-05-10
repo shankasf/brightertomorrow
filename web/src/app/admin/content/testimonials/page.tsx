@@ -1,96 +1,146 @@
 'use client';
 import { useEffect, useState } from 'react';
-import AdminShell from '@/components/admin/AdminShell';
+import { motion, AnimatePresence } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
+import {
+  PageHeader, PageWrap, Card, Button, Input, Textarea, Field,
+  Pill, EmptyState, Checkbox,
+} from '@/components/admin/ui';
 
 type Testimonial = { id: number; author: string; quote: string; rating: number | null; position: number; published: boolean };
 type TestimonialForm = Omit<Testimonial, 'id'>;
 const empty: TestimonialForm = { author: '', quote: '', rating: null, position: 0, published: true };
 
+function Stars({ n, max = 5 }: { n: number; max?: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {Array.from({ length: max }).map((_, i) => (
+        <svg key={i} width="12" height="12" viewBox="0 0 24 24" className={i < n ? 'fill-amber-400 text-amber-400' : 'fill-slate-200 text-slate-200'}>
+          <polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.5 12 2" />
+        </svg>
+      ))}
+    </span>
+  );
+}
+
 export default function TestimonialsPage() {
   const [items, setItems] = useState<Testimonial[]>([]);
   const [editing, setEditing] = useState<Testimonial | null>(null);
   const [form, setForm] = useState<TestimonialForm>(empty);
+  const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = () => adminFetch('/admin/content/testimonials').then((r) => r.json()).then((d) => setItems(d.testimonials));
   useEffect(() => { load(); }, []);
 
+  const startNew = () => { setEditing(null); setForm(empty); setOpen(true); };
+  const startEdit = (t: Testimonial) => {
+    setEditing(t);
+    setForm({ author: t.author, quote: t.quote, rating: t.rating, position: t.position, published: t.published });
+    setOpen(true);
+  };
+  const close = () => { setOpen(false); setEditing(null); setForm(empty); };
+
   const save = async () => {
     setSaving(true);
     if (editing) await adminFetch(`/admin/content/testimonials/${editing.id}`, { method: 'PUT', body: JSON.stringify(form) });
     else await adminFetch('/admin/content/testimonials', { method: 'POST', body: JSON.stringify(form) });
-    setSaving(false); setEditing(null); setForm(empty); load();
+    setSaving(false);
+    close();
+    load();
   };
   const del = async (id: number) => {
-    if (!confirm('Delete?')) return;
-    await adminFetch(`/admin/content/testimonials/${id}`, { method: 'DELETE' }); load();
+    if (!confirm('Delete this testimonial?')) return;
+    await adminFetch(`/admin/content/testimonials/${id}`, { method: 'DELETE' });
+    load();
   };
 
   return (
-    <AdminShell>
-      <div className="p-6 max-w-4xl">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Testimonials</h1>
-          <button onClick={() => { setEditing(null); setForm(empty); }} className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700">+ Add</button>
-        </div>
+      <PageWrap max="max-w-4xl">
+        <PageHeader
+          title="Testimonials"
+          subtitle="Client quotes shown on the public site."
+          action={<Button onClick={startNew}>＋ Add testimonial</Button>}
+        />
 
-        {(editing !== null || form.author !== '') && (
-          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Author</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={form.author}
-                  onChange={(e) => setForm({ ...form, author: e.target.value })} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Rating (1–5)</label>
-                <input type="number" min={1} max={5} className="w-full border rounded-lg px-3 py-2 text-sm"
-                  value={form.rating ?? ''}
-                  onChange={(e) => setForm({ ...form, rating: e.target.value ? +e.target.value : null })} />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Quote</label>
-              <textarea className="w-full border rounded-lg px-3 py-2 text-sm h-20 resize-none" value={form.quote}
-                onChange={(e) => setForm({ ...form, quote: e.target.value })} />
-            </div>
-            <div className="flex items-center gap-4">
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Position</label>
-                <input type="number" className="w-24 border rounded-lg px-3 py-2 text-sm" value={form.position}
-                  onChange={(e) => setForm({ ...form, position: +e.target.value })} />
-              </div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer mt-4">
-                <input type="checkbox" checked={form.published} onChange={(e) => setForm({ ...form, published: e.target.checked })} /> Published
-              </label>
-            </div>
-            <div className="flex gap-2">
-              <button disabled={saving} onClick={save} className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
-              <button onClick={() => { setEditing(null); setForm(empty); }} className="text-sm px-4 py-2 rounded-lg border">Cancel</button>
-            </div>
-          </div>
-        )}
-
-        <div className="space-y-2">
-          {items.map((t) => (
-            <div key={t.id} className="bg-white rounded-xl border border-gray-100 p-4 flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium text-sm text-gray-900">{t.author}</span>
-                  {t.rating && <span className="text-yellow-500 text-xs">{'★'.repeat(t.rating)}</span>}
-                  {!t.published && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Draft</span>}
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              initial={{ opacity: 0, y: -6, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: 'auto' }}
+              exit={{ opacity: 0, y: -6, height: 0 }}
+              transition={{ duration: 0.22 }}
+              className="mb-6 overflow-hidden"
+            >
+              <Card className="border-indigo-200/70 bg-gradient-to-br from-indigo-50/40 via-white to-white">
+                <h2 className="mb-4 text-sm font-semibold text-slate-900">{editing ? 'Edit testimonial' : 'New testimonial'}</h2>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Author">
+                      <Input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} />
+                    </Field>
+                    <Field label="Rating (1–5)">
+                      <Input type="number" min={1} max={5} value={form.rating ?? ''} onChange={(e) => setForm({ ...form, rating: e.target.value ? +e.target.value : null })} />
+                    </Field>
+                  </div>
+                  <Field label="Quote">
+                    <Textarea rows={3} value={form.quote} onChange={(e) => setForm({ ...form, quote: e.target.value })} />
+                  </Field>
+                  <div className="flex flex-wrap items-end gap-6">
+                    <Field label="Position">
+                      <Input type="number" value={form.position} onChange={(e) => setForm({ ...form, position: +e.target.value })} className="!w-24" />
+                    </Field>
+                    <Checkbox label="Published" checked={form.published} onChange={(e) => setForm({ ...form, published: e.target.checked })} />
+                  </div>
                 </div>
-                <p className="text-xs text-gray-600 line-clamp-2 italic">"{t.quote}"</p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button onClick={() => { setEditing(t); setForm({ author: t.author, quote: t.quote, rating: t.rating, position: t.position, published: t.published }); }} className="text-xs text-blue-600 hover:underline">Edit</button>
-                <button onClick={() => del(t.id)} className="text-xs text-red-600 hover:underline">Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </AdminShell>
+                <div className="mt-5 flex items-center gap-2">
+                  <Button onClick={save} loading={saving}>{saving ? "Saving…" : "Save"}</Button>
+                  <Button variant="secondary" onClick={close}>Cancel</Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {items.length === 0 ? (
+          <EmptyState
+            title="No testimonials yet"
+            description="Add a client quote to display on the public site."
+            action={<Button onClick={startNew}>＋ Add testimonial</Button>}
+            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.76-2.02-2-2H4c-1.24 0-2 .77-2 2v8c0 1.24.76 2 2 2h2c0 4-3 5-3 5zM15 21c3 0 7-1 7-8V5c0-1.25-.76-2.02-2-2h-4c-1.24 0-2 .77-2 2v8c0 1.24.76 2 2 2h2c0 4-3 5-3 5z" /></svg>}
+          />
+        ) : (
+          <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.03 } } }} className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {items.map((t) => (
+              <motion.div
+                key={t.id}
+                variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
+                whileHover={{ y: -2 }}
+                className="group relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
+              >
+                <svg className="absolute right-3 top-3 h-8 w-8 text-slate-100" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.76-2.02-2-2H4c-1.24 0-2 .77-2 2v8c0 1.24.76 2 2 2h2c0 4-3 5-3 5zM15 21c3 0 7-1 7-8V5c0-1.25-.76-2.02-2-2h-4c-1.24 0-2 .77-2 2v8c0 1.24.76 2 2 2h2c0 4-3 5-3 5z" />
+                </svg>
+                <div className="relative">
+                  <p className="text-sm leading-relaxed text-slate-700">"{t.quote}"</p>
+                  <div className="mt-4 flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">{t.author}</div>
+                      <div className="mt-0.5 flex items-center gap-2">
+                        {t.rating && <Stars n={t.rating} />}
+                        {!t.published && <Pill tone="slate">Draft</Pill>}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <Button variant="ghost" size="sm" onClick={() => startEdit(t)}>Edit</Button>
+                      <Button variant="ghost" size="sm" onClick={() => del(t.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </PageWrap>
   );
 }

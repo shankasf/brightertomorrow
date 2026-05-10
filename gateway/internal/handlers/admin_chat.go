@@ -22,16 +22,17 @@ func (h *AdminChatHandler) ListSessions(w http.ResponseWriter, r *http.Request) 
 	offset := (page - 1) * limit
 
 	type sessionRow struct {
-		ID          string  `json:"id"`
-		VisitorID   *string `json:"visitor_id"`
-		StartedAt   string  `json:"started_at"`
-		EndedAt     *string `json:"ended_at"`
-		MessageCount int    `json:"message_count"`
-		PurgedAt    *string `json:"purged_at"`
+		ID           string  `json:"id"`
+		VisitorID    *string `json:"visitor_id"`
+		Source       string  `json:"source"`
+		StartedAt    string  `json:"started_at"`
+		EndedAt      *string `json:"ended_at"`
+		MessageCount int     `json:"message_count"`
+		PurgedAt     *string `json:"purged_at"`
 	}
 
 	rows, err := h.Pool.Query(r.Context(),
-		`SELECT s.id, s.visitor_id,
+		`SELECT s.id, s.visitor_id, s.source,
 		        to_char(s.started_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		        to_char(s.ended_at,   'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		        count(m.id) AS message_count,
@@ -51,7 +52,7 @@ func (h *AdminChatHandler) ListSessions(w http.ResponseWriter, r *http.Request) 
 	var sessions []sessionRow
 	for rows.Next() {
 		var s sessionRow
-		if err := rows.Scan(&s.ID, &s.VisitorID, &s.StartedAt, &s.EndedAt, &s.MessageCount, &s.PurgedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.VisitorID, &s.Source, &s.StartedAt, &s.EndedAt, &s.MessageCount, &s.PurgedAt); err != nil {
 			slog.Error("admin chat scan", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return

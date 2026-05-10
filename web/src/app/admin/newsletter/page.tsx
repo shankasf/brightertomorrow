@@ -1,107 +1,170 @@
 'use client';
-import { useEffect, useState } from 'react';
-import AdminShell from '@/components/admin/AdminShell';
+import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
+import {
+  PageHeader, PageWrap, TableCard, THead, TH, TD,
+  Pill, Pagination, EmptyState, Input, SkeletonRows, Button,
+} from '@/components/admin/ui';
 
 type Subscriber = {
   id: number; email: string; created_at: string;
   unsubscribed_at: string | null; deletion_requested_at: string | null;
 };
 
+type Filter = 'all' | 'active' | 'unsubscribed' | 'deletion';
+
 export default function AdminNewsletterPage() {
   const [data, setData] = useState<{ data: Subscriber[]; total: number } | null>(null);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState<Record<number, boolean>>({});
+  const [busy, setBusy] = useState<Record<number, boolean>>({});
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
 
-  const loadData = () => {
-    adminFetch(`/admin/newsletter?page=${page}&limit=50`)
-      .then((r) => r.json())
-      .then(setData);
+  const load = () => {
+    setData(null);
+    adminFetch(`/admin/newsletter?page=${page}&limit=50`).then((r) => r.json()).then(setData);
   };
-
-  useEffect(loadData, [page]);
+  useEffect(load, [page]);
 
   const unsubscribe = async (id: number) => {
     if (!confirm('Mark this subscriber as unsubscribed?')) return;
-    setLoading((l) => ({ ...l, [id]: true }));
+    setBusy((b) => ({ ...b, [id]: true }));
     await adminFetch(`/admin/newsletter/${id}`, { method: 'DELETE' });
-    setLoading((l) => ({ ...l, [id]: false }));
-    loadData();
+    setBusy((b) => ({ ...b, [id]: false }));
+    load();
   };
-
   const requestDeletion = async (id: number) => {
     if (!confirm('Mark this email for deletion (Nevada NRS 603A)?')) return;
-    setLoading((l) => ({ ...l, [id]: true }));
+    setBusy((b) => ({ ...b, [id]: true }));
     await adminFetch(`/admin/newsletter/${id}/request-deletion`, { method: 'POST' });
-    setLoading((l) => ({ ...l, [id]: false }));
-    loadData();
+    setBusy((b) => ({ ...b, [id]: false }));
+    load();
+  };
+
+  const filtered = useMemo(() => {
+    if (!data) return null;
+    let rows = data.data;
+    if (query.trim()) rows = rows.filter((s) => s.email.toLowerCase().includes(query.toLowerCase()));
+    if (filter === 'active') rows = rows.filter((s) => !s.unsubscribed_at && !s.deletion_requested_at);
+    if (filter === 'unsubscribed') rows = rows.filter((s) => s.unsubscribed_at && !s.deletion_requested_at);
+    if (filter === 'deletion') rows = rows.filter((s) => s.deletion_requested_at);
+    return rows;
+  }, [data, query, filter]);
+
+  const counts = useMemo(() => {
+    if (!data) return { all: 0, active: 0, unsubscribed: 0, deletion: 0 };
+    return {
+      all: data.data.length,
+      active: data.data.filter((s) => !s.unsubscribed_at && !s.deletion_requested_at).length,
+      unsubscribed: data.data.filter((s) => s.unsubscribed_at && !s.deletion_requested_at).length,
+      deletion: data.data.filter((s) => s.deletion_requested_at).length,
+    };
+  }, [data]);
+
+  const FilterChip = ({ value, label, count, tone }: { value: Filter; label: string; count: number; tone?: string }) => {
+    const active = filter === value;
+    return (
+      <button
+        onClick={() => setFilter(value)}
+        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all ${
+          active
+            ? 'bg-slate-900 text-white shadow-sm ring-1 ring-slate-900'
+            : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:ring-slate-300'
+        }`}
+      >
+        {label}
+        <span className={`rounded-full px-1.5 py-0 text-[10px] tabular-nums ${active ? 'bg-white/20' : tone ?? 'bg-slate-100'}`}>
+          {count}
+        </span>
+      </button>
+    );
   };
 
   return (
-    <AdminShell>
-      <div className="p-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Newsletter Subscribers</h1>
+      <PageWrap>
+        <PageHeader
+          title="Newsletter subscribers"
+          subtitle="Manage opt-ins, unsubscribes, and right-to-erasure requests (Nevada NRS 603A)."
+          action={
+            <div className="relative">
+              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+              </svg>
+              <Input placeholder="Search email…" value={query} onChange={(e) => setQuery(e.target.value)} className="!w-60 !pl-9" />
+            </div>
+          }
+        />
 
-        {data ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <FilterChip value="all" label="All" count={counts.all} />
+          <FilterChip value="active" label="Active" count={counts.active} />
+          <FilterChip value="unsubscribed" label="Unsubscribed" count={counts.unsubscribed} />
+          <FilterChip value="deletion" label="Deletion requested" count={counts.deletion} />
+        </div>
+
+        {!data ? (
+          <SkeletonRows rows={6} cols={4} />
+        ) : filtered && filtered.length === 0 ? (
+          <EmptyState
+            title={query || filter !== 'all' ? 'No matches' : 'No subscribers yet'}
+            description={query || filter !== 'all' ? 'Try a different search or filter.' : 'New newsletter signups will appear here.'}
+            icon={
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M4 4h12a2 2 0 0 1 2 2v14H4z" /><path d="M18 8h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2" />
+              </svg>
+            }
+          />
+        ) : (
           <>
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-100">
-                  <tr>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Email</th>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Subscribed</th>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Status</th>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {data.data.map((s) => (
-                    <tr key={s.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-900">{s.email}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{s.created_at.slice(0, 10)}</td>
-                      <td className="px-4 py-3">
-                        {s.deletion_requested_at ? (
-                          <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Deletion Requested</span>
-                        ) : s.unsubscribed_at ? (
-                          <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Unsubscribed</span>
-                        ) : (
-                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Active</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 space-x-2">
+            <TableCard>
+              <THead>
+                <tr>
+                  <TH>Email</TH>
+                  <TH>Subscribed</TH>
+                  <TH>Status</TH>
+                  <TH className="text-right">Actions</TH>
+                </tr>
+              </THead>
+              <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.012 } } }}>
+                {filtered!.map((s) => (
+                  <motion.tr
+                    key={s.id}
+                    variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
+                    className="group border-t border-slate-100 transition-colors hover:bg-slate-50/70"
+                  >
+                    <TD className="font-medium text-slate-900">{s.email}</TD>
+                    <TD className="text-xs tabular-nums text-slate-500">{s.created_at.slice(0, 10)}</TD>
+                    <TD>
+                      {s.deletion_requested_at ? (
+                        <Pill tone="red" dot>Deletion requested</Pill>
+                      ) : s.unsubscribed_at ? (
+                        <Pill tone="slate">Unsubscribed</Pill>
+                      ) : (
+                        <Pill tone="green" dot>Active</Pill>
+                      )}
+                    </TD>
+                    <TD className="text-right">
+                      <div className="flex justify-end gap-1.5 opacity-70 transition-opacity group-hover:opacity-100">
                         {!s.unsubscribed_at && !s.deletion_requested_at && (
-                          <button
-                            disabled={loading[s.id]}
-                            onClick={() => unsubscribe(s.id)}
-                            className="text-xs text-amber-600 hover:underline disabled:opacity-40"
-                          >Unsubscribe</button>
+                          <Button variant="ghost" size="sm" disabled={busy[s.id]} onClick={() => unsubscribe(s.id)}>
+                            Unsubscribe
+                          </Button>
                         )}
                         {!s.deletion_requested_at && (
-                          <button
-                            disabled={loading[s.id]}
-                            onClick={() => requestDeletion(s.id)}
-                            className="text-xs text-red-600 hover:underline disabled:opacity-40"
-                          >Request Deletion</button>
+                          <Button variant="ghost" size="sm" disabled={busy[s.id]} onClick={() => requestDeletion(s.id)} className="!text-rose-600 hover:!bg-rose-50">
+                            Request deletion
+                          </Button>
                         )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center justify-between mt-4 text-sm text-gray-500">
-              <span>{data.total} total</span>
-              <div className="flex gap-2">
-                <button disabled={page === 1} onClick={() => setPage(p => p - 1)}
-                  className="px-3 py-1 rounded border disabled:opacity-40 hover:bg-gray-50">← Prev</button>
-                <span className="px-2">Page {page}</span>
-                <button disabled={page * 50 >= data.total} onClick={() => setPage(p => p + 1)}
-                  className="px-3 py-1 rounded border disabled:opacity-40 hover:bg-gray-50">Next →</button>
-              </div>
-            </div>
+                      </div>
+                    </TD>
+                  </motion.tr>
+                ))}
+              </motion.tbody>
+            </TableCard>
+            <Pagination page={page} total={data.total} pageSize={50} onChange={setPage} />
           </>
-        ) : <div className="text-gray-400">Loading…</div>}
-      </div>
-    </AdminShell>
+        )}
+      </PageWrap>
   );
 }

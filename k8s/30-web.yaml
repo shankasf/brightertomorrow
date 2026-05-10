@@ -25,8 +25,16 @@ spec:
                 secretKeyRef:
                   name: bt-config
                   key: GATEWAY_URL
-            - name: NODE_ENV
-              value: production
+            # NODE_ENV intentionally NOT set here: Next.js infers it from the
+            # runtime (`next dev` → development; standalone `node server.js` →
+            # production, set in web/Dockerfile). Setting it explicitly causes
+            # a "non-standard NODE_ENV" warning when Tilt swaps in the dev image.
+            - name: NEXT_PUBLIC_AWS_REGION
+              valueFrom: { secretKeyRef: { name: bt-config, key: NEXT_PUBLIC_AWS_REGION } }
+            - name: NEXT_PUBLIC_COGNITO_USER_POOL_ID
+              valueFrom: { secretKeyRef: { name: bt-config, key: NEXT_PUBLIC_COGNITO_USER_POOL_ID } }
+            - name: NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: bt-config, key: NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID } }
           readinessProbe:
             httpGet: { path: /, port: 3000 }
             initialDelaySeconds: 5

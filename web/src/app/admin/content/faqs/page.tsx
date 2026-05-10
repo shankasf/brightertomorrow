@@ -1,7 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import AdminShell from '@/components/admin/AdminShell';
+import { motion, AnimatePresence } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
+import {
+  PageHeader, PageWrap, Card, Button, Input, Textarea, Field,
+  Pill, EmptyState, Checkbox,
+} from '@/components/admin/ui';
 
 type FAQ = { id: number; question: string; answer: string; category: string | null; position: number; published: boolean };
 type FAQForm = Omit<FAQ, 'id'>;
@@ -11,23 +15,26 @@ export default function FAQsPage() {
   const [faqs, setFaqs] = useState<FAQ[]>([]);
   const [editing, setEditing] = useState<FAQ | null>(null);
   const [form, setForm] = useState<FAQForm>(empty);
+  const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const load = () =>
-    adminFetch('/admin/content/faqs').then((r) => r.json()).then((d) => setFaqs(d.faqs));
-
+  const load = () => adminFetch('/admin/content/faqs').then((r) => r.json()).then((d) => setFaqs(d.faqs));
   useEffect(() => { load(); }, []);
+
+  const startNew = () => { setEditing(null); setForm(empty); setOpen(true); };
+  const startEdit = (f: FAQ) => {
+    setEditing(f);
+    setForm({ question: f.question, answer: f.answer, category: f.category, position: f.position, published: f.published });
+    setOpen(true);
+  };
+  const close = () => { setOpen(false); setEditing(null); setForm(empty); };
 
   const save = async () => {
     setSaving(true);
-    if (editing) {
-      await adminFetch(`/admin/content/faqs/${editing.id}`, { method: 'PUT', body: JSON.stringify(form) });
-    } else {
-      await adminFetch('/admin/content/faqs', { method: 'POST', body: JSON.stringify(form) });
-    }
+    if (editing) await adminFetch(`/admin/content/faqs/${editing.id}`, { method: 'PUT', body: JSON.stringify(form) });
+    else await adminFetch('/admin/content/faqs', { method: 'POST', body: JSON.stringify(form) });
     setSaving(false);
-    setEditing(null);
-    setForm(empty);
+    close();
     load();
   };
 
@@ -38,78 +45,85 @@ export default function FAQsPage() {
   };
 
   return (
-    <AdminShell>
-      <div className="p-6 max-w-4xl">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">FAQs</h1>
-          <button onClick={() => { setEditing(null); setForm(empty); }}
-            className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700">+ New FAQ</button>
-        </div>
+      <PageWrap max="max-w-4xl">
+        <PageHeader
+          title="FAQs"
+          subtitle="Frequently asked questions shown on the public site."
+          action={<Button onClick={startNew}>＋ New FAQ</Button>}
+        />
 
-        {(editing !== null || form.question !== '') && (
-          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6 space-y-4">
-            <h2 className="font-semibold text-gray-700">{editing ? 'Edit FAQ' : 'New FAQ'}</h2>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Question</label>
-              <input className="w-full border rounded-lg px-3 py-2 text-sm" value={form.question}
-                onChange={(e) => setForm({ ...form, question: e.target.value })} />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 mb-1 block">Answer</label>
-              <textarea className="w-full border rounded-lg px-3 py-2 text-sm h-24 resize-none" value={form.answer}
-                onChange={(e) => setForm({ ...form, answer: e.target.value })} />
-            </div>
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <label className="text-xs text-gray-500 mb-1 block">Category</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={form.category ?? ''}
-                  onChange={(e) => setForm({ ...form, category: e.target.value || null })} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Position</label>
-                <input type="number" className="w-24 border rounded-lg px-3 py-2 text-sm" value={form.position}
-                  onChange={(e) => setForm({ ...form, position: +e.target.value })} />
-              </div>
-              <div className="flex items-end pb-1">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={form.published}
-                    onChange={(e) => setForm({ ...form, published: e.target.checked })} />
-                  Published
-                </label>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button disabled={saving} onClick={save}
-                className="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button onClick={() => { setEditing(null); setForm(empty); }}
-                className="text-sm px-4 py-2 rounded-lg border hover:bg-gray-50">Cancel</button>
-            </div>
-          </div>
-        )}
-
-        <div className="space-y-2">
-          {faqs.map((f) => (
-            <div key={f.id} className="bg-white rounded-xl border border-gray-100 p-4 flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  {!f.published && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Draft</span>}
-                  {f.category && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{f.category}</span>}
-                  <span className="text-xs text-gray-400">pos {f.position}</span>
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              initial={{ opacity: 0, y: -6, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: 'auto' }}
+              exit={{ opacity: 0, y: -6, height: 0 }}
+              transition={{ duration: 0.22 }}
+              className="mb-6 overflow-hidden"
+            >
+              <Card className="border-indigo-200/70 bg-gradient-to-br from-indigo-50/40 via-white to-white">
+                <h2 className="mb-4 text-sm font-semibold text-slate-900">{editing ? 'Edit FAQ' : 'New FAQ'}</h2>
+                <div className="space-y-4">
+                  <Field label="Question">
+                    <Input value={form.question} onChange={(e) => setForm({ ...form, question: e.target.value })} placeholder="What time are appointments?" />
+                  </Field>
+                  <Field label="Answer">
+                    <Textarea rows={4} value={form.answer} onChange={(e) => setForm({ ...form, answer: e.target.value })} />
+                  </Field>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <Field label="Category">
+                      <Input value={form.category ?? ''} onChange={(e) => setForm({ ...form, category: e.target.value || null })} placeholder="General" />
+                    </Field>
+                    <Field label="Position">
+                      <Input type="number" value={form.position} onChange={(e) => setForm({ ...form, position: +e.target.value })} />
+                    </Field>
+                    <div className="flex items-end pb-2">
+                      <Checkbox label="Published" checked={form.published} onChange={(e) => setForm({ ...form, published: e.target.checked })} />
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm font-medium text-gray-900">{f.question}</p>
-                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{f.answer}</p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button onClick={() => { setEditing(f); setForm({ question: f.question, answer: f.answer, category: f.category, position: f.position, published: f.published }); }}
-                  className="text-xs text-blue-600 hover:underline">Edit</button>
-                <button onClick={() => del(f.id)} className="text-xs text-red-600 hover:underline">Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </AdminShell>
+                <div className="mt-5 flex items-center gap-2">
+                  <Button onClick={save} loading={saving}>{saving ? "Saving…" : "Save"}</Button>
+                  <Button variant="secondary" onClick={close}>Cancel</Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {faqs.length === 0 ? (
+          <EmptyState
+            title="No FAQs yet"
+            description="Add your first FAQ to start populating the help section."
+            action={<Button onClick={startNew}>＋ New FAQ</Button>}
+            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 1 1 5.8 1c-.5 1.6-2.9 1.7-2.9 4M12 17h.01" /></svg>}
+          />
+        ) : (
+          <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.025 } } }} className="space-y-2">
+            {faqs.map((f) => (
+              <motion.div
+                key={f.id}
+                variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
+                whileHover={{ y: -1 }}
+                className="group flex items-start justify-between gap-4 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                    {!f.published && <Pill tone="slate">Draft</Pill>}
+                    {f.category && <Pill tone="blue">{f.category}</Pill>}
+                    <span className="font-mono text-[10px] tabular-nums text-slate-400">pos {f.position}</span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900">{f.question}</p>
+                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{f.answer}</p>
+                </div>
+                <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <Button variant="ghost" size="sm" onClick={() => startEdit(f)}>Edit</Button>
+                  <Button variant="ghost" size="sm" onClick={() => del(f.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </PageWrap>
   );
 }

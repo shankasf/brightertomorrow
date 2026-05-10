@@ -6,6 +6,7 @@ answer with real, current site data instead of hallucinating.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import logging
 import os
 import time
@@ -16,6 +17,14 @@ from agents import function_tool
 from openai import OpenAI
 
 from .db import conn
+
+# Per-request modality marker. Tools that submit intake / book appointments
+# stamp this value into the gateway payload so admin-side reports can split
+# voice traffic from chat traffic. Defaults to "chat-agent"; the voice
+# WebSocket handler overrides it with "voice-agent" before running the agent.
+agent_source: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "bt_agent_source", default="chat-agent"
+)
 
 EMBED_MODEL = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 
@@ -228,7 +237,7 @@ def request_intake_callback(full_name: str, email: str, phone: str, message: str
         "home_address": "Not provided",
         "sex": "Not provided",
         "notes": message,
-        "source": "chat-agent",
+        "source": agent_source.get(),
     }
 
     try:
@@ -543,7 +552,7 @@ def book_with_insurance(
         "home_address": "Not provided",   # chat agent doesn't collect this today
         "sex": "Not provided",
         "notes": f"Reason: {reason}",
-        "source": "chat-agent",
+        "source": agent_source.get(),
     }
     if payment_method == "insurance":
         submit_body.update({

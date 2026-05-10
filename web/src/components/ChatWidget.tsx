@@ -217,7 +217,7 @@ export default function ChatWidget() {
 
       if (!receivedAnyDelta && !assistantText) {
         // Server closed without sending any content.
-        setMsgs((prev) => [...prev, { role: "assistant", content: "Sorry — I had trouble responding." }]);
+        setMsgs((prev) => [...prev, { role: "assistant", content: "Sorry — I had trouble responding. For immediate help, please call us at [725-238-6990](tel:725-238-6990) or use our [contact form](/contact). We typically reply within one business day." }]);
       }
     } catch (err) {
       console.warn("chat_stream: failed", err);
@@ -225,7 +225,7 @@ export default function ChatWidget() {
       // or append a fresh one if nothing arrived.
       setMsgs((prev) => {
         const last = prev[prev.length - 1];
-        const fallback: Msg = { role: "assistant", content: "Sorry — I had trouble reaching the server." };
+        const fallback: Msg = { role: "assistant", content: "Sorry — I had trouble reaching the server. For immediate help, please call us at [725-238-6990](tel:725-238-6990) or use our [contact form](/contact). We typically reply within one business day." };
         if (last && last.role === "assistant" && !assistantText) {
           const copy = prev.slice();
           copy[copy.length - 1] = fallback;

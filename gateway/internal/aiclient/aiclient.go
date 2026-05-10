@@ -12,8 +12,9 @@ import (
 
 // Client talks to the Python AI service.
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL      string
+	httpClient   *http.Client
+	streamClient *http.Client // no timeout — rely on context cancellation
 }
 
 // New returns a Client targeting baseURL.
@@ -22,6 +23,9 @@ func New(baseURL string) *Client {
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
+		},
+		streamClient: &http.Client{
+			Timeout: 0, // streaming responses; caller controls lifetime via context
 		},
 	}
 }
@@ -106,6 +110,29 @@ func (c *Client) Chat(ctx context.Context, sessionID, message string) (string, e
 	}
 
 	return out.Reply, nil
+}
+
+// ChatStream opens a streaming POST to the AI service /chat/stream endpoint.
+// Returns the raw response so the caller can pipe the SSE body to the client.
+// Caller is responsible for closing the response body.
+func (c *Client) ChatStream(ctx context.Context, sessionID, message string) (*http.Response, error) {
+	reqBody, err := json.Marshal(chatRequest{SessionID: sessionID, Message: message})
+	if err != nil {
+		return nil, fmt.Errorf("aiclient: marshal stream request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/stream", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("aiclient: build stream request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.streamClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("aiclient: do stream request: %w", err)
+	}
+
+	return resp, nil
 }
 
 // CheckCoverage verifies insurance details through the AI service's internal coverage endpoint.

@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation';
 export type AdminUser = { id: number; email: string; role: 'superadmin' | 'auditor' };
 
 const TOKEN_KEY = 'bt_admin_token';
+const USER_CACHE_KEY = 'bt_admin_user_v1';
+const REVALIDATE_TS_KEY = 'bt_admin_revalidate_ts';
+// Only re-fetch /auth/me at most once per minute per tab.
+const REVALIDATE_INTERVAL_MS = 60_000;
 
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -32,16 +36,48 @@ export function adminFetch(path: string, init?: RequestInit): Promise<Response> 
   });
 }
 
+function readCachedUser(): AdminUser | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(USER_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as AdminUser) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(u: AdminUser): void {
+  if (typeof window === 'undefined') return;
+  try { sessionStorage.setItem(USER_CACHE_KEY, JSON.stringify(u)); } catch { /* quota */ }
+}
+
+function clearCachedUser(): void {
+  if (typeof window === 'undefined') return;
+  try { sessionStorage.removeItem(USER_CACHE_KEY); } catch { /* ignore */ }
+}
+
 export function useAdminAuth() {
-  const [user, setUser] = useState<AdminUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Hydrate synchronously from sessionStorage on mount so admin pages render
+  // immediately on navigation instead of paying ~100ms for /auth/me roundtrip
+  // every time. We still revalidate in the background — if the token has been
+  // revoked or expired, the catch block redirects to /login.
+  const [user, setUser] = useState<AdminUser | null>(() => readCachedUser());
+  const [loading, setLoading] = useState(() => readCachedUser() === null);
   const router = useRouter();
 
   useEffect(() => {
     const token = getStoredToken();
     if (!token) {
       setLoading(false);
+      clearCachedUser();
       router.replace('/admin/login');
+      return;
+    }
+    // Skip the /auth/me revalidation if we already revalidated within the last
+    // minute in this tab — avoids a redundant round-trip on every navigation
+    // when the shell remounts (or on rapid back/forward).
+    const lastTs = Number(sessionStorage.getItem(REVALIDATE_TS_KEY) ?? 0);
+    if (readCachedUser() && Date.now() - lastTs < REVALIDATE_INTERVAL_MS) {
       return;
     }
     fetch('/admin/api/auth/me', {
@@ -51,9 +87,16 @@ export function useAdminAuth() {
         if (!r.ok) throw new Error('unauthorized');
         return r.json();
       })
-      .then((u) => { setUser(u); setLoading(false); })
+      .then((u: AdminUser) => {
+        setUser(u);
+        writeCachedUser(u);
+        try { sessionStorage.setItem(REVALIDATE_TS_KEY, String(Date.now())); } catch { /* quota */ }
+        setLoading(false);
+      })
       .catch(() => {
         localStorage.removeItem(TOKEN_KEY);
+        clearCachedUser();
+        try { sessionStorage.removeItem(REVALIDATE_TS_KEY); } catch { /* ignore */ }
         setLoading(false);
         router.replace('/admin/login');
       });
@@ -68,6 +111,7 @@ export function useAdminAuth() {
       }).catch(() => {});
       localStorage.removeItem(TOKEN_KEY);
     }
+    clearCachedUser();
     router.replace('/admin/login');
   }, [router]);
 

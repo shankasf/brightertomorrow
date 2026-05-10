@@ -82,7 +82,19 @@ type DDBClient interface {
 	PutItem(ctx context.Context, in *dynamodb.PutItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	GetItem(ctx context.Context, in *dynamodb.GetItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
 	Query(ctx context.Context, in *dynamodb.QueryInput, opts ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
+	BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
 	DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, opts ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
+}
+
+// ChatTurn is one user/assistant message in a chat (or voice) session.
+// PK = CHAT#<session_id>, SK = TURN#<RFC3339Nano>#<role-short>
+// so we can Query a session in chronological order without an extra index.
+type ChatTurn struct {
+	SessionID   string    `dynamodbav:"sessionId"`
+	Role        string    `dynamodbav:"role"`        // 'user' | 'assistant' | 'system' | 'tool'
+	Content     string    `dynamodbav:"content"`     // plaintext message body
+	CreatedAt   time.Time `dynamodbav:"createdAt"`
+	RetainUntil time.Time `dynamodbav:"retainUntil"` // 10y from CreatedAt
 }
 
 // Store is the gateway-facing API. Construct with New.
@@ -274,6 +286,153 @@ var (
 	ErrNotFound      = errors.New("phi: intake record not found")
 	ErrAlreadyExists = errors.New("phi: intake submission_uuid already exists")
 )
+
+// ---------------------------------------------------------------------------
+// Chat turns — full conversation history lives in DynamoDB. Postgres only
+// keeps the session id + counters. §164.502(b)
+// ---------------------------------------------------------------------------
+
+func chatPK(sessionID string) string { return "CHAT#" + sessionID }
+
+// chatSK returns a sortable composite. Nano-precision timestamp keeps two
+// turns submitted in the same millisecond ordered correctly; the role suffix
+// disambiguates the rare case where user+assistant share the same ts.
+func chatSK(t time.Time, role string) string {
+	short := "u"
+	if role == "assistant" {
+		short = "a"
+	} else if role == "system" {
+		short = "s"
+	} else if role == "tool" {
+		short = "t"
+	}
+	return "TURN#" + t.UTC().Format(time.RFC3339Nano) + "#" + short
+}
+
+// PutChatTurn writes a single chat/voice turn. Caller must populate
+// SessionID, Role, Content, CreatedAt; RetainUntil defaults to +10y.
+func (s *Store) PutChatTurn(ctx context.Context, t ChatTurn) error {
+	if t.SessionID == "" {
+		return errors.New("phi: chat turn SessionID is required")
+	}
+	if t.Role == "" {
+		return errors.New("phi: chat turn Role is required")
+	}
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = time.Now().UTC()
+	}
+	if t.RetainUntil.IsZero() {
+		t.RetainUntil = t.CreatedAt.AddDate(10, 0, 0)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	item, err := attributevalue.MarshalMap(t)
+	if err != nil {
+		return fmt.Errorf("phi: marshal chat turn: %w", err)
+	}
+	item["PK"] = &ddbtypes.AttributeValueMemberS{Value: chatPK(t.SessionID)}
+	item["SK"] = &ddbtypes.AttributeValueMemberS{Value: chatSK(t.CreatedAt, t.Role)}
+
+	if _, err = s.ddb.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(s.tableName),
+		Item:      item,
+	}); err != nil {
+		return fmt.Errorf("phi: put chat turn: %w", err)
+	}
+	return nil
+}
+
+// ListChatTurns returns up to `limit` turns for the session. If `desc` is
+// true, returns newest-first (used by AI to pull recent history); otherwise
+// oldest-first (used by admin transcript view).
+func (s *Store) ListChatTurns(ctx context.Context, sessionID string, limit int32, desc bool) ([]ChatTurn, error) {
+	if sessionID == "" {
+		return nil, errors.New("phi: SessionID is required")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	out, err := s.ddb.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(s.tableName),
+		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :sk)"),
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{
+			":pk": &ddbtypes.AttributeValueMemberS{Value: chatPK(sessionID)},
+			":sk": &ddbtypes.AttributeValueMemberS{Value: "TURN#"},
+		},
+		ScanIndexForward: aws.Bool(!desc),
+		Limit:            aws.Int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("phi: list chat turns: %w", err)
+	}
+	turns := make([]ChatTurn, 0, len(out.Items))
+	for _, it := range out.Items {
+		var t ChatTurn
+		if err := attributevalue.UnmarshalMap(it, &t); err != nil {
+			return nil, fmt.Errorf("phi: unmarshal chat turn: %w", err)
+		}
+		turns = append(turns, t)
+	}
+	return turns, nil
+}
+
+// DeleteChatSession removes every turn for a session. Used by the admin
+// purge endpoint and the retention sweeper. BatchWriteItem caps at 25 keys
+// per call, so we loop until the session has no more turns.
+func (s *Store) DeleteChatSession(ctx context.Context, sessionID string) (int, error) {
+	if sessionID == "" {
+		return 0, errors.New("phi: SessionID is required")
+	}
+	deleted := 0
+	for {
+		// Fetch a page of SK values only (smaller payload than full items).
+		qctx, qcancel := context.WithTimeout(ctx, s.timeout)
+		out, err := s.ddb.Query(qctx, &dynamodb.QueryInput{
+			TableName:              aws.String(s.tableName),
+			KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :sk)"),
+			ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{
+				":pk": &ddbtypes.AttributeValueMemberS{Value: chatPK(sessionID)},
+				":sk": &ddbtypes.AttributeValueMemberS{Value: "TURN#"},
+			},
+			ProjectionExpression: aws.String("PK, SK"),
+			Limit:                aws.Int32(25),
+		})
+		qcancel()
+		if err != nil {
+			return deleted, fmt.Errorf("phi: delete chat: query: %w", err)
+		}
+		if len(out.Items) == 0 {
+			return deleted, nil
+		}
+
+		writes := make([]ddbtypes.WriteRequest, 0, len(out.Items))
+		for _, it := range out.Items {
+			writes = append(writes, ddbtypes.WriteRequest{
+				DeleteRequest: &ddbtypes.DeleteRequest{
+					Key: map[string]ddbtypes.AttributeValue{
+						"PK": it["PK"],
+						"SK": it["SK"],
+					},
+				},
+			})
+		}
+
+		bctx, bcancel := context.WithTimeout(ctx, s.timeout)
+		_, err = s.ddb.BatchWriteItem(bctx, &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]ddbtypes.WriteRequest{s.tableName: writes},
+		})
+		bcancel()
+		if err != nil {
+			return deleted, fmt.Errorf("phi: delete chat: batch: %w", err)
+		}
+		deleted += len(writes)
+	}
+}
 
 func validate(r IntakeRecord) error {
 	switch {

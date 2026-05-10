@@ -1,13 +1,36 @@
 'use client';
 import { useEffect, useState } from 'react';
-import AdminShell from '@/components/admin/AdminShell';
+import { motion, AnimatePresence } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
+import {
+  PageHeader, PageWrap, Card, Button, Input, Field, LoadingScreen,
+} from '@/components/admin/ui';
 
 type Settings = {
   brand_name: string; tagline: string | null; primary_phone: string | null; primary_email: string | null;
   primary_color: string; text_color: string; muted_color: string; surface_color: string;
   logo_url: string | null; hero_image_url: string | null;
 };
+
+const fields: { label: string; key: keyof Settings; type?: string; group: 'identity' | 'contact' | 'theme' | 'media' }[] = [
+  { label: 'Brand name', key: 'brand_name', group: 'identity' },
+  { label: 'Tagline', key: 'tagline', group: 'identity' },
+  { label: 'Primary phone', key: 'primary_phone', group: 'contact' },
+  { label: 'Primary email', key: 'primary_email', group: 'contact' },
+  { label: 'Primary color', key: 'primary_color', type: 'color', group: 'theme' },
+  { label: 'Text color', key: 'text_color', type: 'color', group: 'theme' },
+  { label: 'Muted color', key: 'muted_color', type: 'color', group: 'theme' },
+  { label: 'Surface color', key: 'surface_color', type: 'color', group: 'theme' },
+  { label: 'Logo URL', key: 'logo_url', group: 'media' },
+  { label: 'Hero image URL', key: 'hero_image_url', group: 'media' },
+];
+
+const sections = [
+  { id: 'identity' as const, title: 'Identity', desc: 'Brand name and tagline displayed across the site.' },
+  { id: 'contact' as const, title: 'Contact', desc: 'How visitors reach the practice.' },
+  { id: 'theme' as const, title: 'Theme', desc: 'Color tokens used by the public site.' },
+  { id: 'media' as const, title: 'Media', desc: 'Logo and hero image URLs.' },
+];
 
 export default function SettingsPage() {
   const [form, setForm] = useState<Settings | null>(null);
@@ -28,47 +51,79 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const f = (key: keyof Settings) => ({
-    value: (form?.[key] as string) ?? '',
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
-      form && setForm({ ...form, [key]: e.target.value || null }),
-  });
-
   return (
-    <AdminShell>
-      <div className="p-6 max-w-2xl">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Site Settings</h1>
-
-        {form ? (
-          <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-4">
-            {[
-              ['Brand Name', 'brand_name'],
-              ['Tagline', 'tagline'],
-              ['Primary Phone', 'primary_phone'],
-              ['Primary Email', 'primary_email'],
-              ['Primary Color', 'primary_color'],
-              ['Text Color', 'text_color'],
-              ['Muted Color', 'muted_color'],
-              ['Surface Color', 'surface_color'],
-              ['Logo URL', 'logo_url'],
-              ['Hero Image URL', 'hero_image_url'],
-            ].map(([label, key]) => (
-              <div key={key}>
-                <label className="text-xs text-gray-500 mb-1 block">{label}</label>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" {...f(key as keyof Settings)} />
-              </div>
-            ))}
-
-            <div className="flex items-center gap-3 pt-2">
-              <button disabled={saving} onClick={save}
-                className="bg-blue-600 text-white text-sm px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                {saving ? 'Saving…' : 'Save Changes'}
-              </button>
-              {saved && <span className="text-sm text-green-600">✓ Saved</span>}
+      <PageWrap max="max-w-3xl">
+        <PageHeader
+          title="Site settings"
+          subtitle="Identity, contact details, theme, and media used across the public site."
+          action={
+            <div className="flex items-center gap-2">
+              <AnimatePresence>
+                {saved && (
+                  <motion.span
+                    initial={{ opacity: 0, x: 6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 6 }}
+                    className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m5 13 4 4L19 7" />
+                    </svg>
+                    Saved
+                  </motion.span>
+                )}
+              </AnimatePresence>
+              <Button onClick={save} loading={saving} disabled={!form}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </Button>
             </div>
+          }
+        />
+
+        {!form ? (
+          <LoadingScreen label="Loading settings" height={320} />
+        ) : (
+          <div className="space-y-5">
+            {sections.map((sec) => (
+              <Card key={sec.id}>
+                <div className="mb-4 flex items-baseline justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-900">{sec.title}</h2>
+                    <p className="mt-0.5 text-xs text-slate-500">{sec.desc}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {fields.filter((f) => f.group === sec.id).map((f) => (
+                    <div key={f.key}>
+                      <Field label={f.label}>
+                        {f.type === 'color' ? (
+                          <div className="flex items-stretch gap-2">
+                            <input
+                              type="color"
+                              value={(form[f.key] as string) || '#000000'}
+                              onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                              className="h-9 w-12 cursor-pointer rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm"
+                            />
+                            <Input
+                              value={(form[f.key] as string) ?? ''}
+                              onChange={(e) => setForm({ ...form, [f.key]: e.target.value || null })}
+                              className="font-mono uppercase"
+                            />
+                          </div>
+                        ) : (
+                          <Input
+                            value={(form[f.key] as string) ?? ''}
+                            onChange={(e) => setForm({ ...form, [f.key]: e.target.value || null })}
+                          />
+                        )}
+                      </Field>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            ))}
           </div>
-        ) : <div className="text-gray-400">Loading…</div>}
-      </div>
-    </AdminShell>
+        )}
+      </PageWrap>
   );
 }

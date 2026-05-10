@@ -1,80 +1,136 @@
 'use client';
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import AdminShell from '@/components/admin/AdminShell';
+import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
+import {
+  PageHeader, PageWrap, TableCard, THead, TH, TD,
+  Pill, Pagination, EmptyState, SkeletonRows,
+} from '@/components/admin/ui';
 
 type Session = {
-  id: string; visitor_id: string | null; started_at: string;
+  id: string; visitor_id: string | null; source: 'chat' | 'voice'; started_at: string;
   ended_at: string | null; message_count: number; purged_at: string | null;
 };
 
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return '—';
+  return iso.slice(0, 16).replace('T', ' ');
+}
+
+function durationBetween(a: string, b: string | null): string | null {
+  if (!b) return null;
+  const ms = Date.parse(b) - Date.parse(a);
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const m = Math.round(ms / 60000);
+  if (m < 1) return '<1m';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
 export default function AdminChatPage() {
+  const router = useRouter();
   const [data, setData] = useState<{ data: Session[]; total: number } | null>(null);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    adminFetch(`/admin/chat/sessions?page=${page}&limit=25`)
-      .then((r) => r.json())
-      .then(setData);
+    setData(null);
+    adminFetch(`/admin/chat/sessions?page=${page}&limit=25`).then((r) => r.json()).then(setData);
   }, [page]);
 
   return (
-    <AdminShell>
-      <div className="p-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Chat Sessions</h1>
+      <PageWrap>
+        <PageHeader
+          title="Chat sessions"
+          subtitle="Visitor conversations handled by the AI triage agent. Click a session to view the full transcript — that access is logged."
+        />
 
-        {data ? (
+        {!data ? (
+          <SkeletonRows rows={6} cols={6} />
+        ) : data.data.length === 0 ? (
+          <EmptyState
+            title="No chat sessions yet"
+            description="Sessions started from the website chat widget will appear here."
+            icon={
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M21 12a8 8 0 0 1-11.4 7.2L3 21l1.8-6.6A8 8 0 1 1 21 12z" />
+              </svg>
+            }
+          />
+        ) : (
           <>
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-100">
-                  <tr>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Session ID</th>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Started</th>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Ended</th>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Messages</th>
-                    <th className="text-left px-4 py-3 text-gray-500 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {data.data.map((s) => (
-                    <tr key={s.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs">
-                        <Link href={`/admin/chat/${s.id}`} className="text-blue-600 hover:underline">
-                          {s.id.slice(0, 8)}…
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{s.started_at.slice(0, 16).replace('T', ' ')}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{s.ended_at ? s.ended_at.slice(0, 16).replace('T', ' ') : '—'}</td>
-                      <td className="px-4 py-3 text-center">{s.message_count}</td>
-                      <td className="px-4 py-3">
+            <TableCard>
+              <THead>
+                <tr>
+                  <TH>Session</TH>
+                  <TH>Source</TH>
+                  <TH>Started</TH>
+                  <TH>Ended</TH>
+                  <TH>Duration</TH>
+                  <TH className="text-center">Messages</TH>
+                  <TH>Status</TH>
+                </tr>
+              </THead>
+              <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.015 } } }}>
+                {data.data.map((s) => {
+                  const dur = durationBetween(s.started_at, s.ended_at);
+                  const href = `/admin/chat/${s.id}`;
+                  return (
+                    <motion.tr
+                      key={s.id}
+                      variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
+                      onClick={() => router.push(href)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          router.push(href);
+                        }
+                      }}
+                      onMouseDown={(e) => {
+                        if (e.button === 1) {
+                          e.preventDefault();
+                          window.open(href, '_blank', 'noopener,noreferrer');
+                        }
+                      }}
+                      role="link"
+                      tabIndex={0}
+                      className="group cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50/70 focus:bg-slate-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-300"
+                    >
+                      <TD>
+                        <span className="inline-flex items-center gap-2 font-mono text-xs text-indigo-600 group-hover:text-indigo-700">
+                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 ring-1 ring-inset ring-slate-200 group-hover:bg-indigo-50 group-hover:ring-indigo-200">
+                            {s.id.slice(0, 8)}
+                          </span>
+                          <span className="text-slate-400">…</span>
+                        </span>
+                      </TD>
+                      <TD>
+                        <Pill tone={s.source === 'voice' ? 'violet' : 'amber'} dot>
+                          {s.source === 'voice' ? 'Voice' : 'Chat'}
+                        </Pill>
+                      </TD>
+                      <TD className="text-xs text-slate-500">{fmtDateTime(s.started_at)}</TD>
+                      <TD className="text-xs text-slate-500">{fmtDateTime(s.ended_at)}</TD>
+                      <TD className="text-xs tabular-nums text-slate-600">{dur ?? <span className="text-slate-300">—</span>}</TD>
+                      <TD className="text-center font-medium tabular-nums text-slate-700">{s.message_count}</TD>
+                      <TD>
                         {s.purged_at ? (
-                          <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Anonymized</span>
+                          <Pill tone="slate">Anonymized</Pill>
                         ) : s.ended_at ? (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Ended</span>
+                          <Pill tone="blue">Ended</Pill>
                         ) : (
-                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Active</span>
+                          <Pill tone="green" dot>Active</Pill>
                         )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center justify-between mt-4 text-sm text-gray-500">
-              <span>{data.total} total</span>
-              <div className="flex gap-2">
-                <button disabled={page === 1} onClick={() => setPage(p => p - 1)}
-                  className="px-3 py-1 rounded border disabled:opacity-40 hover:bg-gray-50">← Prev</button>
-                <span className="px-2">Page {page}</span>
-                <button disabled={page * 25 >= data.total} onClick={() => setPage(p => p + 1)}
-                  className="px-3 py-1 rounded border disabled:opacity-40 hover:bg-gray-50">Next →</button>
-              </div>
-            </div>
+                      </TD>
+                    </motion.tr>
+                  );
+                })}
+              </motion.tbody>
+            </TableCard>
+            <Pagination page={page} total={data.total} pageSize={25} onChange={setPage} />
           </>
-        ) : <div className="text-gray-400">Loading…</div>}
-      </div>
-    </AdminShell>
+        )}
+      </PageWrap>
   );
 }

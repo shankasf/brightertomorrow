@@ -250,6 +250,7 @@ func (h *IntakeHandler) submit(ctx context.Context, body intakeRequest) (intakeR
 				payerName = checkResp.Payer
 			}
 		}
+
 	}
 
 	submissionUUID := uuid.NewString()
@@ -320,6 +321,23 @@ func (h *IntakeHandler) submit(ctx context.Context, body intakeRequest) (intakeR
 				"email_hash", emailHash,
 			)
 			// Return 200 — Dynamo is source of truth.
+		}
+
+		// Record the eligibility-check attempt in bt.insurance_checks so admins
+		// can review the full history of CLAIM.MD verifications (including
+		// checks that don't lead to a completed booking). Non-PHI columns
+		// only — name + member ID stay in DynamoDB. §164.312(b)
+		if body.PaymentMethod == intakePaymentInsurance {
+			_, ierr := h.Pool.Exec(ctx, `
+				INSERT INTO bt.insurance_checks
+					(submission_uuid, source, payer_name, coverage_status, eligible, email_hash)
+				VALUES ($1, $2, $3, $4, $5, $6)
+			`, submissionUUID, body.Source, payerName, coverageStatus, eligible, emailHash)
+			if ierr != nil {
+				slog.Warn("intake: insurance_checks insert failed",
+					"err", ierr, "source", body.Source, "payer", payerName)
+				// Don't fail the request — the eligibility decision still stands.
+			}
 		}
 	}
 
