@@ -89,12 +89,31 @@ def _is_hallucinated_transcript(text: str) -> bool:
 
 
 def _persist_message(session_id: str, role: str, content: str) -> None:
+    """Send the turn to the gateway, which writes it to DynamoDB and bumps
+    the non-PHI counters on bt.chat_sessions. Voice transcripts contain PHI
+    (patients say their name/DOB out loud), so the message body MUST NOT
+    land in Postgres on Hostinger. §164.502(b) minimum necessary.
+    """
+    import os, json as _json, urllib.request
+    base = os.environ.get("BT_GATEWAY_URL", "http://bt-gateway")
+    payload = _json.dumps({
+        "session_id": session_id,
+        "role": role,
+        "content": content,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/internal/chat/turn",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
     try:
-        with conn() as c, c.cursor() as cur:
-            cur.execute(
-                "INSERT INTO chat_messages (session_id, role, content) VALUES (%s, %s, %s)",
-                (session_id, role, content),
-            )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            if r.status >= 400:
+                logger.warning(
+                    "voice_persist_status session=%s role=%s status=%s",
+                    session_id, role, r.status,
+                )
     except Exception:
         logger.exception(
             "Failed to persist voice message session=%s role=%s", session_id, role

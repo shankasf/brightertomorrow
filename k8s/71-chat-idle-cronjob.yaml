@@ -34,20 +34,13 @@ spec:
                   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
                   SET search_path = bt, public;
 
-                  WITH last_activity AS (
-                    SELECT s.id,
-                           COALESCE(MAX(m.created_at), s.started_at) AS last_at
-                    FROM bt.chat_sessions s
-                    LEFT JOIN bt.chat_messages m ON m.session_id = s.id
-                    WHERE s.ended_at IS NULL
-                      AND s.purged_at IS NULL
-                    GROUP BY s.id, s.started_at
-                  )
+                  -- Chat content lives in DynamoDB; we read activity from the
+                  -- s.last_message_at counter that the gateway maintains.
                   UPDATE bt.chat_sessions s
-                  SET ended_at = la.last_at + INTERVAL '20 minutes'
-                  FROM last_activity la
-                  WHERE s.id = la.id
-                    AND la.last_at < now() - INTERVAL '20 minutes'
+                  SET ended_at = COALESCE(s.last_message_at, s.started_at) + INTERVAL '20 minutes'
+                  WHERE s.ended_at IS NULL
+                    AND s.purged_at IS NULL
+                    AND COALESCE(s.last_message_at, s.started_at) < now() - INTERVAL '20 minutes'
                   RETURNING s.id;
                   SQL
               resources:

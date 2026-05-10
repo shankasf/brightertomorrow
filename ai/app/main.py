@@ -98,18 +98,30 @@ def health() -> dict[str, Any]:
 
 
 def _load_history(session_id: str, limit: int = 20) -> list[dict[str, str]]:
-    with conn() as c, c.cursor() as cur:
-        cur.execute(
-            """
-            SELECT role, content FROM chat_messages
-            WHERE session_id = %s
-            ORDER BY created_at DESC
-            LIMIT %s
-            """,
-            (session_id, limit),
-        )
-        rows = list(reversed(cur.fetchall()))
-    return [{"role": r, "content": c} for r, c in rows if r in ("user", "assistant")]
+    """Pull recent turns from the gateway's PHI-backed history endpoint.
+
+    Postgres no longer holds chat content — message bodies live in DynamoDB
+    so Hostinger never sees PHI. The gateway's /internal/chat/history call
+    fans out to DDB on our behalf.
+    """
+    if not session_id:
+        return []
+    import urllib.parse, urllib.request, json as _json
+    base = os.environ.get("BT_GATEWAY_URL", "http://bt-gateway")
+    url = f"{base}/internal/chat/history?" + urllib.parse.urlencode({
+        "session_id": session_id, "limit": str(limit),
+    })
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            data = _json.loads(r.read().decode("utf-8"))
+    except Exception:
+        logger.exception("load_history_failed session=%s", session_id)
+        return []
+    return [
+        {"role": m["role"], "content": m["content"]}
+        for m in data.get("messages", [])
+        if m.get("role") in ("user", "assistant")
+    ]
 
 
 @app.post("/chat", response_model=ChatResponse)

@@ -83,7 +83,7 @@ func main() {
 	adminAuthH := &handlers.AdminAuthHandler{Pool: pool, Cognito: cognitoVerifier}
 	adminStatsH := &handlers.AdminStatsHandler{Pool: pool}
 	adminContactsH := &handlers.AdminContactsHandler{Pool: pool, PHI: phiStore}
-	adminChatH := &handlers.AdminChatHandler{Pool: pool}
+	adminChatH := &handlers.AdminChatHandler{Pool: pool, PHI: phiStore}
 	adminNewsletterH := &handlers.AdminNewsletterHandler{Pool: pool}
 	adminAuditH := &handlers.AdminAuditHandler{Pool: pool}
 	adminContentH := &handlers.AdminContentHandler{Pool: pool, AIClient: ai}
@@ -92,6 +92,7 @@ func main() {
 
 	intakeH := &handlers.IntakeHandler{Pool: pool, PHI: phiStore, CoverageChecker: ai}
 	intakeInternalH := &handlers.IntakeInternalHandler{IntakeHandler: intakeH}
+	chatInternalH := &handlers.ChatInternalHandler{Pool: pool, PHI: phiStore}
 
 	readyzH := &handlers.ReadyzHandler{Pool: pool, PHI: phiStore}
 
@@ -114,8 +115,8 @@ func main() {
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/contact", (&handlers.ContactHandler{Pool: pool}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/intake", intakeH.ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/newsletter", (&handlers.NewsletterHandler{Pool: pool}).ServeHTTP)
-		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat", (&handlers.ChatHandler{Pool: pool, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
-		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat/stream", (&handlers.ChatStreamHandler{Pool: pool, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
+		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat", (&handlers.ChatHandler{Pool: pool, PHI: phiStore, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
+		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat/stream", (&handlers.ChatStreamHandler{Pool: pool, PHI: phiStore, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Get("/voice", (&handlers.VoiceHandler{Pool: pool, AIServiceURL: cfg.AIServiceURL, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 	})
 
@@ -126,6 +127,10 @@ func main() {
 	// the auth boundary; do not expose without adding signature auth.
 	r.Route("/internal", func(r chi.Router) {
 		r.Post("/intake/submit", intakeInternalH.ServeHTTP)
+		// Chat-turn API used by the AI pod (voice + chat) so message bodies
+		// are written/read through the PHI store, never directly to Postgres.
+		r.Post("/chat/turn", chatInternalH.PutTurn)
+		r.Get("/chat/history", chatInternalH.History)
 	})
 
 	// Admin API — /admin/api/* routes to gateway (see k8s/40-ingress.yaml).

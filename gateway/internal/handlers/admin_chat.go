@@ -85,11 +85,9 @@ func (h *AdminChatHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 		PurgedAt    *string `json:"purged_at"`
 	}
 	type messageRow struct {
-		ID        int64   `json:"id"`
-		Role      string  `json:"role"`
-		Content   string  `json:"content"`
-		ToolName  *string `json:"tool_name"`
-		CreatedAt string  `json:"created_at"`
+		Role      string `json:"role"`
+		Content   string `json:"content"`
+		CreatedAt string `json:"created_at"`
 	}
 
 	var s sessionDetail
@@ -106,29 +104,23 @@ func (h *AdminChatHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.Pool.Query(ctx,
-		`SELECT id, role, content, tool_name,
-		        to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF')
-		 FROM bt.chat_messages WHERE session_id = $1 ORDER BY created_at`, sessionID)
-	if err != nil {
-		slog.Error("admin chat messages", "err", err)
-		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
-		return
-	}
-	defer rows.Close()
-
-	var messages []messageRow
-	for rows.Next() {
-		var m messageRow
-		if err := rows.Scan(&m.ID, &m.Role, &m.Content, &m.ToolName, &m.CreatedAt); err != nil {
-			slog.Error("admin chat messages scan", "err", err)
+	// Pull the transcript from DynamoDB. Postgres no longer stores message
+	// bodies — keeps PHI off Hostinger entirely.
+	messages := []messageRow{}
+	if h.PHI != nil && s.PurgedAt == nil {
+		turns, terr := h.PHI.ListChatTurns(ctx, sessionID, 500, false /* oldest first */)
+		if terr != nil {
+			slog.Error("admin chat: ddb list turns", "err", terr, "session_id", sessionID)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
-		messages = append(messages, m)
-	}
-	if messages == nil {
-		messages = []messageRow{}
+		for _, t := range turns {
+			messages = append(messages, messageRow{
+				Role:      t.Role,
+				Content:   t.Content,
+				CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339),
+			})
+		}
 	}
 
 	// HIPAA §164.312(b): log PHI access.

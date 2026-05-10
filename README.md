@@ -34,7 +34,9 @@ All traffic routes through Traefik: `/v1/*` and `/admin/*` → gateway, everythi
    ```go
    persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
    defer cancel()
-   pool.Exec(persistCtx, "INSERT INTO bt.chat_messages ...", sessionID, reply)
+   recordTurn(persistCtx, h.Pool, h.PHI, sessionID, "assistant", reply)
+   // → phi.Store.PutChatTurn writes to DynamoDB
+   // → UPDATE bt.chat_sessions SET message_count=message_count+1, last_message_at=now()
    ```
    `net/http` itself also spawns one goroutine per incoming request automatically.
 
@@ -51,7 +53,7 @@ The AI service runs **two parallel agent graphs** sharing the same specialist ag
 
 Both flow Triage → one of `{Crisis Support, Info, Therapist Matching, Intake, Booking}`. Each specialist lives in its own file under `ai/app/bt_agents/` (text) and `ai/app/bt_agents/realtime/` (voice). The head Triage agent owns all handoffs; specialists never reach across to peers.
 
-The voice path is driven entirely by `openai-agents` `RealtimeRunner` / `RealtimeSession` — the SDK manages the OpenAI WebSocket, hand-off lifecycle, and tool-calling. `voice.py` only translates browser ↔ session events (audio in/out, user/assistant transcripts, hallucination filtering) and persists transcripts to Postgres.
+The voice path is driven entirely by `openai-agents` `RealtimeRunner` / `RealtimeSession` — the SDK manages the OpenAI WebSocket, hand-off lifecycle, and tool-calling. `voice.py` only translates browser ↔ session events (audio in/out, user/assistant transcripts, hallucination filtering) and forwards each turn to `bt-gateway` `/internal/chat/turn`, which writes the body to DynamoDB. The AI pod itself never touches Postgres for chat content.
 
 Realtime model is `gpt-realtime-2` with `gpt-4o-mini-transcribe` for input transcription, semantic-VAD turn detection, and PCM16 audio. Override via secret keys `REALTIME_MODEL`, `REALTIME_TRANSCRIPTION_MODEL`, `REALTIME_VOICE` in `bt-config`.
 
@@ -138,36 +140,39 @@ What happens to a single message the moment a visitor types it into the chat wid
 
 ```mermaid
 flowchart TD
-    A([Visitor types a message<br/>in the chat widget]) --> B[Locked in transit<br/>HTTPS / TLS 1.3<br/>nobody on the network can read it]
+    A([Visitor types a message OR speaks<br/>chat widget · voice WebSocket]) --> B[Locked in transit<br/>HTTPS / TLS 1.3<br/>nobody on the network can read it]
     B --> C[Arrives at our website<br/>brightertomorrowtherapy.cloud]
     C --> D[Routed inside our private cluster<br/>to the AI service<br/>never exposed to the public internet]
     D --> E[Sent to OpenAI<br/>HIPAA BAA signed · Zero Data Retention<br/>OpenAI does not keep the message]
     E --> F[AI reply returned to the visitor]
-    F --> G[Transcript saved to the PHI vault<br/>AWS DynamoDB · CMK-encrypted<br/>alias/bt-phi · 1-year key rotation]
-    G --> H[Local database stores ONLY a pointer<br/>no name, no message, no health info<br/>safe even if the server is stolen]
+
+    F --> G[Every turn — yours and the AI's — is written to<br/>the PHI vault on AWS DynamoDB<br/>CMK-encrypted with alias/bt-phi · 1-yr rotation<br/>PK=CHAT#sessionId · SK=TURN#timestamp]
+    G --> H[Postgres on Hostinger holds ONLY non-PHI:<br/>session id · source chat or voice ·<br/>message_count · last_message_at<br/>NEVER the message body]
 
     H --> I{Does an admin<br/>need to read it?}
     I -- No --> J[Sits encrypted in the vault<br/>nobody can see it]
     I -- Yes --> K[Admin signs in<br/>email + password + phone code TOTP MFA<br/>auto sign-out after 8 hours]
-    K --> L[Every single PHI read is written<br/>to a tamper-proof audit log<br/>who · what · when · IP]
-    L --> M[Admin sees the transcript]
+    K --> L[Every PHI read writes one row to the<br/>tamper-proof admin_access_log<br/>who · what · when · IP]
+    L --> M[Admin sees the transcript hydrated from DDB]
 
     J --> N{Has 10 years passed?<br/>Nevada NRS 629.051}
     M --> N
     N -- No --> O[Stays encrypted · audited · retained]
-    N -- Yes --> P[Automatically anonymized<br/>name / message / contact info wiped<br/>audit trail kept forever]
+    N -- Yes --> P[Auto-purged<br/>BatchWriteItem deletes every TURN#<br/>chat_sessions row marked purged]
 
     Q[[Visitor requests deletion<br/>NRS 603A right to erasure]] -.-> P
 
     classDef visitor fill:#e8f4ff,stroke:#06c,color:#003
     classDef transit fill:#fff4d6,stroke:#c80,color:#330
     classDef phi fill:#ffe5e5,stroke:#c00,color:#300
+    classDef pointer fill:#e5f5ff,stroke:#06c,color:#003
     classDef audit fill:#e8ffe8,stroke:#080,color:#030
     classDef purge fill:#f0e5ff,stroke:#60c,color:#202
 
     class A,F visitor
     class B,C,D,E transit
-    class G,H,J,M phi
+    class G,J,M phi
+    class H pointer
     class K,L audit
     class O,P,Q purge
 ```
@@ -188,11 +193,18 @@ flowchart TD
 
 
 
-### What counts as PHI here
+### What counts as PHI here — and where it lives
 
-- **`contact_submissions`** — name, email, phone, message (contains health context)
-- **`chat_sessions` / `chat_messages`** — AI chatbot transcripts (potential health disclosure)
-- **`newsletter_subscribers`** — email linked to therapy inquiry
+| Data | Storage | Why |
+|---|---|---|
+| Intake records (name, DOB, phone, address, insurance ID) | **DynamoDB `bt-main`** (BAA, KMS) | Identifying — must never touch Hostinger Postgres |
+| Chat / voice transcripts (every turn, plaintext body) | **DynamoDB `bt-main`** (BAA, KMS) | Patients can volunteer PHI mid-conversation |
+| Insurance eligibility check details | **DynamoDB `bt-main`** via the linked intake record | Linked to a named patient via `submission_uuid` |
+| Insurance check metadata (status, payer, source, hashed email) | Postgres `bt.insurance_checks` (non-PHI) | Audit-ready history without exposing identity |
+| Chat session shell (id, source, started_at, message_count) | Postgres `bt.chat_sessions` (non-PHI counters) | Lets the dashboard work without PHI joins |
+| Intake pointer (uuid, hashed email, status, source) | Postgres `bt.intake_pointers` (non-PHI) | Pointer to the DynamoDB record |
+| Contact form submissions | Postgres `bt.contact_submissions` (PHI lite) | Legacy; under retention/anonymisation |
+| Newsletter subscribers | Postgres `bt.newsletter_subscribers` | Email + therapy-inquiry link |
 
 ### Safeguards implemented
 
@@ -256,11 +268,23 @@ Three append-only audit tables:
 | `db/schema.sql` | Base schema — all content and PHI tables |
 | `db/migrations/001_perf_indexes.sql` | Query performance indexes |
 | `db/migrations/002_hipaa_compliance.sql` | Audit triggers, retention columns, anonymization procedures, DB roles |
+| `db/migrations/002a_hipaa_schema.sql` | Companion to 002 — re-applies in `bt` schema |
 | `db/migrations/003_admin.sql` | Admin users, sessions, access log tables |
+| `db/migrations/004_faq_embeddings.sql` | pgvector column on `faqs` for chatbot RAG |
+| `db/migrations/005_intake_pointers.sql` | Pointer table — intake PHI moved to DynamoDB |
+| `db/migrations/006_voice_source_and_insurance_checks.sql` | `chat_sessions.source` (chat/voice) + `bt.insurance_checks` history table |
+| `db/migrations/007_chat_messages_to_ddb.sql` | Add `chat_sessions.message_count`, `last_message_at`; backfill from old table |
+| `db/migrations/008_drop_chat_messages.sql` | **Drop `chat_messages`** — every turn now lives in DynamoDB |
 
-## Intake PHI Storage — DynamoDB-backed (HIPAA)
+## PHI Storage — DynamoDB-backed (HIPAA)
 
-Identifying patient information collected through the chat widget, voice agent, or website intake forms (`first_name`, `last_name`, `date_of_birth`, `phone`, `email`, `home_address`, `sex`, `insurance_name`, `insurance_member_id`) is **never persisted to local Postgres**. PHI lives in a CMK-encrypted DynamoDB table (`bt-main`) on AWS; Postgres holds only a non-PHI pointer row that admin lists query.
+Three classes of PHI now live in DynamoDB and **never** touch local Postgres:
+
+1. **Intake records** — the form fields (`first_name`, `last_name`, `date_of_birth`, `phone`, `email`, `home_address`, `sex`, `insurance_name`, `insurance_member_id`) collected by the website, chatbot, or voice agent.
+2. **Chat / voice transcripts** — every turn of every conversation, plaintext bodies. Patients routinely volunteer name, DOB, or insurance ID mid-chat, so the message body itself is treated as PHI.
+3. **Insurance check details** — name + member ID + payer that an eligibility call (CLAIM.MD) was made with. The non-PHI metadata (status, source, hashed email) stays in `bt.insurance_checks` for the admin "Insurance Check History" view.
+
+Postgres only ever holds non-PHI: pointer rows, hashed emails, status flags, source labels, counters, audit log entries.
 
 ### Why this split
 
@@ -280,31 +304,33 @@ flowchart TB
 
     subgraph BT["k3s 'bt' namespace · cluster-internal traffic"]
         WEB["bt-web<br/>Next.js"]
-        AI["bt-ai (FastAPI)<br/>tools.py:<br/>book_with_insurance<br/>request_intake_callback"]
-        GW["bt-gateway (Go 1.24)<br/>handlers/intake.go<br/>handlers/intake_internal.go<br/>internal/phi/store.go"]
-        PG[("Postgres 17<br/>(Docker on host)<br/>bt.intake_pointers<br/>NO PHI columns")]
+        AI["bt-ai (FastAPI)<br/>tools.py: book_with_insurance<br/>main.py: /chat /chat/stream<br/>voice.py: /ws/voice<br/>(no DB writes — calls gateway)"]
+        GW["bt-gateway (Go 1.24)<br/>handlers/intake.go<br/>handlers/chat.go · chat_stream.go<br/>handlers/chat_internal.go<br/>handlers/admin_appointments.go<br/>handlers/admin_insurance_checks.go<br/>internal/phi/store.go"]
+        PG[("Postgres 17 · Docker on host<br/>bt.intake_pointers · bt.chat_sessions<br/>bt.insurance_checks<br/>NON-PHI ONLY:<br/>uuids · sha256(email) · counters · status")]
     end
 
     subgraph AWS["AWS · account 689517798275 · us-east-1"]
-        IAM["IAM user<br/>bt-gateway-vm<br/>scoped to bt-main + GSI1<br/>+ kms:Decrypt via DDB only"]
+        IAM["IAM user bt-gateway-vm<br/>scoped to bt-main + GSI1<br/>+ kms:Decrypt via DDB only"]
         SM["Secrets Manager<br/>bt/gateway/aws-credentials<br/>CMK-encrypted"]
         CMK["KMS CMK<br/>alias/bt-phi<br/>1-yr rotation"]
-        DDB[("DynamoDB bt-main<br/>encryption: CUSTOMER_MANAGED<br/>PITR enabled<br/>deletion protection on<br/>streams: NEW_AND_OLD_IMAGES")]
+        DDB[("DynamoDB bt-main · CMK<br/>PATIENT#<email_hash> / INTAKE#<uuid><br/>CHAT#<session_id> / TURN#<ts>#<role><br/>PITR · deletion protection · streams")]
         TRAIL[("CloudTrail<br/>S3 · object lock 365d<br/>encrypted with bt-phi CMK")]
     end
 
     VISITOR -- "HTTPS" --> INGRESS
     INGRESS -- "TLS in-cluster" --> WEB
-    INGRESS -- "TLS in-cluster" --> AI
-    WEB -- "POST /v1/intake (form)" --> GW
-    AI -- "POST /internal/intake/submit<br/>cluster-only HTTP, network-isolated" --> GW
+    INGRESS -- "TLS in-cluster" --> GW
+    INGRESS -. "/ws/voice WebSocket" .-> AI
+    WEB -- "POST /v1/intake (form)<br/>POST /v1/chat /chat/stream" --> GW
+    GW == "POST /chat (LLM call)" ==> AI
+    AI == "POST /internal/chat/turn<br/>GET /internal/chat/history<br/>POST /internal/intake/submit<br/>(cluster-only — Traefik never exposes /internal/*)" ==> GW
 
     GW -. "load env at startup" .-> SM
     SM -. "rotate via CDK redeploy" .-> IAM
-    GW == "TLS · SigV4 · KMS data key" ==> DDB
+    GW == "TLS · SigV4 · KMS data key<br/>PutChatTurn · PutIntake · BatchWriteItem" ==> DDB
     DDB -- "encrypts/decrypts<br/>every item with" --> CMK
     DDB -- "every API call audited" --> TRAIL
-    GW -- "INSERT pointer row<br/>(submission_uuid, email_hash, status)<br/>NO PHI" --> PG
+    GW -- "non-PHI only:<br/>pointer · session counter · check status" --> PG
 
     classDef phi fill:#ffe5e5,stroke:#c00
     classDef pointer fill:#e5f5ff,stroke:#06c
@@ -378,22 +404,69 @@ sequenceDiagram
     participant GW as bt-gateway
     participant PG as Postgres
     participant DDB as DynamoDB
-    participant AUD as bt.phi_audit_log
+    participant AUD as bt.admin_access_log
 
-    A->>GW: GET /admin/api/intake-pointers (list)
-    GW->>PG: SELECT non-PHI cols FROM bt.intake_pointers ORDER BY created_at DESC
-    PG-->>GW: rows (status, flow, email_hash, created_at)
-    GW-->>A: 200 — list view never carries PHI
-    Note over A,GW: List view is pointer-only. No DynamoDB call.
+    A->>GW: GET /admin/api/appointments?from=&to=&source=
+    GW->>PG: SELECT pointer rows FROM bt.intake_pointers (filtered)
+    PG-->>GW: rows (uuid, email_hash, status — NO PHI)
+    loop for each pointer
+        GW->>DDB: GetItem PK=PATIENT#<hash> SK=INTAKE#<uuid>
+        DDB-->>GW: name, DOB, phone, address, member ID
+        GW->>AUD: INSERT view_appointments_list, resource_id=<uuid>
+    end
+    GW-->>A: 200 hydrated list
+    Note over GW,AUD: One audit row per PHI record returned.
 
-    A->>GW: GET /admin/api/intake-pointers/{id}
-    GW->>PG: SELECT pointer WHERE id=?
-    PG-->>GW: pointer row (gives ddb_pk, ddb_sk)
-    GW->>DDB: GetItem PK,SK
-    DDB-->>GW: full PHI record
-    GW->>AUD: INSERT (table='intake_pointers_phi_access', actor=admin_email, row_id=uuid)
-    GW-->>A: 200 — pointer + PHI merged
-    Note over GW,AUD: Every PHI fetch is logged before the response is returned.
+    A->>GW: GET /admin/api/chat/sessions/<id>
+    GW->>PG: SELECT chat_sessions WHERE id=?
+    PG-->>GW: shell (id, source, started_at, message_count)
+    GW->>DDB: Query PK=CHAT#<id> AND begins_with(SK,'TURN#')
+    DDB-->>GW: every turn (oldest first)
+    GW->>AUD: INSERT view_chat_session, resource_id=<id>
+    GW-->>A: 200 transcript
+    Note over GW,AUD: Postgres holds zero message bodies.
+
+    A->>GW: GET /admin/api/insurance-checks.csv?from=&source=
+    GW->>PG: SELECT insurance_checks (filtered)
+    PG-->>GW: status + payer + email_hash + submission_uuid (NO PHI)
+    loop for each check
+        GW->>DDB: GetItem PK=PATIENT#<hash> SK=INTAKE#<uuid>
+        DDB-->>GW: patient name + member ID
+        GW->>AUD: INSERT export_insurance_checks_csv, resource_id=<check_uuid>
+    end
+    GW-->>A: text/csv attachment
+    Note over GW,AUD: CSV downloads are audited row-by-row.
+```
+
+### Chat / voice transcript lifecycle (PHI in DDB)
+
+Every turn — chatbot AND voice — is written straight to DynamoDB. Postgres maintains only non-PHI counters on `bt.chat_sessions` so the dashboard works without ever joining message bodies.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant V as Visitor
+    participant W as bt-web (chat widget) / WebSocket (voice)
+    participant GW as bt-gateway
+    participant AI as bt-ai
+    participant PG as Postgres bt.chat_sessions
+    participant DDB as DynamoDB bt-main
+
+    V->>W: Types message OR speaks
+    W->>GW: POST /v1/chat/stream  (or /v1/voice WS)
+    GW->>GW: ensure visitor cookie + chat_sessions row<br/>(source = 'chat' or 'voice')
+    GW->>DDB: PutItem PK=CHAT#<sid> SK=TURN#<ts>#u  role=user
+    GW->>PG: UPDATE chat_sessions SET message_count++,<br/>last_message_at=now() WHERE id=<sid>
+    GW->>AI: POST /chat/stream (forwards turn)
+    AI->>GW: GET /internal/chat/history?session_id=<sid>
+    GW->>DDB: Query PK=CHAT#<sid> ScanIndexForward=false LIMIT 20
+    DDB-->>GW: recent turns
+    GW-->>AI: history JSON
+    AI-->>GW: SSE stream of assistant tokens
+    GW-->>W: SSE proxied to client
+    GW->>DDB: PutItem PK=CHAT#<sid> SK=TURN#<ts>#a  role=assistant
+    GW->>PG: UPDATE chat_sessions counters again
+    Note over PG,DDB: Postgres never sees content.<br/>DDB stores plaintext under CMK alias/bt-phi.
 ```
 
 ## Architecture Diagrams
@@ -407,31 +480,38 @@ graph TB
     end
 
     subgraph Ingress["Ingress — Traefik"]
-        T[Traefik Reverse Proxy<br/>HTTP → HTTPS redirect<br/>TLS termination]
+        T[Traefik Reverse Proxy<br/>HTTP → HTTPS redirect<br/>TLS termination<br/>NEVER routes /internal/*]
     end
 
     subgraph Services["Application Services"]
-        W[web<br/>Next.js 15 / React 19<br/>:3001<br/>Pages + Admin UI]
-        G[gateway<br/>Go 1.23 / chi<br/>:8080<br/>REST API + Admin API]
-        AI[ai<br/>FastAPI / Python<br/>:8001<br/>Chatbot + Voice]
+        W[bt-web<br/>Next.js 15 / React 19<br/>:3001<br/>Pages + Admin UI]
+        G[bt-gateway<br/>Go 1.24 / chi<br/>:8080<br/>REST + Admin + /internal/*<br/>only path that talks to DDB]
+        AI[bt-ai<br/>FastAPI / Python<br/>:8001<br/>Chat + Voice agents<br/>NO direct DB access]
     end
 
     subgraph Data["Data Layer"]
-        DB[(PostgreSQL 17<br/>schema: bt<br/>:5432)]
+        DB[(PostgreSQL 17 · Hostinger<br/>NON-PHI ONLY<br/>pointers · counters · status)]
+        DDB[(DynamoDB bt-main · AWS<br/>BAA · CMK alias/bt-phi<br/>intake records · chat turns)]
     end
 
     subgraph External["External Services"]
-        OAI[OpenAI API<br/>GPT-4o / Realtime]
+        OAI[OpenAI API<br/>HIPAA BAA · ZDR<br/>GPT-4o / Realtime]
+        CLM[CLAIM.MD<br/>insurance eligibility]
+        COG[AWS Cognito<br/>admin login + MFA]
     end
 
     B -->|HTTPS| T
-    T -->|/v1/* /admin/*| G
-    T -->|everything else| W
+    T -->|/v1/* /admin/api/*| G
+    T -->|everything else /admin/* HTML| W
     W -->|server-side fetch| G
-    G -->|pgx v5| DB
-    G -->|/v1/chat /v1/voice| AI
-    AI -->|OpenAI SDK| OAI
-    AI -->|pgx| DB
+    G -->|pgx v5 · non-PHI only| DB
+    G ==>|TLS · SigV4 · ALL PHI| DDB
+    G -->|/chat /chat/stream| AI
+    AI -->|/internal/chat/turn<br/>/internal/chat/history<br/>/internal/intake/submit| G
+    AI -->|OpenAI SDK + Realtime| OAI
+    G -->|/internal/intake/check-coverage| AI
+    AI -->|via gateway proxy| CLM
+    G -->|admin login token exchange| COG
 ```
 
 ### Low Level Design (LLD)
@@ -503,23 +583,30 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    subgraph App["Application Layer"]
-        H[Admin Handler<br/>view_contact / view_chat]
-        AL[admin.LogPHIAccess]
+    subgraph App["Application Layer (bt-gateway)"]
+        H[Admin Handler<br/>appointments · insurance-checks ·<br/>chat session detail · contacts]
+        AL[admin.LogPHIAccess<br/>called once per PHI row]
     end
 
-    subgraph DB["PostgreSQL — bt schema"]
-        PHI[(contact_submissions<br/>chat_sessions<br/>chat_messages)]
+    subgraph DB["PostgreSQL — bt schema (non-PHI)"]
+        PTR[(intake_pointers<br/>chat_sessions<br/>insurance_checks<br/>contact_submissions)]
         AAL[(admin_access_log<br/>append-only<br/>UPDATE/DELETE revoked)]
         PAL[(phi_audit_log<br/>append-only<br/>DB trigger)]
-        TR[TRIGGER on INSERT/UPDATE/DELETE<br/>phi tables → phi_audit_log]
+        TR[TRIGGER on INSERT/UPDATE/DELETE<br/>pointer tables → phi_audit_log]
     end
 
-    H -->|SELECT| PHI
+    subgraph AWS["DynamoDB bt-main — actual PHI"]
+        DDB[(INTAKE# items<br/>TURN# items<br/>CMK encrypted)]
+        CT[(CloudTrail<br/>data events<br/>S3 object lock)]
+    end
+
+    H -->|SELECT pointer| PTR
+    H -->|GetItem / Query<br/>per row hydrated| DDB
     H --> AL
-    AL -->|INSERT| AAL
-    PHI -->|mutation| TR
+    AL -->|one row per PHI access| AAL
+    PTR -->|mutation| TR
     TR -->|INSERT| PAL
+    DDB -->|every API call| CT
 ```
 
 #### Database ER Diagram (key tables)
@@ -561,14 +648,31 @@ erDiagram
     chat_sessions {
         uuid id PK
         text visitor_id
+        text source "chat | voice"
+        integer message_count "non-PHI counter"
+        timestamptz last_message_at
         timestamptz retain_until
         timestamptz purged_at
     }
-    chat_messages {
+    intake_pointers {
         bigserial id PK
-        uuid session_id FK
-        text role
-        text content
+        uuid submission_uuid
+        char64 email_hash
+        text source "chat-agent | voice-agent | website-*"
+        text status
+        text ddb_pk
+        text ddb_sk
+        timestamptz retain_until
+    }
+    insurance_checks {
+        bigserial id PK
+        uuid check_uuid
+        uuid submission_uuid FK
+        text source
+        text payer_name
+        text coverage_status
+        boolean eligible
+        char64 email_hash
     }
     phi_audit_log {
         bigserial id PK
@@ -580,16 +684,17 @@ erDiagram
 
     admin_users ||--o{ admin_sessions : "has"
     admin_users ||--o{ admin_access_log : "generates"
-    chat_sessions ||--o{ chat_messages : "contains"
+    intake_pointers ||--o{ insurance_checks : "linked via submission_uuid"
 ```
 
-To apply all migrations:
+> **NB:** `chat_messages` was dropped in migration 008 — every turn now lives in DynamoDB under `PK=CHAT#<session_id>`, `SK=TURN#<rfc3339nano>#<role>`. `chat_sessions.message_count` and `last_message_at` are non-PHI counters maintained by the gateway on every `PutChatTurn`.
+
+To apply all migrations in order:
 
 ```bash
-PGPASSWORD=<pass> psql -h localhost -U app -d app -f db/schema.sql
-PGPASSWORD=<pass> psql -h localhost -U app -d app -f db/migrations/001_perf_indexes.sql
-PGPASSWORD=<pass> psql -h localhost -U app -d app -f db/migrations/002_hipaa_compliance.sql
-PGPASSWORD=<pass> psql -h localhost -U app -d app -f db/migrations/003_admin.sql
+for f in db/schema.sql db/migrations/*.sql; do
+  PGPASSWORD=<pass> psql -h localhost -U app -d app -f "$f"
+done
 ```
 
 ## DB schema
@@ -604,13 +709,19 @@ All tables in `bt` schema:
 - `testimonials`, `faqs`, `stats`, `blog_posts`
 - `locations`, `press_mentions`, `podcast`, `free_resources`
 
-**PHI**
-- `contact_submissions` — contact form intake (retain_until, purged_at)
-- `chat_sessions` / `chat_messages` — AI chatbot transcripts (retain_until, purged_at)
+**Pointers / non-PHI metadata (Postgres)**
+- `intake_pointers` — uuid, sha256(email), source, status (PHI lives in DDB)
+- `chat_sessions` — id, source (`chat`/`voice`), `message_count`, `last_message_at` (turns live in DDB)
+- `insurance_checks` — eligibility-check history (status, payer, source, sha256(email))
+- `contact_submissions` — legacy contact-form data (retain_until, purged_at)
 - `newsletter_subscribers` — email list (unsubscribed_at, deletion_requested_at)
 
-**Compliance**
+**PHI (DynamoDB `bt-main`, CMK alias/bt-phi)**
+- `PATIENT#<email_hash>` / `INTAKE#<submission_uuid>` — full intake record
+- `CHAT#<session_id>` / `TURN#<rfc3339nano>#<role>` — every chat / voice turn
+
+**Compliance (Postgres)**
 - `phi_audit_log` — database-level PHI mutation log (append-only)
 - `admin_users` / `admin_sessions` — admin authentication
 - `admin_access_log` — admin PHI read log (append-only)
-- `phi_due_for_purge` — view: records past NRS 629.051 retention window
+- `phi_due_for_purge` — view: rows past NRS 629.051 retention window

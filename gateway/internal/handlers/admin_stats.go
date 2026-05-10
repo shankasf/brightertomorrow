@@ -100,12 +100,9 @@ func (h *AdminStatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		  FROM bt.chat_sessions s
 		  WHERE s.ended_at IS NULL
 		    AND s.purged_at IS NULL
-		    AND COALESCE(
-		      (SELECT MAX(m.created_at) FROM bt.chat_messages m WHERE m.session_id = s.id),
-		      s.started_at
-		    ) > now() - INTERVAL '20 minutes'`, &activeChats},
+		    AND COALESCE(s.last_message_at, s.started_at) > now() - INTERVAL '20 minutes'`, &activeChats},
 		{`SELECT count(*) FROM bt.chat_sessions WHERE started_at >= current_date`, &chatsToday},
-		{`SELECT count(*) FROM bt.chat_messages`, &totalMessages},
+		{`SELECT COALESCE(SUM(message_count), 0)::int FROM bt.chat_sessions`, &totalMessages},
 		{`SELECT count(*) FROM bt.newsletter_subscribers`, &totalNewsletterSubs},
 		{`SELECT count(*) FROM bt.newsletter_subscribers WHERE unsubscribed_at IS NULL`, &activeNewsletterSubs},
 		{`SELECT count(*) FROM bt.faqs`, &totalFaqs},
@@ -150,7 +147,23 @@ func (h *AdminStatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}{
 		{seriesQ("bt.contact_submissions", "created_at"), &contactsSeries},
 		{seriesQ("bt.chat_sessions", "started_at"), &chatsSeries},
-		{seriesQ("bt.chat_messages", "created_at"), &messagesSeries},
+		// Message bodies live in DynamoDB now; we proxy daily volume by
+		// summing per-session message_count, bucketed by the day of the
+		// session's last activity. Lossy for sessions that span multiple
+		// days, accurate for the typical same-day session.
+		{`WITH d AS (
+			SELECT generate_series(
+				(current_date - interval '` + strconv.Itoa(seriesDays-1) + ` days')::date,
+				current_date,
+				interval '1 day'
+			)::date AS day
+		)
+		SELECT d.day, COALESCE(SUM(s.message_count), 0)::int
+		FROM d
+		LEFT JOIN bt.chat_sessions s
+			ON COALESCE(s.last_message_at, s.started_at)::date = d.day
+		GROUP BY d.day
+		ORDER BY d.day`, &messagesSeries},
 		{seriesQ("bt.newsletter_subscribers", "created_at"), &newsletterSeries},
 	}
 	for _, q := range seriesTargets {
