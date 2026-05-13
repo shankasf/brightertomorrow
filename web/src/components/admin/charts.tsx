@@ -235,9 +235,10 @@ export function MultiAreaChart({
       {/* Tooltip — positioned in CSS so it tracks pointer-snapped index */}
       {hoverIdx !== null && (
         <div
-          className="pointer-events-none absolute top-1 rounded-xl border border-[#E5E5E5] bg-white/95 px-3 py-2 text-xs shadow-[0_10px_30px_rgba(25,39,53,0.12)] backdrop-blur"
+          className="pointer-events-none absolute top-1 max-w-[220px] rounded-xl border border-[#E5E5E5] bg-white/95 px-3 py-2 text-xs shadow-[0_10px_30px_rgba(25,39,53,0.12)] backdrop-blur"
           style={{
-            left: `calc(${((xScale(hoverIdx) - 40) / w) * 100}% + 8px)`,
+            left: `${Math.max(15, Math.min(85, (xScale(hoverIdx) / w) * 100))}%`,
+            transform: 'translateX(-50%)',
           }}
         >
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-soft">
@@ -439,7 +440,7 @@ export function BarChart({
         <div
           className="pointer-events-none absolute -top-2 rounded-lg border border-[#E5E5E5] bg-white/95 px-2.5 py-1 text-xs shadow-md backdrop-blur"
           style={{
-            left: `${((padding.left + hover * (barW + gap) + barW / 2) / w) * 100}%`,
+            left: `${Math.max(10, Math.min(90, ((padding.left + hover * (barW + gap) + barW / 2) / w) * 100))}%`,
             transform: 'translateX(-50%)',
           }}
         >
@@ -478,14 +479,20 @@ export function Sparkline({
   const area = path + ` L${width},${height} L0,${height} Z`;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} className="overflow-visible">
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      className="block h-full w-full overflow-visible"
+      style={{ height }}
+      aria-hidden
+    >
       <defs>
         <linearGradient id={`${uid}-sp-fill`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.35" />
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={area} fill={`url(#${uid}-sp-fill)`} />
+      <path d={area} fill={`url(#${uid}-sp-fill)`} vectorEffect="non-scaling-stroke" />
       <motion.path
         d={path}
         fill="none"
@@ -493,6 +500,7 @@ export function Sparkline({
         strokeWidth="1.75"
         strokeLinecap="round"
         strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
         initial={{ pathLength: 0, opacity: 0 }}
         animate={{ pathLength: 1, opacity: 1 }}
         transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1] }}
@@ -504,6 +512,7 @@ export function Sparkline({
         fill={color}
         stroke="white"
         strokeWidth="1.25"
+        vectorEffect="non-scaling-stroke"
       />
     </svg>
   );

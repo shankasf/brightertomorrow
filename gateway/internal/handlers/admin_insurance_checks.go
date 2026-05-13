@@ -64,7 +64,7 @@ type insuranceCheckFilters struct {
 	From      *time.Time
 	To        *time.Time
 	Source    string // "chatbot", "voice", "website", or "" for all
-	Status    string // "eligible" | "ineligible" | "needs_review" | "verification_error" | ""
+	Status    string // "verified" | "unverified" | "error" | ""
 	Q         string
 	Limit     int
 	Offset    int
@@ -98,7 +98,7 @@ func parseInsuranceCheckFilters(r *http.Request, defaultLimit, maxLimit int) (in
 		return f, fmt.Errorf("invalid 'source' — expected chatbot, voice, website, or all")
 	}
 	switch f.Status {
-	case "", "all", "eligible", "ineligible", "needs_review", "verification_error":
+	case "", "all", "verified", "unverified", "error":
 	default:
 		return f, fmt.Errorf("invalid 'status'")
 	}
@@ -126,9 +126,13 @@ func insuranceSourceClause(src string, argIdx *int) (string, []any) {
 		*argIdx++
 		return s, []any{"chat-agent"}
 	case "voice":
+		s := fmt.Sprintf("source = ANY($%d)", *argIdx)
+		*argIdx++
+		return s, []any{[]string{"voice-agent", "voice-phone"}}
+	case "phone":
 		s := fmt.Sprintf("source = $%d", *argIdx)
 		*argIdx++
-		return s, []any{"voice-agent"}
+		return s, []any{"voice-phone"}
 	case "website":
 		s := fmt.Sprintf("source = ANY($%d)", *argIdx)
 		*argIdx++
@@ -198,7 +202,25 @@ func (h *AdminInsuranceChecksHandler) loadChecks(ctx context.Context, f insuranc
 // hydrateChecks fills name/phone/email/member_id from DynamoDB for each row
 // that has a submission_uuid. Pure pointer rows (no submission) keep PHI
 // fields empty — which is fine because none was ever written.
+//
+// Uses BatchGetItem so a 25-row page costs one DDB round-trip, not 25.
 func (h *AdminInsuranceChecksHandler) hydrateChecks(ctx context.Context, ms []insuranceCheckMeta) []insuranceCheckRow {
+	keys := make([]phi.IntakeKey, 0, len(ms))
+	for _, m := range ms {
+		if m.SubmissionUUID != nil && *m.SubmissionUUID != "" && m.EmailHash != "" {
+			keys = append(keys, phi.IntakeKey{EmailHash: m.EmailHash, SubmissionUUID: *m.SubmissionUUID})
+		}
+	}
+	recs := map[string]*phi.IntakeRecord{}
+	if len(keys) > 0 {
+		got, err := h.PHI.BatchGetIntakes(ctx, keys)
+		if err != nil {
+			slog.Error("insurance_checks: ddb batch get failed", "err", err, "n", len(keys))
+		} else {
+			recs = got
+		}
+	}
+
 	out := make([]insuranceCheckRow, 0, len(ms))
 	for _, m := range ms {
 		row := insuranceCheckRow{
@@ -213,17 +235,15 @@ func (h *AdminInsuranceChecksHandler) hydrateChecks(ctx context.Context, ms []in
 		}
 		if m.SubmissionUUID != nil && *m.SubmissionUUID != "" {
 			row.SubmissionUUID = *m.SubmissionUUID
-			rec, err := h.PHI.GetIntake(ctx, m.EmailHash, *m.SubmissionUUID)
-			if err == nil && rec != nil {
+			if rec, ok := recs[*m.SubmissionUUID]; ok && rec != nil {
 				row.FirstName = rec.FirstName
 				row.LastName = rec.LastName
 				row.DateOfBirth = rec.DateOfBirth
 				row.Phone = rec.Phone
 				row.Email = rec.Email
 				row.MemberID = rec.InsuranceMemberID
-			} else if err != nil {
-				slog.Warn("insurance_checks: ddb get missed",
-					"submission_uuid", *m.SubmissionUUID, "err", err)
+			} else {
+				slog.Warn("insurance_checks: ddb get missed", "submission_uuid", *m.SubmissionUUID)
 			}
 		}
 		out = append(out, row)
@@ -254,13 +274,15 @@ func (h *AdminInsuranceChecksHandler) auditBulk(ctx context.Context, r *http.Req
 	if !ok {
 		return
 	}
+	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
 		// Only audit rows that actually exposed PHI (i.e. were hydrated).
 		if row.FirstName == "" && row.LastName == "" && row.Email == "" {
 			continue
 		}
-		admin.LogPHIAccess(ctx, h.Pool, r, u, action, "insurance_checks_phi_access", row.CheckUUID)
+		ids = append(ids, row.CheckUUID)
 	}
+	admin.LogPHIAccessBatch(ctx, h.PHI, r, u, action, "insurance_checks_phi_access", ids)
 }
 
 // List handles GET /admin/api/insurance-checks.
@@ -353,4 +375,18 @@ func (h *AdminInsuranceChecksHandler) ExportCSV(w http.ResponseWriter, r *http.R
 		})
 	}
 	cw.Flush()
+}
+
+// CanonicalCoverageStatus collapses any upstream/internal status string into
+// one of three admin-facing values: "verified", "unverified", "error".
+// Stored in bt.insurance_checks.coverage_status as the source of truth for
+// admin filtering and display.
+func CanonicalCoverageStatus(raw string, eligible bool) string {
+	if eligible {
+		return "verified"
+	}
+	if strings.EqualFold(strings.TrimSpace(raw), "verification_error") {
+		return "error"
+	}
+	return "unverified"
 }

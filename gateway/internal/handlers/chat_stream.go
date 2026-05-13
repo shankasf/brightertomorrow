@@ -56,6 +56,11 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	visitorID := ensureVisitor(w, r, h.CookieSecure)
 	ctx := r.Context()
+	// clientCtx tracks the client connection — we watch it for cancellation so
+	// we can stop forwarding bytes to a gone client. We must NOT use it for the
+	// upstream AI call, or a client disconnect would cancel the upstream stream
+	// and we'd lose the rest of the assistant turn (HIPAA §164.312(b) audit).
+	clientCtx := ctx
 	sessionID := body.SessionID
 
 	if sessionID == "" {
@@ -119,9 +124,12 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Open the upstream stream. Use a fresh context so client disconnect doesn't
-	// prevent us from reaching the upstream at all — we rely on ctx for propagation.
-	upstreamResp, err := h.AIClient.ChatStream(ctx, sessionID, body.Message)
+	// Open the upstream stream with a detached context so a mid-stream client
+	// disconnect doesn't cancel the AI call. We need the full assistant reply
+	// to land in DynamoDB even when the visitor closes the tab.
+	upstreamCtx, upstreamCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer upstreamCancel()
+	upstreamResp, err := h.AIClient.ChatStream(upstreamCtx, sessionID, body.Message)
 	if err != nil {
 		slog.Warn("chat_stream: ai dial failed", "err", err, "session_id", sessionID)
 		writeSSEEvent(w, "message", chatFallback)
@@ -160,7 +168,7 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// If the client disconnected, keep reading upstream to accumulate the
 		// reply but stop writing — we still want to persist.
 		select {
-		case <-ctx.Done():
+		case <-clientCtx.Done():
 			clientGone = true
 		default:
 		}

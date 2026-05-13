@@ -18,7 +18,7 @@ def build_crisis_agent() -> Agent:
         "Keep response under 3 sentences."
     )
     return Agent(
-        name="Crisis Support",
+        name="CrisisSupport",
         handoff_description=(
             "Handles safety concerns, self-harm, or any indication of crisis "
             "or immediate danger."

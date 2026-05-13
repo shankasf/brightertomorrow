@@ -111,7 +111,7 @@ function MiniKPI({
                     : 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200/70'
                 }`}
               >
-                {delta.positive ? '▲' : '▼'} {delta.value}
+                {delta.positive ? '▲' : '▼'} {delta.value}%
               </span>
             )}
           </div>
@@ -126,7 +126,7 @@ function MiniKPI({
 
       {series && series.length > 1 && (
         <div className="relative mt-3 -mb-1">
-          <Sparkline values={series} color={color} height={42} width={260} />
+          <Sparkline values={series} color={color} height={42} />
         </div>
       )}
     </motion.div>

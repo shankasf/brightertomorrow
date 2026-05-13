@@ -13,9 +13,12 @@ from .config import (
     DEFAULT_TRANSCRIPTION_MODEL,
     build_model_settings,
     build_realtime_run_config,
+    build_telephony_model_settings,
+    build_telephony_run_config,
     realtime_model_name,
     realtime_transcription_model_name,
     realtime_voice_name,
+    realtime_ws_url,
 )
 from .triage import build_realtime_triage
 
@@ -26,7 +29,10 @@ __all__ = [
     "build_model_settings",
     "build_realtime_run_config",
     "build_realtime_triage",
+    "build_telephony_model_settings",
+    "build_telephony_run_config",
     "realtime_model_name",
     "realtime_transcription_model_name",
     "realtime_voice_name",
+    "realtime_ws_url",
 ]

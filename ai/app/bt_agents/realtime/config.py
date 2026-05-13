@@ -13,6 +13,10 @@ from agents.realtime import RealtimeRunConfig, RealtimeSessionModelSettings
 DEFAULT_REALTIME_MODEL = "gpt-realtime-2"
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
 DEFAULT_REALTIME_VOICE = "marin"
+# OpenAI now pins this project to the US regional Realtime endpoint; the
+# global `api.openai.com` host closes the WS with `incorrect_hostname`.
+# Override via REALTIME_BASE_URL only if OpenAI moves the project.
+DEFAULT_REALTIME_BASE_URL = "wss://us.api.openai.com/v1/realtime"
 DEFAULT_TRANSCRIPTION_LANGUAGE = "en"
 DEFAULT_TRANSCRIPTION_PROMPT = (
     "English-only phone call into Brighter Tomorrow Therapy, a US therapy practice. "
@@ -34,6 +38,11 @@ def realtime_transcription_model_name() -> str:
 
 def realtime_voice_name() -> str:
     return os.environ.get("REALTIME_VOICE") or DEFAULT_REALTIME_VOICE
+
+
+def realtime_ws_url() -> str:
+    base = (os.environ.get("REALTIME_BASE_URL") or DEFAULT_REALTIME_BASE_URL).rstrip("?")
+    return f"{base}?model={realtime_model_name()}"
 
 
 def build_model_settings() -> RealtimeSessionModelSettings:
@@ -63,3 +72,31 @@ def build_model_settings() -> RealtimeSessionModelSettings:
 def build_realtime_run_config() -> RealtimeRunConfig:
     """RealtimeRunConfig (TypedDict) for RealtimeRunner."""
     return {"model_settings": build_model_settings()}
+
+
+def build_telephony_model_settings() -> RealtimeSessionModelSettings:
+    """g711_ulaw in/out for Twilio Media Streams — no resampling on either end.
+
+    Differences from the browser-mic config:
+      * mulaw both directions (Twilio's wire format → no PCM conversion)
+      * far-field denoiser instead of near-field (caller mic is usually a phone
+        speaker in a noisy room, not a headset)
+      * VAD eagerness=medium so the model reacts to short narrowband utterances
+        (e.g. one-syllable "yes") that low eagerness misses on PSTN audio
+    """
+    settings = build_model_settings()
+    settings["input_audio_format"] = "g711_ulaw"
+    settings["output_audio_format"] = "g711_ulaw"
+    settings["input_audio_noise_reduction"] = {"type": "far_field"}
+    settings["turn_detection"] = {
+        "type": "semantic_vad",
+        "eagerness": "medium",
+        "create_response": True,
+        "interrupt_response": True,
+    }
+    return settings
+
+
+def build_telephony_run_config() -> RealtimeRunConfig:
+    """RealtimeRunConfig for the Twilio bridge (POTS-grade audio)."""
+    return {"model_settings": build_telephony_model_settings()}

@@ -84,6 +84,37 @@ spec:
                 secretKeyRef:
                   name: bt-config
                   key: COGNITO_USER_POOL_CLIENT_ID
+            # Twilio Voice webhook signature verification + future outbound.
+            - name: TWILIO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: TWILIO_AUTH_TOKEN
+                  optional: true
+            - name: TWILIO_PUBLIC_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: TWILIO_PUBLIC_HOST
+                  optional: true
+            - name: TWILIO_ACCOUNT_SID
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: TWILIO_ACCOUNT_SID
+                  optional: true
+            - name: TWILIO_API_KEY_SID
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: TWILIO_API_KEY_SID
+                  optional: true
+            - name: TWILIO_API_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bt-config
+                  key: TWILIO_API_KEY_SECRET
+                  optional: true
           readinessProbe:
             httpGet:
               path: /readyz

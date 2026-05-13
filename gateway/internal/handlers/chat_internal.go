@@ -59,6 +59,26 @@ func (h *ChatInternalHandler) PutTurn(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// EndSession handles POST /internal/chat/end. Called by the AI pod when a
+// realtime voice or Twilio call session terminates, so the chat_sessions row
+// flips out of "active" immediately instead of waiting for the idle sweeper.
+// No PHI; no body content; ownership check is moot for in-cluster callers.
+func (h *ChatInternalHandler) EndSession(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := httpx.ReadJSON(w, r, &body); err != nil {
+		httpx.WriteValidationError(w, "invalid JSON")
+		return
+	}
+	if body.SessionID == "" {
+		httpx.WriteValidationError(w, "session_id is required")
+		return
+	}
+	MarkSessionEnded(h.Pool, body.SessionID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // History handles GET /internal/chat/history?session_id=...&limit=...
 // Returns oldest-first by default so the AI can replay context. Capped
 // at the most recent N turns to keep the prompt small.

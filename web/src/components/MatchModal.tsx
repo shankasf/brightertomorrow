@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FiArrowLeft, FiArrowRight, FiCheck, FiX, FiUser, FiUsers,
@@ -29,6 +30,7 @@ type Lead = {
   modality: Modality | "";
   firstName: string;
   lastName: string;
+  dob: string;
   email: string;
   phone: string;
 };
@@ -39,6 +41,7 @@ const EMPTY: Lead = {
   modality: "",
   firstName: "",
   lastName: "",
+  dob: "",
   email: "",
   phone: "",
 };
@@ -53,6 +56,11 @@ export default function MatchModal({
   const [step, setStep] = useState(0);
   const [lead, setLead] = useState<Lead>(EMPTY);
   const [submitState, setSubmitState] = useState<"idle" | "sending" | "ok" | "err">("idle");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -74,22 +82,24 @@ export default function MatchModal({
     step === 0 ? !!lead.audience :
     step === 1 ? lead.focus.length > 0 :
     step === 2 ? !!lead.modality :
-    step === 3 ? !!lead.firstName && !!lead.email :
+    step === 3 ? !!lead.firstName && !!lead.lastName && !!lead.dob && !!lead.email && !!lead.phone :
     false;
 
   async function submit() {
     setSubmitState("sending");
     try {
-      const r = await fetch("/v1/contact", {
+      const r = await fetch("/v1/match", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          source: "hero-match-modal",
           first_name: lead.firstName,
           last_name: lead.lastName,
+          date_of_birth: lead.dob,
           email: lead.email,
           phone: lead.phone,
-          message: `Match request — for: ${lead.audience}, focus: ${lead.focus.join(", ")}, modality: ${lead.modality}`,
+          audience: lead.audience,
+          focus: lead.focus,
+          modality: lead.modality,
         }),
       });
       if (!r.ok) throw new Error(await r.text());
@@ -99,7 +109,9 @@ export default function MatchModal({
     }
   }
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <AnimatePresence>
       {open && (
         <>
@@ -113,71 +125,81 @@ export default function MatchModal({
 
           {/* Dialog */}
           <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="match-title"
-            initial={{ opacity: 0, y: 20, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.96 }}
-            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] w-[min(560px,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain bg-white shadow-card"
-            style={{ borderRadius: "24px 0 24px 24px" }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={onClose}
+            className="fixed inset-0 z-[61] overflow-y-auto p-4 sm:p-6"
           >
-            {/* Header */}
-            <div className="px-7 pt-6 pb-5 border-b border-surface-line flex items-start justify-between gap-4">
-              <div>
-                <span
-                  className="text-[11px] font-semibold uppercase tracking-[0.18em]"
-                  style={{ color: "#E1B878" }}
-                >
-                  Find your therapist
-                </span>
-                <h3 id="match-title" className="font-display text-2xl text-ink mt-1 font-bold">
-                  Let&rsquo;s get you matched
-                </h3>
-              </div>
-              <button
-                onClick={onClose}
-                className="w-9 h-9 grid place-items-center rounded-full hover:bg-cream-alt text-ink-soft hover:text-ink transition shrink-0"
-                aria-label="Close"
+            <div className="flex min-h-full items-center justify-center">
+              <motion.div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="match-title"
+                initial={{ opacity: 0, y: 20, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.96 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                onClick={(event) => event.stopPropagation()}
+                className="relative my-auto w-full max-w-[560px] max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain bg-white shadow-card"
+                style={{ borderRadius: "24px 0 24px 24px" }}
               >
-                <FiX size={18} />
-              </button>
-            </div>
-
-            {/* Progress dots */}
-            {submitState !== "ok" && (
-              <div className="px-7 pt-5">
-                <div className="flex items-center gap-1.5">
-                  {Array.from({ length: totalSteps }).map((_, i) => (
+                {/* Header */}
+                <div className="px-7 pt-6 pb-5 border-b border-surface-line flex items-start justify-between gap-4">
+                  <div>
                     <span
-                      key={i}
-                      className="h-1.5 flex-1 rounded-full transition-all duration-300"
-                      style={{
-                        backgroundColor: i <= step ? "#E1B878" : "#E5E5E5",
-                      }}
-                    />
-                  ))}
-                </div>
-                <div className="text-[11px] text-ink-soft mt-2 tabular-nums">
-                  Step {step + 1} of {totalSteps}
-                </div>
-              </div>
-            )}
-
-            {/* Body */}
-            <div className="px-7 py-6 min-h-[260px]">
-              {submitState === "ok" ? (
-                <SuccessPanel onClose={onClose} />
-              ) : (
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={step}
-                    initial={{ opacity: 0, x: 16 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -16 }}
-                    transition={{ duration: 0.25 }}
+                      className="text-[11px] font-semibold uppercase tracking-[0.18em]"
+                      style={{ color: "#E1B878" }}
+                    >
+                      Find your therapist
+                    </span>
+                    <h3 id="match-title" className="font-display text-2xl text-ink mt-1 font-bold">
+                      Let&rsquo;s get you matched
+                    </h3>
+                  </div>
+                  <button
+                    onClick={onClose}
+                    className="w-9 h-9 grid place-items-center rounded-full hover:bg-cream-alt text-ink-soft hover:text-ink transition shrink-0"
+                    aria-label="Close"
                   >
+                    <FiX size={18} />
+                  </button>
+                </div>
+
+                {/* Progress dots */}
+                {submitState !== "ok" && (
+                  <div className="px-7 pt-5">
+                    <div className="flex items-center gap-1.5">
+                      {Array.from({ length: totalSteps }).map((_, i) => (
+                        <span
+                          key={i}
+                          className="h-1.5 flex-1 rounded-full transition-all duration-300"
+                          style={{
+                            backgroundColor: i <= step ? "#E1B878" : "#E5E5E5",
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-ink-soft mt-2 tabular-nums">
+                      Step {step + 1} of {totalSteps}
+                    </div>
+                  </div>
+                )}
+
+                {/* Body */}
+                <div className="px-7 py-6 min-h-[260px]">
+                  {submitState === "ok" ? (
+                    <SuccessPanel onClose={onClose} />
+                  ) : (
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.div
+                        key={step}
+                        initial={{ opacity: 0, x: 16 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -16 }}
+                        transition={{ duration: 0.25 }}
+                      >
                     {step === 0 && (
                       <Step heading="Who is therapy for?">
                         <div className="grid grid-cols-2 gap-3">
@@ -274,8 +296,8 @@ export default function MatchModal({
 
                     {step === 3 && (
                       <Step
-                        heading="Where can we reach you?"
-                        sub="We'll match you within one business day."
+                        heading="Tell us about yourself"
+                        sub="We'll match you and a care-team member will reach out within one business day."
                       >
                         <div className="grid grid-cols-2 gap-3">
                           <Field
@@ -288,6 +310,16 @@ export default function MatchModal({
                             label="Last name"
                             value={lead.lastName}
                             onChange={(v) => setLead({ ...lead, lastName: v })}
+                            required
+                          />
+                        </div>
+                        <div className="mt-3">
+                          <Field
+                            label="Date of birth"
+                            type="date"
+                            value={lead.dob}
+                            onChange={(v) => setLead({ ...lead, dob: v })}
+                            required
                           />
                         </div>
                         <div className="mt-3">
@@ -302,69 +334,73 @@ export default function MatchModal({
                         </div>
                         <div className="mt-3">
                           <Field
-                            label="Phone (optional)"
+                            label="Phone"
                             type="tel"
                             value={lead.phone}
                             onChange={(v) => setLead({ ...lead, phone: v })}
+                            required
                             icon={<FiPhone size={14} />}
                           />
                         </div>
                       </Step>
                     )}
-                  </motion.div>
-                </AnimatePresence>
-              )}
-            </div>
+                      </motion.div>
+                    </AnimatePresence>
+                  )}
+                </div>
 
-            {/* Footer */}
-            {submitState !== "ok" && (
-              <div className="px-7 pb-6 pt-2 flex items-center justify-between gap-3 border-t border-surface-line">
-                <button
-                  type="button"
-                  onClick={() => setStep((s) => Math.max(0, s - 1))}
-                  disabled={step === 0}
-                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft hover:text-ink disabled:opacity-30 transition px-3 py-2"
-                >
-                  <FiArrowLeft size={14} /> Back
-                </button>
+                {/* Footer */}
+                {submitState !== "ok" && (
+                  <div className="px-7 pb-6 pt-2 flex items-center justify-between gap-3 border-t border-surface-line">
+                    <button
+                      type="button"
+                      onClick={() => setStep((s) => Math.max(0, s - 1))}
+                      disabled={step === 0}
+                      className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft hover:text-ink disabled:opacity-30 transition px-3 py-2"
+                    >
+                      <FiArrowLeft size={14} /> Back
+                    </button>
 
-                {step < totalSteps - 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => canAdvance && setStep((s) => s + 1)}
-                    disabled={!canAdvance}
-                    className="inline-flex items-center gap-2 text-white font-semibold uppercase tracking-[0.12em] text-[0.78rem] px-6 py-3 transition disabled:opacity-50"
-                    style={{
-                      backgroundColor: "#66202A",
-                      borderRadius: "20px 0 20px 20px",
-                    }}
-                  >
-                    Continue <FiArrowRight size={14} />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => canAdvance && submitState !== "sending" && void submit()}
-                    disabled={!canAdvance || submitState === "sending"}
-                    className="btn-primary disabled:opacity-50"
-                  >
-                    {submitState === "sending" ? "Sending…" : "Match me"}
-                  </button>
+                    {step < totalSteps - 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => canAdvance && setStep((s) => s + 1)}
+                        disabled={!canAdvance}
+                        className="inline-flex items-center gap-2 text-white font-semibold uppercase tracking-[0.12em] text-[0.78rem] px-6 py-3 transition disabled:opacity-50"
+                        style={{
+                          backgroundColor: "#66202A",
+                          borderRadius: "20px 0 20px 20px",
+                        }}
+                      >
+                        Continue <FiArrowRight size={14} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => canAdvance && submitState !== "sending" && void submit()}
+                        disabled={!canAdvance || submitState === "sending"}
+                        className="btn-primary disabled:opacity-50"
+                      >
+                        {submitState === "sending" ? "Sending…" : "Match me"}
+                      </button>
+                    )}
+                  </div>
                 )}
-              </div>
-            )}
 
-            {submitState === "err" && (
-              <div className="px-7 pb-5 -mt-2">
-                <p className="text-sm text-red-700">
-                  Something went wrong. Please try again or call 725-238-6990.
-                </p>
-              </div>
-            )}
+                {submitState === "err" && (
+                  <div className="px-7 pb-5 -mt-2">
+                    <p className="text-sm text-red-700">
+                      Something went wrong. Please try again or call 725-238-6990.
+                    </p>
+                  </div>
+                )}
+              </motion.div>
+            </div>
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
 
@@ -473,8 +509,8 @@ function SuccessPanel({ onClose }: { onClose: () => void }) {
       </div>
       <h4 className="font-display text-2xl text-ink font-bold">You&rsquo;re in good hands.</h4>
       <p className="text-sm text-ink-soft mt-2 max-w-sm mx-auto leading-relaxed">
-        We&rsquo;ll review your answers and email you a therapist match within
-        one business day. Watch your inbox.
+        Your request is in. Our care team will reach out within one business
+        day to confirm next steps.
       </p>
       <button
         type="button"

@@ -36,15 +36,23 @@ function fmtDateTime(iso: string): string {
 }
 
 function statusTone(s: string): 'green' | 'amber' | 'red' | 'slate' {
-  if (s === 'eligible') return 'green';
-  if (s === 'ineligible' || s === 'verification_error') return 'red';
-  if (s === 'needs_review') return 'amber';
+  if (s === 'verified') return 'green';
+  if (s === 'error') return 'red';
+  if (s === 'unverified') return 'amber';
   return 'slate';
 }
 
-function sourceTone(s: string): 'amber' | 'violet' | 'blue' | 'slate' {
+function statusLabel(s: string): string {
+  if (s === 'verified') return 'Verified';
+  if (s === 'unverified') return 'Unverified';
+  if (s === 'error') return 'Error';
+  return s.replace('_', ' ');
+}
+
+function sourceTone(s: string): 'amber' | 'violet' | 'cyan' | 'blue' | 'slate' {
   if (s === 'chat-agent') return 'amber';
   if (s === 'voice-agent') return 'violet';
+  if (s === 'voice-phone') return 'cyan';
   if (s.startsWith('website')) return 'blue';
   return 'slate';
 }
@@ -69,31 +77,38 @@ export default function AdminInsuranceChecksPage() {
   const [page, setPage] = useState(1);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [source, setSource] = useState<'all' | 'chatbot' | 'voice' | 'website'>('all');
-  const [status, setStatus] = useState<'all' | 'eligible' | 'ineligible' | 'needs_review' | 'verification_error'>('all');
+  const [source, setSource] = useState<'all' | 'chatbot' | 'voice' | 'phone' | 'website'>('all');
+  const [status, setStatus] = useState<'all' | 'verified' | 'unverified' | 'error'>('all');
   const [q, setQ] = useState('');
+  // Debounce the search box. Each keystroke previously refetched (and
+  // re-audited) PHI; 250ms means a 10-char search hits the gateway once.
+  const [debouncedQ, setDebouncedQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
   const [downloading, setDownloading] = useState(false);
 
   const load = useCallback(async () => {
     setData(null);
     setError('');
     try {
-      const r = await adminFetch(`/admin/insurance-checks?${buildQuery({ page, from, to, source, status, q })}`);
+      const r = await adminFetch(`/admin/insurance-checks?${buildQuery({ page, from, to, source, status, q: debouncedQ })}`);
       if (!r.ok) throw new Error(`${r.status}`);
       setData(await r.json());
     } catch {
       setError('Failed to load insurance check history.');
     }
-  }, [page, from, to, source, status, q]);
+  }, [page, from, to, source, status, debouncedQ]);
 
-  useEffect(() => { setPage(1); }, [from, to, source, status, q]);
+  useEffect(() => { setPage(1); }, [from, to, source, status, debouncedQ]);
   useEffect(() => { load(); }, [load]);
 
   const downloadCsv = useCallback(async () => {
     setDownloading(true);
     try {
       const token = getStoredToken();
-      const url = `/admin/api/insurance-checks.csv?${buildQuery({ page: 1, from, to, source, status, q })}`;
+      const url = `/admin/api/insurance-checks.csv?${buildQuery({ page: 1, from, to, source, status, q: debouncedQ })}`;
       const r = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (!r.ok) throw new Error(`${r.status}`);
       const blob = await r.blob();
@@ -109,7 +124,7 @@ export default function AdminInsuranceChecksPage() {
     } finally {
       setDownloading(false);
     }
-  }, [from, to, source, status, q]);
+  }, [from, to, source, status, debouncedQ]);
 
   const items = data?.items ?? [];
 
@@ -152,7 +167,8 @@ export default function AdminInsuranceChecksPage() {
           >
             <option value="all">All sources</option>
             <option value="chatbot">Chatbot</option>
-            <option value="voice">Voice</option>
+            <option value="voice">Voice (any)</option>
+            <option value="phone">Voice (phone only)</option>
             <option value="website">Website form</option>
           </select>
         </label>
@@ -164,10 +180,9 @@ export default function AdminInsuranceChecksPage() {
             className="mt-1 h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-ink focus:border-brand focus:outline-none"
           >
             <option value="all">All statuses</option>
-            <option value="eligible">Eligible</option>
-            <option value="ineligible">Ineligible</option>
-            <option value="needs_review">Needs review</option>
-            <option value="verification_error">Verification error</option>
+            <option value="verified">Verified</option>
+            <option value="unverified">Unverified</option>
+            <option value="error">Error</option>
           </select>
         </label>
         <label className="flex flex-col text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft sm:col-span-2">
@@ -228,7 +243,7 @@ export default function AdminInsuranceChecksPage() {
                     </TD>
                     <TD>
                       <Pill tone={statusTone(c.coverage_status)} dot>
-                        {c.eligible ? 'Eligible' : c.coverage_status.replace('_', ' ')}
+                        {statusLabel(c.coverage_status)}
                       </Pill>
                     </TD>
                     <TD>

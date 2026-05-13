@@ -109,9 +109,14 @@ func parseAppointmentFilters(r *http.Request, defaultLimit, maxLimit int) (appoi
 	return f, nil
 }
 
-// sourceClause returns SQL fragment + arg for the source filter. Chatbot is
-// `source = 'chat-agent'`; Voice is `source = 'voice-agent'`; Website matches
-// the two website-* values from intake.go; "all" / "" returns no clause.
+// sourceClause returns SQL fragment + arg for the source filter.
+//
+//	"chatbot" → source = 'chat-agent'                (text chat widget)
+//	"voice"   → source IN ('voice-agent','voice-phone')
+//	             (browser WebRTC widget + Twilio PSTN calls)
+//	"phone"   → source = 'voice-phone'               (Twilio PSTN only)
+//	"website" → website-* flows
+//	""/"all"  → no clause
 func sourceClause(src string, argIdx *int) (string, []any) {
 	switch src {
 	case "chatbot":
@@ -119,13 +124,17 @@ func sourceClause(src string, argIdx *int) (string, []any) {
 		*argIdx++
 		return s, []any{"chat-agent"}
 	case "voice":
+		s := fmt.Sprintf("AND source = ANY($%d)", *argIdx)
+		*argIdx++
+		return s, []any{[]string{"voice-agent", "voice-phone"}}
+	case "phone":
 		s := fmt.Sprintf("AND source = $%d", *argIdx)
 		*argIdx++
-		return s, []any{"voice-agent"}
+		return s, []any{"voice-phone"}
 	case "website":
 		s := fmt.Sprintf("AND source = ANY($%d)", *argIdx)
 		*argIdx++
-		return s, []any{[]string{"website-booking-flow", "website-coverage-flow"}}
+		return s, []any{[]string{"website-booking-flow", "website-coverage-flow", "website-match-flow"}}
 	}
 	return "", nil
 }
@@ -186,15 +195,28 @@ func (h *AdminAppointmentsHandler) loadPointers(ctx context.Context, f appointme
 	return out, total, rows.Err()
 }
 
-// hydrate fetches the PHI record for each pointer from DynamoDB and returns
-// the merged rows. Pointers whose DDB record is missing are skipped (logged).
+// hydrate fetches the PHI records for all pointers in one BatchGetItem call
+// (DDB caps at 100 keys per call; phi.BatchGetIntakes chunks larger sets).
+// Pointers whose DDB record is missing are skipped (logged). Order of the
+// returned rows matches the pointer order so pagination + CSV stay stable.
 func (h *AdminAppointmentsHandler) hydrate(ctx context.Context, ptrs []pointerMeta) []appointmentRow {
+	if len(ptrs) == 0 {
+		return nil
+	}
+	keys := make([]phi.IntakeKey, 0, len(ptrs))
+	for _, p := range ptrs {
+		keys = append(keys, phi.IntakeKey{EmailHash: p.EmailHash, SubmissionUUID: p.SubmissionUUID})
+	}
+	recs, err := h.PHI.BatchGetIntakes(ctx, keys)
+	if err != nil {
+		slog.Error("appointments: ddb batch get failed", "err", err, "n", len(keys))
+		return nil
+	}
 	out := make([]appointmentRow, 0, len(ptrs))
 	for _, p := range ptrs {
-		rec, err := h.PHI.GetIntake(ctx, p.EmailHash, p.SubmissionUUID)
-		if err != nil || rec == nil {
-			slog.Warn("appointments: ddb get missed",
-				"submission_uuid", p.SubmissionUUID, "err", err)
+		rec, ok := recs[p.SubmissionUUID]
+		if !ok || rec == nil {
+			slog.Warn("appointments: ddb get missed", "submission_uuid", p.SubmissionUUID)
 			continue
 		}
 		out = append(out, appointmentRow{
@@ -245,26 +267,33 @@ func sourceLabel(s string) string {
 	case "chat-agent":
 		return "Chatbot"
 	case "voice-agent":
-		return "Voice"
+		return "Voice (web)"
+	case "voice-phone":
+		return "Voice (phone)"
 	case "website-booking-flow":
 		return "Website (Booking)"
 	case "website-coverage-flow":
 		return "Website (Coverage)"
+	case "website-match-flow":
+		return "Website (Match)"
 	default:
 		return s
 	}
 }
 
 // auditBulk records one access_log row per submission viewed.
-// HIPAA §164.312(b) — append-only, no batching shortcuts.
+// HIPAA §164.312(b) — append-only. One batched INSERT, fired in a detached
+// goroutine so audit writes don't add to response latency. No rows dropped.
 func (h *AdminAppointmentsHandler) auditBulk(ctx context.Context, r *http.Request, action string, rows []appointmentRow) {
 	u, ok := appmw.AdminFromContext(r.Context())
-	if !ok {
+	if !ok || len(rows) == 0 {
 		return
 	}
+	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
-		admin.LogPHIAccess(ctx, h.Pool, r, u, action, "intake_pointers_phi_access", row.SubmissionUUID)
+		ids = append(ids, row.SubmissionUUID)
 	}
+	admin.LogPHIAccessBatch(ctx, h.PHI, r, u, action, "intake_pointers_phi_access", ids)
 }
 
 // List handles GET /admin/api/appointments.

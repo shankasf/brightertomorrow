@@ -8,10 +8,45 @@ import {
   Pill, Pagination, EmptyState, SkeletonRows,
 } from '@/components/admin/ui';
 
+// Canonical source enum across every admin table — bt.chat_sessions,
+// bt.intake_pointers, bt.callback_requests, bt.insurance_checks all speak
+// this vocabulary after migration 014. Legacy values 'chat' and 'voice'
+// were renamed to 'chat-agent' and 'voice-agent' respectively; the page
+// also normalises them at render time in case any cached rows arrive.
+type SourceValue = 'chat-agent' | 'voice-agent' | 'voice-phone';
+
+type RawSource = SourceValue | 'chat' | 'voice';
+
+function canonicalSource(s: RawSource): SourceValue {
+  if (s === 'chat') return 'chat-agent';
+  if (s === 'voice') return 'voice-agent';
+  return s;
+}
+
 type Session = {
-  id: string; visitor_id: string | null; source: 'chat' | 'voice'; started_at: string;
-  ended_at: string | null; message_count: number; purged_at: string | null;
+  id: string;
+  visitor_id: string | null;
+  source: RawSource;
+  external_ref: string | null; // Twilio CallSid when source === 'voice-phone'
+  started_at: string;
+  ended_at: string | null;
+  message_count: number;
+  purged_at: string | null;
 };
+
+function sourceLabel(s: RawSource): string {
+  const c = canonicalSource(s);
+  if (c === 'voice-phone') return 'Twilio Phone Call';
+  if (c === 'voice-agent') return 'Voice (web)';
+  return 'Chatbot';
+}
+
+function sourceTone(s: RawSource): 'amber' | 'violet' | 'cyan' {
+  const c = canonicalSource(s);
+  if (c === 'voice-phone') return 'cyan';
+  if (c === 'voice-agent') return 'violet';
+  return 'amber';
+}
 
 function fmtDateTime(iso: string | null): string {
   if (!iso) return '—';
@@ -33,18 +68,41 @@ export default function AdminChatPage() {
   const router = useRouter();
   const [data, setData] = useState<{ data: Session[]; total: number } | null>(null);
   const [page, setPage] = useState(1);
+  const [source, setSource] = useState<'all' | SourceValue>('all');
+
+  useEffect(() => { setPage(1); }, [source]);
 
   useEffect(() => {
     setData(null);
-    adminFetch(`/admin/chat/sessions?page=${page}&limit=25`).then((r) => r.json()).then(setData);
-  }, [page]);
+    const q = new URLSearchParams({ page: String(page), limit: '25' });
+    if (source !== 'all') q.set('source', source);
+    adminFetch(`/admin/chat/sessions?${q.toString()}`).then((r) => r.json()).then(setData);
+  }, [page, source]);
 
   return (
       <PageWrap>
         <PageHeader
           title="Chat sessions"
-          subtitle="Visitor conversations handled by the AI triage agent. Click a session to view the full transcript — that access is logged."
+          subtitle="Every conversation handled by the AI triage agent — website chatbot, browser voice widget, and Twilio phone calls. Click a session to view the full transcript; that access is logged."
         />
+
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">Source:</span>
+          {(['all', 'chat-agent', 'voice-agent', 'voice-phone'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setSource(v)}
+              className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition ${
+                source === v
+                  ? 'bg-ink text-cream ring-ink'
+                  : 'bg-white text-ink-soft ring-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {v === 'all' ? 'All' : v === 'chat-agent' ? 'Chatbot' : v === 'voice-agent' ? 'Voice (web)' : 'Twilio Phone Call'}
+            </button>
+          ))}
+        </div>
 
         {!data ? (
           <SkeletonRows rows={6} cols={6} />
@@ -106,9 +164,14 @@ export default function AdminChatPage() {
                         </span>
                       </TD>
                       <TD>
-                        <Pill tone={s.source === 'voice' ? 'violet' : 'amber'} dot>
-                          {s.source === 'voice' ? 'Voice' : 'Chat'}
+                        <Pill tone={sourceTone(s.source)} dot>
+                          {sourceLabel(s.source)}
                         </Pill>
+                        {s.source === 'voice-phone' && s.external_ref ? (
+                          <div className="mt-1 font-mono text-[10px] text-slate-400" title={`Twilio CallSid: ${s.external_ref}`}>
+                            {s.external_ref.slice(0, 10)}…
+                          </div>
+                        ) : null}
                       </TD>
                       <TD className="text-xs text-slate-500">{fmtDateTime(s.started_at)}</TD>
                       <TD className="text-xs text-slate-500">{fmtDateTime(s.ended_at)}</TD>

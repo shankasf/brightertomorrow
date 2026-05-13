@@ -14,10 +14,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from .log_stream import broadcaster as log_broadcaster, install as install_log_broadcast
 from .logging_config import configure_logging
 
 load_dotenv()
 configure_logging()
+install_log_broadcast()
+
+# Disable the OpenAI Agents SDK tracing client. It posts spans to
+# api.openai.com (global), which our US-region-only project rejects with
+# 401 `incorrect_hostname` — non-fatal but pollutes the log stream on
+# every tool call. Production tracing belongs in CloudWatch + slog, not
+# OpenAI's hosted spans. Override with BT_AGENTS_TRACING=1 if needed.
+import os  # noqa: E402
+if os.environ.get("BT_AGENTS_TRACING", "0") != "1":
+    from agents import set_tracing_disabled  # noqa: E402
+    set_tracing_disabled(True)
 
 from .agent import build_agent  # noqa: E402 — must come after configure_logging
 from .aws_signer import signed_post
@@ -26,6 +38,7 @@ from .db import conn
 from .embed_faqs import embed_all_faqs
 from .info_cache import detect_intent, get_cached_reply, cache_stats
 from .tools import _ELIGIBLE_STATES, _validate_dob
+from .twilio_voice import run_twilio_session
 from .voice import run_voice_session
 
 logger = logging.getLogger(__name__)
@@ -149,7 +162,11 @@ async def chat(req: ChatRequest) -> ChatResponse:
     GREET_MARKER = "__BT_GREET__"
     is_greet = req.message.strip() == GREET_MARKER
 
-    history = _load_history(session_id) if session_id and not is_greet else []
+    history = (
+        await asyncio.to_thread(_load_history, session_id)
+        if session_id and not is_greet
+        else []
+    )
     logger.debug("chat_history session=%s loaded=%d", session_id or "anon", len(history))
 
     turn_content = (
@@ -453,7 +470,11 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
                 )
 
-    history = _load_history(session_id) if session_id and not is_greet else []
+    history = (
+        await asyncio.to_thread(_load_history, session_id)
+        if session_id and not is_greet
+        else []
+    )
     logger.debug("chat_stream_history session=%s loaded=%d", session_id or "anon", len(history))
 
     if is_greet:
@@ -473,6 +494,48 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
 def internal_cache_stats() -> dict[str, Any]:
     """Snapshot of the canned-reply cache. Cluster-internal — for ops/debug."""
     return cache_stats()
+
+
+@app.get("/internal/logs/stream")
+async def internal_logs_stream(request: Request) -> StreamingResponse:
+    """SSE stream of live log records (INFO and above).
+
+    Cluster-internal endpoint — the gateway proxies this under
+    superadmin auth and audits each viewer in admin_access_log. Records
+    are produced by the app.log_stream broadcaster, which buffers the
+    last 500 lines so a fresh subscriber sees recent history before
+    going live. Records may contain operational PHI (patient_id,
+    payer_id, tool latencies) — do NOT expose without auth.
+    """
+    async def gen() -> AsyncIterator[bytes]:
+        q = log_broadcaster.subscribe()
+        try:
+            # Hello so the client knows the stream is up.
+            yield b': connected\n\n'
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # Keep-alive comment — keeps proxies from closing
+                    # an idle SSE connection.
+                    yield b': keep-alive\n\n'
+                    continue
+                payload = json.dumps(msg, separators=(",", ":"))
+                yield f"data: {payload}\n\n".encode("utf-8")
+        finally:
+            log_broadcaster.unsubscribe(q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.post("/internal/embed-faqs")
@@ -509,14 +572,21 @@ async def internal_check_coverage(req: CoverageCheckRequest) -> CoverageCheckRes
 
     t0 = time.perf_counter()
     try:
-        coverage = signed_post("/internal/insurance/verify", {
-            "patient_id": req.patient_id.strip().lower(),
-            "first_name": req.first_name.strip(),
-            "last_name": req.last_name.strip(),
-            "dob": valid_dob,
-            "payer_id": payer.id,
-            "member_id": req.member_id.strip(),
-        })
+        # signed_post is sync (httpx + botocore.SigV4Auth) — offload to a thread
+        # so we don't block the uvicorn event loop for the CLAIM.MD round-trip
+        # (up to 20s). asyncio.to_thread propagates ContextVars too.
+        coverage = await asyncio.to_thread(
+            signed_post,
+            "/internal/insurance/verify",
+            {
+                "patient_id": req.patient_id.strip().lower(),
+                "first_name": req.first_name.strip(),
+                "last_name": req.last_name.strip(),
+                "dob": valid_dob,
+                "payer_id": payer.id,
+                "member_id": req.member_id.strip(),
+            },
+        )
     except Exception as exc:
         logger.exception("coverage_check_error payer=%s patient_id=%s", payer.id, req.patient_id)
         raise HTTPException(status_code=502, detail=f"coverage verification failed: {exc}") from exc
@@ -559,6 +629,70 @@ async def voice_ws(ws: WebSocket, session_id: str = "") -> None:
             "voice_ws_error session=%s duration_s=%.1f",
             session_id or "anon", time.perf_counter() - t0,
             exc_info=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Twilio Voice — phone callers reach the same realtime agent graph.
+# ---------------------------------------------------------------------------
+#
+# Twilio configuration (per number):
+#   * "A CALL COMES IN" webhook (HTTP POST)
+#       https://brightertomorrowtherapy.cloud/v1/twilio/voice
+#   * The TwiML response opens a bidirectional Media Stream to
+#       wss://brightertomorrowtherapy.cloud/v1/twilio/media
+#   * Recording MUST be disabled on the number (HIPAA / BAA scope).
+#
+# The gateway terminates TLS and verifies the X-Twilio-Signature header
+# before proxying to these endpoints (see gateway/internal/handlers/twilio.go).
+
+
+@app.post("/twilio/voice")
+async def twilio_voice() -> Any:
+    """Return TwiML that opens a Media Stream back to /twilio/media.
+
+    The gateway sets the public host explicitly via the ``BT_PUBLIC_WS_BASE``
+    env so we don't accidentally point Twilio at a stale staging host.
+    """
+    from fastapi.responses import Response
+
+    ws_base = (
+        os.environ.get("BT_PUBLIC_WS_BASE")
+        or "wss://brightertomorrowtherapy.cloud"
+    ).rstrip("/")
+    stream_url = f"{ws_base}/v1/twilio/media"
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response>"
+        "<Connect>"
+        f'<Stream url="{stream_url}" />'
+        "</Connect>"
+        "</Response>"
+    )
+    return Response(content=twiml, media_type="application/xml")
+
+
+@app.websocket("/twilio/media")
+async def twilio_media_ws(ws: WebSocket) -> None:
+    """Bridge a Twilio Media Stream to the realtime triage agent graph."""
+    logger.info("twilio_ws_connect")
+    await ws.accept(subprotocol="audio.twilio.com")
+    t0 = time.perf_counter()
+    from .tools import agent_source
+    # "voice-phone" — PSTN call via Twilio. Distinct from "voice-agent" which
+    # is the browser WebRTC widget. HIPAA audit cares about the difference
+    # (PSTN audio crossed a carrier network we don't control).
+    agent_source.set("voice-phone")
+    try:
+        await run_twilio_session(ws)
+    except WebSocketDisconnect:
+        logger.info(
+            "twilio_ws_disconnect duration_s=%.1f", time.perf_counter() - t0,
+        )
+    except Exception:
+        logger.warning(
+            "twilio_ws_error duration_s=%.1f",
+            time.perf_counter() - t0, exc_info=True,
         )
 
 

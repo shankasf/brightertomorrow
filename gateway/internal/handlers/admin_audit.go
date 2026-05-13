@@ -1,20 +1,25 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	appmw "github.com/brightertomorrowtherapy/bt-gateway/internal/middleware"
 	"github.com/go-chi/chi/v5"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // AdminAuditHandler handles HIPAA audit log + purge endpoints.
 type AdminAuditHandler struct {
 	Pool *pgxpool.Pool
+	PHI  *phi.Store
 }
 
 // PHIAuditLog handles GET /admin/audit/phi — superadmin only.
@@ -60,34 +65,41 @@ func (h *AdminAuditHandler) PHIAuditLog(w http.ResponseWriter, r *http.Request) 
 		entries = []entry{}
 	}
 
-	var total int
-	_ = h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM bt.phi_audit_log`).Scan(&total)
+	// Approximate count from pg_class.reltuples — phi_audit_log is append-
+	// heavy and grows unboundedly; an exact count(*) would be a full scan
+	// on every audit page load. ANALYZE keeps this within a few percent
+	// of truth, which is plenty for pagination UI.
+	total := approxRowCount(r.Context(), h.Pool, "bt.phi_audit_log")
 
-	// Log that we accessed the audit log (meta-audit).
-	u, _ := appmw.AdminFromContext(r.Context())
-	admin.LogPHIAccess(r.Context(), h.Pool, r, u, "view_phi_audit_log", "phi_audit_log", "")
+	// LogAdminActivity middleware already records view_phi_audit_log for this
+	// request — no need to call LogPHIAccess here (would be a duplicate row).
 
 	httpx.WriteJSON(w, http.StatusOK, pageResponse(entries, total, page, limit))
 }
 
 // AdminAccessLog handles GET /admin/audit/access — superadmin only.
+// Returns enriched rows including user_agent, details JSONB (which carries
+// method, path, and query) so the frontend can render human-readable sentences.
 func (h *AdminAuditHandler) AdminAccessLog(w http.ResponseWriter, r *http.Request) {
 	page, limit := parsePage(r)
 	offset := (page - 1) * limit
 
 	type entry struct {
-		ID           int64   `json:"id"`
-		EventTime    string  `json:"event_time"`
-		AdminEmail   string  `json:"admin_email"`
-		Action       string  `json:"action"`
-		ResourceType string  `json:"resource_type"`
-		ResourceID   *string `json:"resource_id"`
-		IPAddress    *string `json:"ip_address"`
+		ID           int64           `json:"id"`
+		EventTime    string          `json:"event_time"`
+		AdminEmail   string          `json:"admin_email"`
+		Action       string          `json:"action"`
+		ResourceType string          `json:"resource_type"`
+		ResourceID   *string         `json:"resource_id"`
+		IPAddress    *string         `json:"ip_address"`
+		UserAgent    *string         `json:"user_agent"`
+		Details      json.RawMessage `json:"details"`
 	}
 
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT id, to_char(event_time,'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        admin_email, action, resource_type, resource_id, ip_address::text
+		        admin_email, action, resource_type, resource_id, ip_address::text,
+		        user_agent, details
 		 FROM bt.admin_access_log
 		 ORDER BY event_time DESC
 		 LIMIT $1 OFFSET $2`, limit, offset)
@@ -101,10 +113,15 @@ func (h *AdminAuditHandler) AdminAccessLog(w http.ResponseWriter, r *http.Reques
 	var entries []entry
 	for rows.Next() {
 		var e entry
-		if err := rows.Scan(&e.ID, &e.EventTime, &e.AdminEmail, &e.Action, &e.ResourceType, &e.ResourceID, &e.IPAddress); err != nil {
+		var detailsBytes []byte
+		if err := rows.Scan(&e.ID, &e.EventTime, &e.AdminEmail, &e.Action, &e.ResourceType,
+			&e.ResourceID, &e.IPAddress, &e.UserAgent, &detailsBytes); err != nil {
 			slog.Error("admin access log scan", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
+		}
+		if len(detailsBytes) > 0 {
+			e.Details = json.RawMessage(detailsBytes)
 		}
 		entries = append(entries, e)
 	}
@@ -112,10 +129,32 @@ func (h *AdminAuditHandler) AdminAccessLog(w http.ResponseWriter, r *http.Reques
 		entries = []entry{}
 	}
 
-	var total int
-	_ = h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM bt.admin_access_log`).Scan(&total)
+	total := approxRowCount(r.Context(), h.Pool, "bt.admin_access_log")
 
 	httpx.WriteJSON(w, http.StatusOK, pageResponse(entries, total, page, limit))
+}
+
+// approxRowCount returns pg_class.reltuples for the given fully-qualified
+// table name. Cheap (single index lookup) and accurate to within a few %
+// after ANALYZE — adequate for paginated audit views where exactness is
+// not load-bearing. Falls back to 0 on any error (UI degrades gracefully).
+func approxRowCount(ctx context.Context, pool *pgxpool.Pool, qualified string) int {
+	parts := strings.SplitN(qualified, ".", 2)
+	if len(parts) != 2 {
+		return 0
+	}
+	var n float64
+	err := pool.QueryRow(ctx,
+		`SELECT GREATEST(c.reltuples, 0)::float8
+		   FROM pg_class c
+		   JOIN pg_namespace n ON n.oid = c.relnamespace
+		  WHERE n.nspname = $1 AND c.relname = $2`,
+		parts[0], parts[1],
+	).Scan(&n)
+	if err != nil {
+		return 0
+	}
+	return int(n)
 }
 
 // PurgeQueue handles GET /admin/audit/purge-queue — superadmin only.
@@ -169,7 +208,7 @@ func (h *AdminAuditHandler) PurgeContact(w http.ResponseWriter, r *http.Request)
 	}
 
 	u, _ := appmw.AdminFromContext(r.Context())
-	admin.LogPHIAccess(r.Context(), h.Pool, r, u, "purge_contact", "contact_submission", strconv.FormatInt(id, 10))
+	admin.LogPHIAccess(r.Context(), h.PHI, r, u, "purge_contact", "contact_submission", strconv.FormatInt(id, 10))
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -185,7 +224,7 @@ func (h *AdminAuditHandler) PurgeChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, _ := appmw.AdminFromContext(r.Context())
-	admin.LogPHIAccess(r.Context(), h.Pool, r, u, "purge_chat_session", "chat_session", sessionID)
+	admin.LogPHIAccess(r.Context(), h.PHI, r, u, "purge_chat_session", "chat_session", sessionID)
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

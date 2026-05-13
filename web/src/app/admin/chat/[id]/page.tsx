@@ -7,13 +7,41 @@ import { adminFetch } from '@/components/admin/useAdminAuth';
 import { Card, ErrorBanner, PageWrap, PHIBadge, Pill } from '@/components/admin/ui';
 
 type Message = { id: number; role: string; content: string; tool_name: string | null; created_at: string };
+// Canonical agent enum (migration 014). Older rows may still arrive with
+// legacy short aliases — canonicalSource() normalises them at render time.
+type SourceValue = 'chat-agent' | 'voice-agent' | 'voice-phone';
+type RawSource = SourceValue | 'chat' | 'voice';
+
+function canonicalSource(s: RawSource): SourceValue {
+  if (s === 'chat') return 'chat-agent';
+  if (s === 'voice') return 'voice-agent';
+  return s;
+}
+
 type SessionDetail = {
   session: {
-    id: string; visitor_id: string | null; started_at: string;
+    id: string; visitor_id: string | null;
+    source: RawSource;
+    external_ref: string | null;   // Twilio CallSid when source === 'voice-phone'
+    started_at: string;
     ended_at: string | null; retain_until: string | null; purged_at: string | null;
   };
   messages: Message[];
 };
+
+function sourceLabel(s: RawSource): string {
+  const c = canonicalSource(s);
+  if (c === 'voice-phone') return 'Twilio Phone Call';
+  if (c === 'voice-agent') return 'Voice (web)';
+  return 'Chatbot';
+}
+
+function sourceTone(s: RawSource): 'amber' | 'violet' | 'cyan' {
+  const c = canonicalSource(s);
+  if (c === 'voice-phone') return 'cyan';
+  if (c === 'voice-agent') return 'violet';
+  return 'amber';
+}
 
 const roleStyle: Record<string, { bg: string; text: string; label: string; align: 'left' | 'right' }> = {
   user: { bg: 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white', text: 'text-white', label: 'Visitor', align: 'right' },
@@ -55,7 +83,10 @@ export default function ChatSessionDetailPage() {
             >
               <div>
                 <h1 className="font-mono text-base font-semibold text-slate-900">{id}</h1>
-                <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <Pill tone={sourceTone(detail.session.source)} dot>
+                    {sourceLabel(detail.session.source)}
+                  </Pill>
                   {detail.session.purged_at ? (
                     <Pill tone="slate">Anonymized</Pill>
                   ) : detail.session.ended_at ? (
@@ -63,6 +94,11 @@ export default function ChatSessionDetailPage() {
                   ) : (
                     <Pill tone="green" dot>Active</Pill>
                   )}
+                  {detail.session.source === 'voice-phone' && detail.session.external_ref ? (
+                    <span className="font-mono text-[11px] text-slate-400" title="Twilio CallSid — cross-reference in Twilio Console">
+                      CallSid: {detail.session.external_ref}
+                    </span>
+                  ) : null}
                 </div>
               </div>
               <PHIBadge />

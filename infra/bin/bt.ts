@@ -32,6 +32,9 @@ const gatewayIam = new GatewayIamStack(app, "BtGatewayIam", {
   env,
   phiKey: security.phiKey,
   tableArn: data.table.tableArn,
+  janeEventsTableArn: data.janeEventsTable.tableArn,
+  softHoldsTableArn: data.softHoldsTable.tableArn,
+  janeIcalSyncFnArn: data.janeIcalSyncFn.functionArn,
 });
 gatewayIam.addDependency(security);
 gatewayIam.addDependency(data);

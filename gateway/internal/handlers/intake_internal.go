@@ -9,14 +9,18 @@ import (
 )
 
 // validInternalSources lists the source values accepted from trusted callers.
+//
+// voice-agent  — browser WebRTC widget on the public site.
+// voice-phone  — PSTN call routed in via Twilio Media Streams.
 var validInternalSources = map[string]struct{}{
 	"chat-agent":            {},
 	"voice-agent":           {},
+	"voice-phone":           {},
 	"website-booking-flow":  {},
 	"website-coverage-flow": {},
 }
 
-var errIntakeSource = errors.New("source must be chat-agent, voice-agent, website-booking-flow, or website-coverage-flow")
+var errIntakeSource = errors.New("source must be chat-agent, voice-agent, voice-phone, website-booking-flow, or website-coverage-flow")
 
 // IntakeInternalHandler serves the SigV4-trusted internal intake endpoint.
 // It delegates to IntakeHandler.submit, sharing all validation and persistence

@@ -14,7 +14,6 @@
     "deploy:phase1": "cdk deploy BtSecurity BtData BtObservability --require-approval never",
     "deploy:phase2": "cdk deploy BtAuth --require-approval never",
     "deploy:phase3": "cdk deploy BtApi --require-approval never",
-    "deploy:phase4": "cdk deploy BtSpa --require-approval never",
     "destroy": "cdk destroy --all"
   },
   "devDependencies": {

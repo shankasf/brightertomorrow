@@ -67,6 +67,12 @@ type IntakeRecord struct {
 	Coverage               map[string]string `dynamodbav:"coverage,omitempty"`
 	CreatedAt              time.Time         `dynamodbav:"createdAt"`
 	RetainUntil            time.Time         `dynamodbav:"retainUntil"`
+	// AppointmentTime and TherapistStaffID are only set for booking-flow
+	// intakes that were confirmed via the calendar agent. Pointer semantics
+	// so the attributevalue marshaller emits omitempty — non-booking records
+	// do not write these attributes at all.
+	AppointmentTime    *time.Time `dynamodbav:"appointmentTime,omitempty"`
+	TherapistStaffID   *int       `dynamodbav:"therapistStaffId,omitempty"`
 }
 
 // Pointer is a non-PHI summary suitable for admin list views.
@@ -81,6 +87,9 @@ type Pointer struct {
 type DDBClient interface {
 	PutItem(ctx context.Context, in *dynamodb.PutItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	GetItem(ctx context.Context, in *dynamodb.GetItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
+	UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
+	BatchGetItem(ctx context.Context, in *dynamodb.BatchGetItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error)
+	DeleteItem(ctx context.Context, in *dynamodb.DeleteItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error)
 	Query(ctx context.Context, in *dynamodb.QueryInput, opts ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
 	BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
 	DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, opts ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
@@ -215,6 +224,134 @@ func (s *Store) GetIntake(ctx context.Context, emailHash, submissionUUID string)
 		return nil, fmt.Errorf("phi: unmarshal intake: %w", err)
 	}
 	return &rec, nil
+}
+
+// IntakeKey identifies one PHI record for batch fetch.
+type IntakeKey struct {
+	EmailHash      string
+	SubmissionUUID string
+}
+
+// BatchGetIntakes fetches up to len(keys) PHI records in parallel using
+// DynamoDB BatchGetItem (capped at 100 items per call by AWS). Returns a
+// map keyed by submission_uuid so callers can re-assemble in their own
+// order; missing keys are simply absent from the map (no error).
+//
+// Why this exists: list views (appointments, insurance-checks) previously
+// looped GetItem per row, causing 25 serial round-trips per page and ~5,000
+// for a full CSV export. BatchGetItem collapses that to ⌈N/100⌉ calls.
+//
+// UnprocessedKeys (returned by DDB under throttle) are retried with
+// exponential backoff, same shape as DeleteChatSession. ConsistentRead is
+// preserved per AWS GetItem semantics (BatchGetItem accepts ConsistentRead
+// per table).
+func (s *Store) BatchGetIntakes(ctx context.Context, keys []IntakeKey) (map[string]*IntakeRecord, error) {
+	out := make(map[string]*IntakeRecord, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+
+	// Drop dup keys — BatchGetItem rejects duplicates inside a single call.
+	seen := make(map[string]struct{}, len(keys))
+	deduped := make([]IntakeKey, 0, len(keys))
+	for _, k := range keys {
+		if k.EmailHash == "" || k.SubmissionUUID == "" {
+			continue
+		}
+		id := k.EmailHash + "|" + k.SubmissionUUID
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		deduped = append(deduped, k)
+	}
+
+	for start := 0; start < len(deduped); start += 100 {
+		end := start + 100
+		if end > len(deduped) {
+			end = len(deduped)
+		}
+		chunk := deduped[start:end]
+
+		reqKeys := make([]map[string]ddbtypes.AttributeValue, 0, len(chunk))
+		for _, k := range chunk {
+			reqKeys = append(reqKeys, map[string]ddbtypes.AttributeValue{
+				"PK": &ddbtypes.AttributeValueMemberS{Value: patientPK(k.EmailHash)},
+				"SK": &ddbtypes.AttributeValueMemberS{Value: intakeSK(k.SubmissionUUID)},
+			})
+		}
+
+		pending := map[string]ddbtypes.KeysAndAttributes{
+			s.tableName: {
+				Keys:           reqKeys,
+				ConsistentRead: aws.Bool(true),
+			},
+		}
+
+		// Retry UnprocessedKeys with exponential backoff. Bounded so a sticky
+		// throttle can't pin the handler — caller's request context still wins.
+		for attempt := 0; attempt < 6 && len(pending[s.tableName].Keys) > 0; attempt++ {
+			bctx, bcancel := context.WithTimeout(ctx, s.timeout)
+			resp, err := s.ddb.BatchGetItem(bctx, &dynamodb.BatchGetItemInput{
+				RequestItems: pending,
+			})
+			bcancel()
+			if err != nil {
+				return out, fmt.Errorf("phi: batch get intakes: %w", err)
+			}
+			for _, items := range resp.Responses {
+				for _, it := range items {
+					var rec IntakeRecord
+					if err := attributevalue.UnmarshalMap(it, &rec); err != nil {
+						return out, fmt.Errorf("phi: unmarshal intake (batch): %w", err)
+					}
+					out[rec.SubmissionUUID] = &rec
+				}
+			}
+			if u, ok := resp.UnprocessedKeys[s.tableName]; ok && len(u.Keys) > 0 {
+				pending = map[string]ddbtypes.KeysAndAttributes{s.tableName: u}
+				sleep := time.Duration(50<<attempt) * time.Millisecond
+				select {
+				case <-ctx.Done():
+					return out, ctx.Err()
+				case <-time.After(sleep):
+				}
+				continue
+			}
+			pending = nil
+			break
+		}
+		if pending != nil && len(pending[s.tableName].Keys) > 0 {
+			return out, fmt.Errorf("phi: batch get intakes: %d keys unprocessed after retries",
+				len(pending[s.tableName].Keys))
+		}
+	}
+	return out, nil
+}
+
+// DeleteIntake hard-deletes one PHI record. Used by the data-quality
+// cleanup tool (cleanup_incomplete_intakes) to remove submissions whose
+// required identity fields were never populated. Caller is responsible
+// for also purging the matching pointer row from Postgres so the two
+// stores stay consistent.
+func (s *Store) DeleteIntake(ctx context.Context, emailHash, submissionUUID string) error {
+	if emailHash == "" || submissionUUID == "" {
+		return errors.New("phi: emailHash and submissionUUID required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	_, err := s.ddb.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]ddbtypes.AttributeValue{
+			"PK": &ddbtypes.AttributeValueMemberS{Value: patientPK(emailHash)},
+			"SK": &ddbtypes.AttributeValueMemberS{Value: intakeSK(submissionUUID)},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("phi: delete intake: %w", err)
+	}
+	return nil
 }
 
 // ListByStatus returns intake pointers in a given status (eg "needs_review")
@@ -384,12 +521,22 @@ func (s *Store) ListChatTurns(ctx context.Context, sessionID string, limit int32
 // DeleteChatSession removes every turn for a session. Used by the admin
 // purge endpoint and the retention sweeper. BatchWriteItem caps at 25 keys
 // per call, so we loop until the session has no more turns.
+//
+// DynamoDB can return UnprocessedItems on throttling — we retry those
+// in-place with exponential backoff and only credit the returned count
+// once DDB confirms the deletes. Without this, the returned `deleted`
+// count was wildly inflated (every attempted write was counted, even
+// retries) and throttled deletes could silently leave PHI behind for the
+// duration of a single sweep.
 func (s *Store) DeleteChatSession(ctx context.Context, sessionID string) (int, error) {
 	if sessionID == "" {
 		return 0, errors.New("phi: SessionID is required")
 	}
 	deleted := 0
-	for {
+	// Outer cap: at 25 deletes per batch, this would handle ~2500 turns —
+	// far more than any realistic chat session — without an unbounded loop.
+	const maxBatches = 100
+	for batchN := 0; batchN < maxBatches; batchN++ {
 		// Fetch a page of SK values only (smaller payload than full items).
 		qctx, qcancel := context.WithTimeout(ctx, s.timeout)
 		out, err := s.ddb.Query(qctx, &dynamodb.QueryInput{
@@ -422,16 +569,44 @@ func (s *Store) DeleteChatSession(ctx context.Context, sessionID string) (int, e
 			})
 		}
 
-		bctx, bcancel := context.WithTimeout(ctx, s.timeout)
-		_, err = s.ddb.BatchWriteItem(bctx, &dynamodb.BatchWriteItemInput{
-			RequestItems: map[string][]ddbtypes.WriteRequest{s.tableName: writes},
-		})
-		bcancel()
-		if err != nil {
-			return deleted, fmt.Errorf("phi: delete chat: batch: %w", err)
+		// Retry UnprocessedItems with exponential backoff. Cap retries so a
+		// pathological throttle doesn't hold the goroutine forever.
+		pending := writes
+		for retry := 0; retry < 6 && len(pending) > 0; retry++ {
+			bctx, bcancel := context.WithTimeout(ctx, s.timeout)
+			resp, err := s.ddb.BatchWriteItem(bctx, &dynamodb.BatchWriteItemInput{
+				RequestItems: map[string][]ddbtypes.WriteRequest{s.tableName: pending},
+			})
+			bcancel()
+			if err != nil {
+				return deleted, fmt.Errorf("phi: delete chat: batch: %w", err)
+			}
+			confirmed := len(pending)
+			pending = nil
+			if resp != nil {
+				if u, ok := resp.UnprocessedItems[s.tableName]; ok && len(u) > 0 {
+					confirmed -= len(u)
+					pending = u
+				}
+			}
+			deleted += confirmed
+			if len(pending) == 0 {
+				break
+			}
+			// Backoff: 50ms, 100ms, 200ms, 400ms, 800ms, 1600ms — bounded
+			// to keep total worst case well under one minute per page.
+			sleep := time.Duration(50<<retry) * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return deleted, ctx.Err()
+			case <-time.After(sleep):
+			}
 		}
-		deleted += len(writes)
+		if len(pending) > 0 {
+			return deleted, fmt.Errorf("phi: delete chat: %d items unprocessed after retries", len(pending))
+		}
 	}
+	return deleted, fmt.Errorf("phi: delete chat: exceeded %d batch iterations", maxBatches)
 }
 
 func validate(r IntakeRecord) error {

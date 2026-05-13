@@ -57,12 +57,11 @@ function clearCachedUser(): void {
 }
 
 export function useAdminAuth() {
-  // Hydrate synchronously from sessionStorage on mount so admin pages render
-  // immediately on navigation instead of paying ~100ms for /auth/me roundtrip
-  // every time. We still revalidate in the background — if the token has been
-  // revoked or expired, the catch block redirects to /login.
-  const [user, setUser] = useState<AdminUser | null>(() => readCachedUser());
-  const [loading, setLoading] = useState(() => readCachedUser() === null);
+  // Initial render MUST match SSR output (no sessionStorage / window access),
+  // otherwise React throws a hydration mismatch. Start with user=null,
+  // loading=true; hydrate from sessionStorage inside useEffect (client-only).
+  const [user, setUser] = useState<AdminUser | null>(null);
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
@@ -73,11 +72,19 @@ export function useAdminAuth() {
       router.replace('/admin/login');
       return;
     }
+    // Hydrate immediately from sessionStorage so the shell paints without
+    // waiting for /auth/me. We revalidate in the background below — a stale
+    // cache will be corrected, and a revoked token redirects to /login.
+    const cached = readCachedUser();
+    if (cached) {
+      setUser(cached);
+      setLoading(false);
+    }
     // Skip the /auth/me revalidation if we already revalidated within the last
     // minute in this tab — avoids a redundant round-trip on every navigation
     // when the shell remounts (or on rapid back/forward).
     const lastTs = Number(sessionStorage.getItem(REVALIDATE_TS_KEY) ?? 0);
-    if (readCachedUser() && Date.now() - lastTs < REVALIDATE_INTERVAL_MS) {
+    if (cached && Date.now() - lastTs < REVALIDATE_INTERVAL_MS) {
       return;
     }
     fetch('/admin/api/auth/me', {

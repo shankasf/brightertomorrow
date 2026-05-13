@@ -278,13 +278,24 @@ Three append-only audit tables:
 
 ## PHI Storage — DynamoDB-backed (HIPAA)
 
-Three classes of PHI now live in DynamoDB and **never** touch local Postgres:
+**As of 2026-05-13** every patient-identifying field — and every record that
+is *linkable* to one (hashed identifiers + appointment dates + therapist IDs,
+audit references to PHI submission UUIDs, etc.) — lives in AWS DynamoDB
+`bt-main` (CMK-encrypted, BAA-covered) and **never** lands on the local
+Postgres on the Hostinger VPS. Hostinger does not sign a BAA, so anything
+HIPAA-relevant must transit and persist on AWS.
 
-1. **Intake records** — the form fields (`first_name`, `last_name`, `date_of_birth`, `phone`, `email`, `home_address`, `sex`, `insurance_name`, `insurance_member_id`) collected by the website, chatbot, or voice agent.
-2. **Chat / voice transcripts** — every turn of every conversation, plaintext bodies. Patients routinely volunteer name, DOB, or insurance ID mid-chat, so the message body itself is treated as PHI.
-3. **Insurance check details** — name + member ID + payer that an eligibility call (CLAIM.MD) was made with. The non-PHI metadata (status, source, hashed email) stays in `bt.insurance_checks` for the admin "Insurance Check History" view.
+Now resident in DynamoDB:
 
-Postgres only ever holds non-PHI: pointer rows, hashed emails, status flags, source labels, counters, audit log entries.
+1. **Intake records** (`PATIENT#<emailHash>` / `INTAKE#<submissionUUID>`) — every form field collected by website, chatbot, or voice agent. Now also carries `appointmentTime` + `therapistStaffId` for confirmed bookings (formerly on `bt.intake_pointers`).
+2. **Chat / voice transcripts** (`CHAT#<sessionID>` / `TURN#…`) — every turn of every conversation, plaintext bodies.
+3. **Insurance checks** (`PATIENT#<emailHash>` / `INSURANCE#<checkUUID>`, `GSI1PK=ENTITY#INSURANCE`) — payer + status + email_hash. Standalone checks created by the AI `verify_coverage` tool are linked to the booking submission via `LinkCheckToSubmission` so one eligibility decision = one DDB item.
+4. **Callbacks** (`PATIENT#callback-<uuid>` / `CALLBACK#meta`, `GSI1PK=ENTITY#CALLBACK`) — `first_name`, `last_name`, `phone`, `reason` from any "please call me back" request.
+5. **Audit log** (`AUDIT#ACCESS#<YYYY-MM-DD>` and `AUDIT#PHI#<YYYY-MM-DD>`, `GSI1PK=ENTITY#AUDIT_ACCESS|AUDIT_PHI`) — §164.312(b) admin-PHI-access events and trigger-generated change history. Day-partitioned to avoid hot keys; ListAccessAudit / ListPHIAudit are cursor-paginated.
+
+Postgres holds only operational non-PHI: admin auth state (sessions, bcrypt hashes — Cognito covers prod), public site content (FAQs, team members, KB), and `bt.chat_sessions` row metadata (visitor cookie UUID + source + counts; transcripts in DDB).
+
+See [project_hostinger_not_hipaa](https://github.com/) memory rule — every new write of patient data must target DDB.
 
 ### Why this split
 

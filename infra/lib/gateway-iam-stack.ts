@@ -8,6 +8,9 @@ import { DDB_GSI1 } from "./constants";
 export interface GatewayIamStackProps extends StackProps {
   phiKey: kms.IKey;
   tableArn: string;
+  janeEventsTableArn: string;
+  softHoldsTableArn: string;
+  janeIcalSyncFnArn: string;
 }
 
 /**
@@ -45,6 +48,48 @@ export class GatewayIamStack extends Stack {
         "dynamodb:DescribeTable",
       ],
       resources: [props.tableArn, tableGsiArn],
+    }));
+
+    // Jane iCal events table — gateway needs GetItem/PutItem/Query/DeleteItem
+    // for serving availability and managing soft holds.
+    user.addToPolicy(new iam.PolicyStatement({
+      sid: "DynamoDbJaneEventsAccess",
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable",
+      ],
+      resources: [
+        props.janeEventsTableArn,
+        `${props.janeEventsTableArn}/index/*`,
+      ],
+    }));
+
+    // Soft holds table — same access pattern
+    user.addToPolicy(new iam.PolicyStatement({
+      sid: "DynamoDbSoftHoldsAccess",
+      effect: iam.Effect.ALLOW,
+      actions: [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable",
+      ],
+      resources: [props.softHoldsTableArn],
+    }));
+
+    // Lambda invoke on jane_ical_sync — for live on-demand refetch
+    // (gateway code may invoke this directly in future to refresh before
+    // returning availability windows).
+    user.addToPolicy(new iam.PolicyStatement({
+      sid: "InvokeJaneIcalSync",
+      effect: iam.Effect.ALLOW,
+      actions: ["lambda:InvokeFunction"],
+      resources: [props.janeIcalSyncFnArn],
     }));
 
     // CMK is needed to encrypt/decrypt items at rest. Without this the

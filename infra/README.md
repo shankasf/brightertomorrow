@@ -12,9 +12,11 @@ Deploys the AWS portion of BrighterTomorrow Therapy:
   - `GET /patients/{patient_id}` — Cognito JWT
   - `GET /dashboard/metrics` — Cognito JWT
 - **Lambdas** (Python 3.12, outside VPC): `verifyInsurance`, `handleChat`, `getPatientData`, `getDashboardMetrics`
-- **S3 + CloudFront** SPA at `admin.brightertomorrowtherapy.cloud` (OAC, HSTS, strict CSP)
 - **CloudTrail** multi-region, file validation, CMK-encrypted bucket with Object Lock (compliance, 1y)
 - **CloudWatch** alarms for 4xx/5xx and DynamoDB throttles → SNS email
+
+> The admin UI is served directly from `web/src/app/admin/**` on the Hostinger k3s cluster
+> (Traefik + cert-manager/Let's Encrypt). There is no CloudFront / S3 SPA in this stack.
 
 ## Phased deploy
 
@@ -36,9 +38,6 @@ npm run deploy:phase2
 
 # phase 3 — lambdas + API Gateway (adds ACM cert + Hostinger CNAME for api.)
 npm run deploy:phase3
-
-# phase 4 — admin SPA (adds ACM cert + Hostinger CNAME for admin.)
-npm run deploy:phase4
 ```
 
 ## Environment
@@ -50,7 +49,7 @@ npm run deploy:phase4
 ## HIPAA posture
 
 - KMS-encrypted at rest for every PHI-touching resource
-- TLS 1.2+ everywhere; HSTS on CloudFront
+- TLS 1.2+ everywhere (API Gateway + k3s ingress; HSTS set at the Traefik / Next.js layer for the admin host)
 - Cognito with enforced TOTP MFA + advanced security
 - No PHI in CloudWatch logs (structured JSON logger with field-level redaction)
 - CloudTrail with Object Lock + log file validation

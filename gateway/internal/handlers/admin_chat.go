@@ -28,21 +28,43 @@ func (h *AdminChatHandler) ListSessions(w http.ResponseWriter, r *http.Request) 
 		ID           string  `json:"id"`
 		VisitorID    *string `json:"visitor_id"`
 		Source       string  `json:"source"`
+		ExternalRef  *string `json:"external_ref"` // Twilio CallSid for voice-phone rows
 		StartedAt    string  `json:"started_at"`
 		EndedAt      *string `json:"ended_at"`
 		MessageCount int     `json:"message_count"`
 		PurgedAt     *string `json:"purged_at"`
 	}
 
+	// Optional source filter — keeps the page useful as voice-phone volume
+	// grows. The column stores the canonical agent enum
+	// {chat-agent, voice-agent, voice-phone} (migration 014). We also accept
+	// the legacy short aliases {chat, voice} that older admin URLs may pass
+	// and rewrite them transparently so bookmarks keep working.
+	sourceFilter := r.URL.Query().Get("source")
+	switch sourceFilter {
+	case "chat":
+		sourceFilter = "chat-agent"
+	case "voice":
+		sourceFilter = "voice-agent"
+	}
+	where := ""
+	args := []any{limit, offset}
+	switch sourceFilter {
+	case "chat-agent", "voice-agent", "voice-phone":
+		where = "WHERE s.source = $3"
+		args = []any{limit, offset, sourceFilter}
+	}
+
 	rows, err := h.Pool.Query(r.Context(),
-		`SELECT s.id, s.visitor_id, s.source,
+		`SELECT s.id, s.visitor_id, s.source, s.external_ref,
 		        to_char(s.started_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		        to_char(s.ended_at,   'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		        s.message_count,
 		        to_char(s.purged_at,  'YYYY-MM-DD"T"HH24:MI:SSOF')
 		 FROM bt.chat_sessions s
+		 `+where+`
 		 ORDER BY s.started_at DESC
-		 LIMIT $1 OFFSET $2`, limit, offset)
+		 LIMIT $1 OFFSET $2`, args...)
 	if err != nil {
 		slog.Error("admin chat list", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
@@ -53,7 +75,7 @@ func (h *AdminChatHandler) ListSessions(w http.ResponseWriter, r *http.Request) 
 	var sessions []sessionRow
 	for rows.Next() {
 		var s sessionRow
-		if err := rows.Scan(&s.ID, &s.VisitorID, &s.Source, &s.StartedAt, &s.EndedAt, &s.MessageCount, &s.PurgedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.VisitorID, &s.Source, &s.ExternalRef, &s.StartedAt, &s.EndedAt, &s.MessageCount, &s.PurgedAt); err != nil {
 			slog.Error("admin chat scan", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -65,7 +87,14 @@ func (h *AdminChatHandler) ListSessions(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var total int
-	_ = h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM bt.chat_sessions`).Scan(&total)
+	if where != "" {
+		_ = h.Pool.QueryRow(r.Context(),
+			`SELECT count(*) FROM bt.chat_sessions WHERE source = $1`,
+			sourceFilter,
+		).Scan(&total)
+	} else {
+		_ = h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM bt.chat_sessions`).Scan(&total)
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, pageResponse(sessions, total, page, limit))
 }
@@ -79,6 +108,8 @@ func (h *AdminChatHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 	type sessionDetail struct {
 		ID          string  `json:"id"`
 		VisitorID   *string `json:"visitor_id"`
+		Source      string  `json:"source"`
+		ExternalRef *string `json:"external_ref"`
 		StartedAt   string  `json:"started_at"`
 		EndedAt     *string `json:"ended_at"`
 		RetainUntil *string `json:"retain_until"`
@@ -92,13 +123,13 @@ func (h *AdminChatHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 
 	var s sessionDetail
 	err := h.Pool.QueryRow(ctx,
-		`SELECT id, visitor_id,
+		`SELECT id, visitor_id, source, external_ref,
 		        to_char(started_at,   'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		        to_char(ended_at,     'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		        to_char(retain_until, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
 		        to_char(purged_at,    'YYYY-MM-DD"T"HH24:MI:SSOF')
 		 FROM bt.chat_sessions WHERE id = $1`, sessionID,
-	).Scan(&s.ID, &s.VisitorID, &s.StartedAt, &s.EndedAt, &s.RetainUntil, &s.PurgedAt)
+	).Scan(&s.ID, &s.VisitorID, &s.Source, &s.ExternalRef, &s.StartedAt, &s.EndedAt, &s.RetainUntil, &s.PurgedAt)
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "not found")
 		return
@@ -125,7 +156,7 @@ func (h *AdminChatHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 
 	// HIPAA §164.312(b): log PHI access.
 	u, _ := appmw.AdminFromContext(ctx)
-	admin.LogPHIAccess(ctx, h.Pool, r, u, "view_chat_session", "chat_session", sessionID)
+	admin.LogPHIAccess(ctx, h.PHI, r, u, "view_chat_session", "chat_session", sessionID)
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"session":  s,

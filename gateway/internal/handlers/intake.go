@@ -222,35 +222,83 @@ func (h *IntakeHandler) submit(ctx context.Context, body intakeRequest) (intakeR
 	eligible := false
 	payerName := body.InsuranceName
 
+	// reusedCheckUUID identifies a standalone bt-main insurance check
+	// (written by verify_coverage) that we'll re-link to this booking's
+	// submission_uuid below. Empty string means "no match; ran a fresh
+	// CLAIM.MD call". Mirrors the pre-DDB Postgres reuse logic but reads
+	// from DynamoDB so the Hostinger VPS never sees insurance PHI.
+	var (
+		reusedCheckUUID      string
+		reusedCheckEmailHash string
+	)
+
 	if body.PaymentMethod == intakePaymentInsurance {
-		if h.CoverageChecker == nil {
-			return intakeResponse{}, http.StatusInternalServerError, fmt.Errorf("internal server error")
+		// Same-session reuse — chatbot / voice booking flow. The
+		// Insurance Check agent has ALREADY run verify_coverage in this
+		// conversation and written a standalone InsuranceCheckRecord
+		// keyed by sha256(name+DOB). Reuse it instead of re-billing
+		// CLAIM.MD seconds later for the same patient + payer.
+		if body.Source == "chat-agent" || body.Source == "voice-agent" || body.Source == "voice-phone" {
+			nameDOBHash := patientHashFor(body.FirstName, body.LastName, body.DateOfBirth)
+			if h.PHI != nil {
+				reuse, lookupErr := h.PHI.FindStandaloneCheckForReuse(ctx, nameDOBHash, body.InsuranceName, 30*time.Minute)
+				switch {
+				case lookupErr == nil:
+					reusedCheckUUID = reuse.CheckUUID
+					reusedCheckEmailHash = nameDOBHash
+					eligible = reuse.Eligible
+					coverageStatus = reuse.CoverageStatus
+					coverage = map[string]any{
+						"status": coverageStatus,
+						"plan":   body.InsuranceName,
+						"source": "in_session_verification",
+					}
+					slog.Info("intake: reused in-session insurance verification",
+						"patient_hash", nameDOBHash,
+						"check_uuid", reuse.CheckUUID,
+						"source", body.Source,
+					)
+				case errors.Is(lookupErr, phi.ErrNotFound):
+					// No prior in-session check; fall through to CoverageChecker.
+				default:
+					slog.Warn("intake: in-session insurance lookup failed",
+						"err", lookupErr,
+						"patient_hash", nameDOBHash,
+						"source", body.Source,
+					)
+				}
+			}
 		}
 
-		checkResp, err := h.CoverageChecker.CheckCoverage(ctx, aiclient.CoverageCheckRequest{
-			PatientID: body.Email,
-			FirstName: body.FirstName,
-			LastName:  body.LastName,
-			DOB:       dobCompact(body.DateOfBirth),
-			PayerName: body.InsuranceName,
-			MemberID:  body.InsuranceMemberID,
-		})
-		if err != nil {
-			slog.Warn("intake: coverage verification failed", "err", err, "flow", body.Flow, "email", body.Email)
-			coverage = map[string]any{
-				"status": "verification_error",
-				"plan":   payerName,
+		if reusedCheckUUID == "" {
+			if h.CoverageChecker == nil {
+				return intakeResponse{}, http.StatusInternalServerError, fmt.Errorf("internal server error")
 			}
-			coverageStatus = "verification_error"
-		} else {
-			coverage = checkResp.Coverage
-			coverageStatus = coverageState(checkResp.Coverage)
-			eligible = checkResp.Eligible
-			if checkResp.Payer != "" {
-				payerName = checkResp.Payer
+
+			checkResp, err := h.CoverageChecker.CheckCoverage(ctx, aiclient.CoverageCheckRequest{
+				PatientID: body.Email,
+				FirstName: body.FirstName,
+				LastName:  body.LastName,
+				DOB:       dobCompact(body.DateOfBirth),
+				PayerName: body.InsuranceName,
+				MemberID:  body.InsuranceMemberID,
+			})
+			if err != nil {
+				slog.Warn("intake: coverage verification failed", "err", err, "flow", body.Flow, "email", body.Email)
+				coverage = map[string]any{
+					"status": "verification_error",
+					"plan":   payerName,
+				}
+				coverageStatus = "verification_error"
+			} else {
+				coverage = checkResp.Coverage
+				coverageStatus = coverageState(checkResp.Coverage)
+				eligible = checkResp.Eligible
+				if checkResp.Payer != "" {
+					payerName = checkResp.Payer
+				}
 			}
 		}
-
 	}
 
 	submissionUUID := uuid.NewString()
@@ -301,42 +349,55 @@ func (h *IntakeHandler) submit(ctx context.Context, body intakeRequest) (intakeR
 		}
 	}
 
-	// Insert non-PHI pointer into Postgres. If this fails after Dynamo
-	// succeeded, log for operator remediation but return 200 — Dynamo is
-	// the source of truth.
-	var submissionID int64
-	if h.Pool != nil {
-		ddbPK := "PATIENT#" + emailHash
-		ddbSK := "INTAKE#" + submissionUUID
-		row := h.Pool.QueryRow(ctx, `
-			INSERT INTO bt.intake_pointers
-				(submission_uuid, email_hash, flow, payment_method, status, source, ddb_pk, ddb_sk)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			RETURNING id
-		`, submissionUUID, emailHash, body.Flow, body.PaymentMethod, coverageStatus, body.Source, ddbPK, ddbSK)
-		if err := row.Scan(&submissionID); err != nil {
-			slog.Error("intake: pointer insert failed — DynamoDB record exists, manual reconciliation required",
-				"err", err,
-				"submission_uuid", submissionUUID,
-				"email_hash", emailHash,
-			)
-			// Return 200 — Dynamo is source of truth.
-		}
+	// Intake pointer + insurance_checks audit rows now live in DynamoDB
+	// (bt-main). Postgres no longer holds these — the Hostinger VPS is not
+	// BAA-covered. submissionID is no longer a pg serial; we return 0 to
+	// preserve the response shape and rely on submissionUUID downstream.
+	submissionID := int64(0)
 
-		// Record the eligibility-check attempt in bt.insurance_checks so admins
-		// can review the full history of CLAIM.MD verifications (including
-		// checks that don't lead to a completed booking). Non-PHI columns
-		// only — name + member ID stay in DynamoDB. §164.312(b)
-		if body.PaymentMethod == intakePaymentInsurance {
-			_, ierr := h.Pool.Exec(ctx, `
-				INSERT INTO bt.insurance_checks
-					(submission_uuid, source, payer_name, coverage_status, eligible, email_hash)
-				VALUES ($1, $2, $3, $4, $5, $6)
-			`, submissionUUID, body.Source, payerName, coverageStatus, eligible, emailHash)
-			if ierr != nil {
+	// Insurance audit on DDB. Two branches, never both:
+	//   • Reuse: standalone check from verify_coverage exists — link it
+	//     to this booking via LinkCheckToSubmission.
+	//   • Fresh: no usable standalone — write a new InsuranceCheckRecord
+	//     tied to this submission.
+	// Self-pay skips both.
+	if body.PaymentMethod == intakePaymentInsurance && h.PHI != nil {
+		canonicalStatus := CanonicalCoverageStatus(coverageStatus, eligible)
+		if reusedCheckUUID != "" {
+			err := h.PHI.LinkCheckToSubmission(ctx,
+				reusedCheckUUID, reusedCheckEmailHash, submissionUUID, emailHash)
+			if err != nil {
+				slog.Warn("intake: insurance check link failed",
+					"err", err, "check_uuid", reusedCheckUUID,
+					"submission_uuid", submissionUUID)
+				// Fall back to a fresh insert so the booking still has an
+				// audit row on the admin Insurance Checks page.
+				_ = h.PHI.PutInsuranceCheck(ctx, phi.InsuranceCheckRecord{
+					CheckUUID:      uuid.NewString(),
+					SubmissionUUID: submissionUUID,
+					Source:         body.Source,
+					PayerName:      payerName,
+					CoverageStatus: canonicalStatus,
+					Eligible:       eligible,
+					EmailHash:      emailHash,
+					CreatedAt:      now,
+					RetainUntil:    now.AddDate(10, 0, 0),
+				})
+			}
+		} else {
+			if perr := h.PHI.PutInsuranceCheck(ctx, phi.InsuranceCheckRecord{
+				CheckUUID:      uuid.NewString(),
+				SubmissionUUID: submissionUUID,
+				Source:         body.Source,
+				PayerName:      payerName,
+				CoverageStatus: canonicalStatus,
+				Eligible:       eligible,
+				EmailHash:      emailHash,
+				CreatedAt:      now,
+				RetainUntil:    now.AddDate(10, 0, 0),
+			}); perr != nil {
 				slog.Warn("intake: insurance_checks insert failed",
-					"err", ierr, "source", body.Source, "payer", payerName)
-				// Don't fail the request — the eligibility decision still stands.
+					"err", perr, "source", body.Source, "payer", payerName)
 			}
 		}
 	}

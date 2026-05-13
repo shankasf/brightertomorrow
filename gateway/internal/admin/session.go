@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -141,10 +142,49 @@ func Login(ctx context.Context, pool *pgxpool.Pool, email, password, ipAddr, ua 
 	return token, &u, nil
 }
 
+// Token validation cache. The dashboard fires ~6 widget requests in parallel
+// on every page load, each of which previously round-tripped to Postgres to
+// validate the bearer token. With a short-lived in-process cache, those 6
+// concurrent calls share a single DB lookup.
+//
+// HIPAA note: caching auth decisions is normal practice; NIST 800-63B
+// permits session-token reuse for the duration of the session. We bound
+// the cache at 30 seconds so a server-side revoke (RevokeToken) takes
+// effect within that window without any explicit cache invalidation. The
+// authoritative store (bt.admin_sessions) is unchanged.
+const tokenCacheTTL = 30 * time.Second
+
+type tokenCacheEntry struct {
+	user      *User
+	expiresAt time.Time
+}
+
+var (
+	tokenCacheMu sync.RWMutex
+	tokenCache   = make(map[string]tokenCacheEntry)
+)
+
 // ValidateToken looks up the session by token hash, checks expiry and revocation,
 // refreshes last_used_at, and returns the admin user.
+//
+// Result is cached for tokenCacheTTL. A successful validation also refreshes
+// last_used_at asynchronously so the cached hot path costs zero DB work.
 func ValidateToken(ctx context.Context, pool *pgxpool.Pool, token string) (*User, error) {
 	tokenHash := hashToken(token)
+
+	tokenCacheMu.RLock()
+	entry, hit := tokenCache[tokenHash]
+	tokenCacheMu.RUnlock()
+	if hit && time.Now().Before(entry.expiresAt) {
+		// Async last_used_at refresh — never block the request on it.
+		go func(h string) {
+			rc, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, _ = pool.Exec(rc,
+				`UPDATE bt.admin_sessions SET last_used_at=now() WHERE token_hash=$1`, h)
+		}(tokenHash)
+		return entry.user, nil
+	}
 
 	var u User
 	err := pool.QueryRow(ctx,
@@ -158,6 +198,7 @@ func ValidateToken(ctx context.Context, pool *pgxpool.Pool, token string) (*User
 		tokenHash,
 	).Scan(&u.ID, &u.Email, &u.Role)
 	if errors.Is(err, pgx.ErrNoRows) {
+		invalidateTokenCache(tokenHash)
 		return nil, ErrSessionExpired
 	}
 	if err != nil {
@@ -168,15 +209,39 @@ func ValidateToken(ctx context.Context, pool *pgxpool.Pool, token string) (*User
 	_, _ = pool.Exec(ctx,
 		`UPDATE bt.admin_sessions SET last_used_at=now() WHERE token_hash=$1`, tokenHash)
 
+	tokenCacheMu.Lock()
+	// Opportunistic GC: if the cache grew past a reasonable bound, evict
+	// expired entries. Bound chosen to be larger than any plausible concurrent
+	// admin count.
+	if len(tokenCache) > 1024 {
+		now := time.Now()
+		for k, v := range tokenCache {
+			if now.After(v.expiresAt) {
+				delete(tokenCache, k)
+			}
+		}
+	}
+	tokenCache[tokenHash] = tokenCacheEntry{user: &u, expiresAt: time.Now().Add(tokenCacheTTL)}
+	tokenCacheMu.Unlock()
+
 	return &u, nil
 }
 
-// RevokeToken invalidates a session.
+func invalidateTokenCache(tokenHash string) {
+	tokenCacheMu.Lock()
+	delete(tokenCache, tokenHash)
+	tokenCacheMu.Unlock()
+}
+
+// RevokeToken invalidates a session. Also evicts the in-process cache so the
+// next request hits Postgres and sees the revocation immediately (otherwise
+// a logged-out admin could keep working for up to tokenCacheTTL).
 func RevokeToken(ctx context.Context, pool *pgxpool.Pool, token string) error {
 	tokenHash := hashToken(token)
 	_, err := pool.Exec(ctx,
 		`UPDATE bt.admin_sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL`,
 		tokenHash)
+	invalidateTokenCache(tokenHash)
 	return err
 }
 

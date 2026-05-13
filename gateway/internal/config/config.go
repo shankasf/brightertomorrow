@@ -22,6 +22,29 @@ type Config struct {
 	// Cognito (admin login). When unset, /admin/api/auth/exchange returns 503.
 	CognitoUserPoolID string
 	CognitoClientID   string
+	// Calendar DDB tables (created by infra agent).
+	JaneEventsTable string
+	SoftHoldsTable  string
+	// Shared secret for /internal/calendar/* endpoints. When empty the check
+	// is skipped (dev mode); in production this must be set.
+	InternalAPISecret string
+	// Twilio Voice.
+	//
+	//   TwilioAuthToken    — verifies X-Twilio-Signature on inbound webhook +
+	//                        Media Streams WS upgrades. REQUIRED today.
+	//   TwilioPublicHost   — host Twilio dials us on; must match the webhook
+	//                        URL on the Twilio number exactly.
+	//   TwilioAccountSid   — "AC…"; future outbound REST API base path.
+	//   TwilioAPIKeySid    — "SK…"; preferred basic-auth user for outbound.
+	//   TwilioAPIKeySecret — paired secret.
+	//
+	// Outbound fields are loaded but not used yet — wired so adding outbound
+	// features won't require a secrets/config rollout.
+	TwilioAuthToken    string
+	TwilioPublicHost   string
+	TwilioAccountSid   string
+	TwilioAPIKeySid    string
+	TwilioAPIKeySecret string
 }
 
 var ErrMissingDatabaseURL = errors.New("config: DATABASE_URL is required")
@@ -54,6 +77,14 @@ func Load() (*Config, error) {
 		AWSRegion:            envOr("BT_DDB_REGION", "us-east-1"),
 		CognitoUserPoolID:    os.Getenv("COGNITO_USER_POOL_ID"),
 		CognitoClientID:      os.Getenv("COGNITO_USER_POOL_CLIENT_ID"),
+		JaneEventsTable:      envOr("BT_JANE_EVENTS_TABLE", "bt-jane-events"),
+		SoftHoldsTable:       envOr("BT_SOFT_HOLDS_TABLE", "bt-soft-holds"),
+		InternalAPISecret:    os.Getenv("INTERNAL_API_SECRET"),
+		TwilioAuthToken:      os.Getenv("TWILIO_AUTH_TOKEN"),
+		TwilioPublicHost:     envOr("TWILIO_PUBLIC_HOST", "brightertomorrowtherapy.cloud"),
+		TwilioAccountSid:     os.Getenv("TWILIO_ACCOUNT_SID"),
+		TwilioAPIKeySid:      os.Getenv("TWILIO_API_KEY_SID"),
+		TwilioAPIKeySecret:   os.Getenv("TWILIO_API_KEY_SECRET"),
 	}, nil
 }
 

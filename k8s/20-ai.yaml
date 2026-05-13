@@ -36,6 +36,18 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: AWS_SECRET_ACCESS_KEY } }
             - name: AWS_REGION
               valueFrom: { secretKeyRef: { name: bt-config, key: AWS_REGION, optional: true } }
+            # Twilio. AI side reads BT_PUBLIC_WS_BASE for TwiML emission.
+            # ACCOUNT_SID + API_KEY_* are wired now so future outbound features
+            # (SMS confirmations, programmatic call control) work without a
+            # secrets rollout. Inbound auth verification stays in the gateway.
+            - name: BT_PUBLIC_WS_BASE
+              valueFrom: { secretKeyRef: { name: bt-config, key: BT_PUBLIC_WS_BASE, optional: true } }
+            - name: TWILIO_ACCOUNT_SID
+              valueFrom: { secretKeyRef: { name: bt-config, key: TWILIO_ACCOUNT_SID, optional: true } }
+            - name: TWILIO_API_KEY_SID
+              valueFrom: { secretKeyRef: { name: bt-config, key: TWILIO_API_KEY_SID, optional: true } }
+            - name: TWILIO_API_KEY_SECRET
+              valueFrom: { secretKeyRef: { name: bt-config, key: TWILIO_API_KEY_SECRET, optional: true } }
           readinessProbe:
             httpGet: { path: /health, port: 8001 }
             periodSeconds: 5

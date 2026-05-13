@@ -82,6 +82,48 @@ export default function ChatWidget() {
 
   useEffect(() => { scroller.current?.scrollTo({ top: 9e9, behavior: "smooth" }); }, [msgs, open, loading]);
 
+  // Terminate the chat session when the visitor closes the tab / navigates
+  // away. The gateway flips chat_sessions.ended_at so the admin UI stops
+  // showing the row as "active". sendBeacon is the only fetch variant the
+  // browser guarantees to flush during unload; `pagehide` fires on real
+  // navigation/tab-close on every modern browser (Safari skips beforeunload).
+  // visibilitychange+hidden catches mobile background-switch where pagehide
+  // is not always fired.
+  useEffect(() => {
+    if (!sessionId) return;
+    const end = () => {
+      try {
+        const body = JSON.stringify({ session_id: sessionId });
+        if (navigator.sendBeacon) {
+          // Blob with explicit type so the request reaches the right route
+          // even though sendBeacon defaults to text/plain.
+          navigator.sendBeacon(
+            "/v1/chat/end",
+            new Blob([body], { type: "application/json" }),
+          );
+        } else {
+          // Fallback for very old browsers — fire-and-forget; the keepalive
+          // flag lets the request survive the unload.
+          void fetch("/v1/chat/end", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+            keepalive: true,
+          });
+        }
+      } catch {
+        // Never let a beacon failure interfere with the unload path.
+      }
+    };
+    const onVis = () => { if (document.visibilityState === "hidden") end(); };
+    window.addEventListener("pagehide", end);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pagehide", end);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [sessionId]);
+
   // Cycle the capability tooltip every ~2.4s while the chat is closed.
   useEffect(() => {
     if (open) return;
@@ -289,26 +331,17 @@ export default function ChatWidget() {
     }
     setVoiceStatus("connecting");
     try {
-      // Ensure a session exists before opening the WebSocket.
+      // Voice-first: if no chat session yet, mint a UUID client-side. The
+      // gateway's /v1/voice handler creates the bt.chat_sessions row on
+      // demand (source='voice'), so no fake "Hello" round-trip is needed
+      // and the patient UI starts clean.
       let sid = sessionId;
       if (!sid) {
-        const r = await fetch("/v1/chat", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ session_id: null, message: "Hello" }),
-        });
-        const data = await r.json();
-        if (data.session_id) {
-          sid = data.session_id as string;
-          setSessionId(sid);
-          setMsgs((prev) => [
-            ...prev,
-            { role: "user", content: "Hello" },
-            { role: "assistant", content: data.reply ?? "Hi there!" },
-          ]);
-        } else {
-          throw new Error("Could not create session");
-        }
+        sid =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        setSessionId(sid);
       }
 
       const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -570,31 +603,60 @@ export default function ChatWidget() {
               </div>
             )}
 
-            <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="border-t border-surface-line p-2 flex items-center gap-2 bg-white">
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Type a message…"
-                className="flex-1 min-w-0 px-3 py-2 rounded-full bg-surface border border-surface-line text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:border-brand"
-              />
-              <button
-                type="button"
-                onClick={() => void toggleVoice()}
-                title={voiceActive ? "End voice" : "Talk via voice"}
-                aria-label={voiceActive ? "End voice" : "Start voice"}
-                className={`p-2.5 rounded-full transition shrink-0 ${
-                  voiceActive
-                    ? "bg-red-500 text-white animate-pulse"
-                    : voiceStatus === "connecting"
-                    ? "bg-brand/30 text-brand animate-pulse"
-                    : "bg-surface border border-surface-line text-ink-muted hover:text-brand hover:border-brand"
-                }`}
-              >
-                {voiceActive ? <FiMicOff size={16} /> : <FiMic size={16} />}
-              </button>
-              <button type="submit" disabled={loading} className="bg-brand hover:bg-brand-600 text-white p-2.5 rounded-full disabled:opacity-50 transition shrink-0" aria-label="Send">
-                <FiSend size={16} />
-              </button>
+            <form
+              onSubmit={(e) => { e.preventDefault(); void send(); }}
+              className="border-t border-surface-line p-2 bg-white"
+            >
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    // Auto-grow up to ~5 lines.
+                    const el = e.currentTarget;
+                    el.style.height = "auto";
+                    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    // Enter submits; Shift+Enter inserts a newline.
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      void send();
+                    }
+                  }}
+                  rows={1}
+                  placeholder="Type a message…"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-2xl bg-surface border border-surface-line text-sm text-ink placeholder:text-ink-soft focus:outline-none focus:border-brand resize-none leading-5 max-h-[140px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => void toggleVoice()}
+                  title={voiceActive ? "End voice" : "Talk via voice"}
+                  aria-label={voiceActive ? "End voice" : "Start voice"}
+                  className={`p-2.5 rounded-full transition shrink-0 ${
+                    voiceActive
+                      ? "bg-red-500 text-white animate-pulse"
+                      : voiceStatus === "connecting"
+                      ? "bg-brand/30 text-brand animate-pulse"
+                      : "bg-surface border border-surface-line text-ink-muted hover:text-brand hover:border-brand"
+                  }`}
+                >
+                  {voiceActive ? <FiMicOff size={16} /> : <FiMic size={16} />}
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-brand hover:bg-brand-600 text-white p-2.5 rounded-full disabled:opacity-50 transition shrink-0"
+                  aria-label="Send"
+                >
+                  <FiSend size={16} />
+                </button>
+              </div>
+              <div className="mt-1 px-3 text-[10.5px] text-ink-soft">
+                <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Enter</kbd> to send · <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Shift</kbd>
+                {" + "}
+                <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Enter</kbd> for new line
+              </div>
             </form>
           </motion.div>
         )}

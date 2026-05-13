@@ -49,8 +49,8 @@ export default function AdminContactsPage() {
   return (
       <PageWrap>
         <PageHeader
-          title="Contact submissions"
-          subtitle="Message bodies are hidden in this list (HIPAA §164.502(b) minimum necessary). Click a row to view the full record — that access is logged."
+          title="General enquiries — Website"
+          subtitle="Submissions from the public website contact form. Message bodies are hidden in this list (HIPAA §164.502(b) minimum necessary). Click a row to view the full record — that access is logged."
           action={
             <div className="relative">
               <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

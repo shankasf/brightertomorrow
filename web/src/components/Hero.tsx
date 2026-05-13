@@ -147,7 +147,7 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
             <button
               type="button"
               onClick={() => setCoverageOpen(true)}
-              className="inline-flex items-center gap-2 text-white border border-white/40 hover:border-white hover:bg-white/10 px-6 py-4 font-semibold uppercase tracking-[0.12em] text-[0.82rem] transition"
+              className="inline-flex items-center justify-center gap-2 text-white border border-white/40 hover:border-white hover:bg-white/10 px-6 py-4 font-semibold uppercase tracking-[0.12em] text-[0.82rem] leading-none transition"
               style={{ borderRadius: "20px 0 20px 20px" }}
             >
               <FiShield size={14} /> Check Your Coverage
@@ -201,14 +201,7 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
     {/* Multi-step flows — Talkspace-style. Rendered outside <section> so the
         modal overlays escape the hero stacking context. */}
     <MatchModal open={matchOpen} onClose={() => setMatchOpen(false)} />
-    <CoverageModal
-      open={coverageOpen}
-      onClose={() => setCoverageOpen(false)}
-      onMatch={() => {
-        setCoverageOpen(false);
-        setMatchOpen(true);
-      }}
-    />
+    <CoverageModal open={coverageOpen} onClose={() => setCoverageOpen(false)} />
     </>
   );
 }

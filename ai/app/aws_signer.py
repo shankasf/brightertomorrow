@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Mapping
+from urllib.parse import urlencode
 
 import httpx
 from botocore.auth import SigV4Auth
@@ -57,14 +58,28 @@ def gateway_post(path: str, body: Mapping[str, Any], *, timeout: float = 20.0) -
     return resp.json() if resp.content else {}
 
 
+def gateway_get(path: str, *, params: Mapping[str, str] | None = None, timeout: float = 10.0) -> dict[str, Any]:
+    """GET from the gateway pod over cluster-internal HTTP — no SigV4."""
+    base = os.environ.get("BT_GATEWAY_URL", "http://bt-gateway").rstrip("/")
+    url = f"{base}{path}"
+    resp = httpx.get(url, params=dict(params or {}), timeout=timeout)
+    resp.raise_for_status()
+    return resp.json() if resp.content else {}
+
+
 def signed_get(path: str, *, params: Mapping[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
     base = os.environ.get("BT_API_URL", "https://api.brightertomorrowtherapy.cloud").rstrip("/")
     region = os.environ.get("AWS_REGION", "us-east-1")
-    url = f"{base}{path}"
+    # SigV4 canonical query string is parsed from urlsplit(request.url).query
+    # for GET — params passed via AWSRequest(params=...) are NOT signed. Bake
+    # them into the URL before signing so the canonical request matches what
+    # the server actually receives.
+    qs = urlencode(sorted((params or {}).items()))
+    url = f"{base}{path}?{qs}" if qs else f"{base}{path}"
 
-    aws_req = AWSRequest(method="GET", url=url, params=dict(params or {}))
+    aws_req = AWSRequest(method="GET", url=url)
     SigV4Auth(_creds(), "execute-api", region).add_auth(aws_req)
 
-    resp = httpx.get(url, params=dict(params or {}), headers=dict(aws_req.headers), timeout=timeout)
+    resp = httpx.get(url, headers=dict(aws_req.headers), timeout=timeout)
     resp.raise_for_status()
     return resp.json() if resp.content else {}

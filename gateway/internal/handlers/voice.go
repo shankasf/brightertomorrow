@@ -55,7 +55,7 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Voice-first: create the session for this visitor so the IDOR check passes.
 		_, insertErr := h.Pool.Exec(ctx,
-			`INSERT INTO bt.chat_sessions (id, visitor_id, source) VALUES ($1, $2, 'voice') ON CONFLICT DO NOTHING`,
+			`INSERT INTO bt.chat_sessions (id, visitor_id, source) VALUES ($1, $2, 'voice-agent') ON CONFLICT DO NOTHING`,
 			sessionID, visitorID,
 		)
 		if insertErr != nil {
@@ -71,9 +71,9 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// A chat-first session is being upgraded to voice. Promote the
 		// source so the admin "Chat Sessions" view reflects the latest
-		// modality. Only widens chat→voice; never the reverse.
+		// modality. Only widens chat-agent → voice-agent; never reverse.
 		_, _ = h.Pool.Exec(ctx,
-			`UPDATE bt.chat_sessions SET source = 'voice' WHERE id = $1 AND source = 'chat'`,
+			`UPDATE bt.chat_sessions SET source = 'voice-agent' WHERE id = $1 AND source = 'chat-agent'`,
 			sessionID,
 		)
 	}
@@ -149,6 +149,11 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 	)
+
+	// Mark the session ended now that the voice WS is closing — the visitor
+	// hung up or closed the tab. Detached context so the originating request
+	// cancellation doesn't abort the write.
+	MarkSessionEnded(h.Pool, sessionID)
 }
 
 // proxyMessages reads every message from src and writes it verbatim to dst.

@@ -3,18 +3,20 @@ import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { CognitoUser } from 'amazon-cognito-identity-js';
-import QRCode from 'qrcode';
-import {
-  startLogin,
-  completeNewPassword,
-  submitTotp,
-  verifyTotpSetup,
-  exchangeForGatewayToken,
-  isCognitoConfigured,
-  requestPasswordReset,
-  confirmPasswordReset,
-} from '@/lib/admin-cognito';
 import { InlineSpinner, BTMark } from '@/components/admin/Spinner';
+
+// Lazy-loaded heavy deps. `amazon-cognito-identity-js` (~50KB gz) is only
+// needed once the user submits the email/password form; `qrcode` (~30KB
+// gz) is only needed in the MFA-setup stage. Importing them at module
+// scope put 80KB+ on the critical path of every /admin/login render.
+type CognitoModule = typeof import('@/lib/admin-cognito');
+let cognitoModulePromise: Promise<CognitoModule> | null = null;
+function loadCognito(): Promise<CognitoModule> {
+  if (!cognitoModulePromise) {
+    cognitoModulePromise = import('@/lib/admin-cognito');
+  }
+  return cognitoModulePromise;
+}
 
 const TOKEN_KEY = 'bt_admin_token';
 
@@ -39,22 +41,34 @@ export default function AdminLoginPage() {
   const [configured, setConfigured] = useState(true);
 
   useEffect(() => {
-    setConfigured(isCognitoConfigured());
+    // Load Cognito on idle so the configuration check is ready by the time
+    // the user starts typing, without blocking initial paint.
+    let cancelled = false;
+    loadCognito()
+      .then((m) => { if (!cancelled) setConfigured(m.isCognitoConfigured()); })
+      .catch(() => { if (!cancelled) setConfigured(false); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!mfaQr) { setMfaQrImage(''); return; }
-    QRCode.toDataURL(mfaQr, {
-      width: 200,
-      margin: 1,
-      color: { dark: '#192735', light: '#ffffff' },
-    })
-      .then(setMfaQrImage)
-      .catch(() => setMfaQrImage(''));
+    let cancelled = false;
+    import('qrcode')
+      .then(({ default: QRCode }) =>
+        QRCode.toDataURL(mfaQr, {
+          width: 200,
+          margin: 1,
+          color: { dark: '#192735', light: '#ffffff' },
+        }),
+      )
+      .then((url) => { if (!cancelled) setMfaQrImage(url); })
+      .catch(() => { if (!cancelled) setMfaQrImage(''); });
+    return () => { cancelled = true; };
   }, [mfaQr]);
 
   async function finishWithSession(idToken: string) {
-    const { token } = await exchangeForGatewayToken(idToken);
+    const m = await loadCognito();
+    const { token } = await m.exchangeForGatewayToken(idToken);
     localStorage.setItem(TOKEN_KEY, token);
     router.replace('/admin');
   }
@@ -64,7 +78,8 @@ export default function AdminLoginPage() {
     setError(''); setInfo('');
     setBusy(true);
     try {
-      const result = await startLogin(email, password);
+      const m = await loadCognito();
+      const result = await m.startLogin(email, password);
       if (result.kind === 'success') {
         await finishWithSession(result.session.getIdToken().getJwtToken());
       } else if (result.kind === 'newPassword') {
@@ -92,12 +107,14 @@ export default function AdminLoginPage() {
     setError('');
     setBusy(true);
     try {
-      const session = await completeNewPassword(pending, newPassword);
+      const m = await loadCognito();
+      const session = await m.completeNewPassword(pending, newPassword);
       await finishWithSession(session.getIdToken().getJwtToken());
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('TOTP')) {
-        const r = await startLogin(email, newPassword);
+        const m = await loadCognito();
+        const r = await m.startLogin(email, newPassword);
         if (r.kind === 'mfaSetup') {
           setPending(r.user);
           setMfaQr(r.qr);
@@ -118,7 +135,8 @@ export default function AdminLoginPage() {
     setError('');
     setBusy(true);
     try {
-      const session = await verifyTotpSetup(pending, totp);
+      const m = await loadCognito();
+      const session = await m.verifyTotpSetup(pending, totp);
       await finishWithSession(session.getIdToken().getJwtToken());
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Invalid code');
@@ -133,7 +151,8 @@ export default function AdminLoginPage() {
     setError('');
     setBusy(true);
     try {
-      const session = await submitTotp(pending, totp);
+      const m = await loadCognito();
+      const session = await m.submitTotp(pending, totp);
       await finishWithSession(session.getIdToken().getJwtToken());
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Invalid code');
@@ -147,7 +166,8 @@ export default function AdminLoginPage() {
     setError(''); setInfo('');
     setBusy(true);
     try {
-      const { destination } = await requestPasswordReset(email);
+      const m = await loadCognito();
+      const { destination } = await m.requestPasswordReset(email);
       setResetDestination(destination ?? '');
       setStage('reset');
       setInfo(`We sent a verification code${destination ? ` to ${destination}` : ''}.`);
@@ -163,7 +183,8 @@ export default function AdminLoginPage() {
     setError(''); setInfo('');
     setBusy(true);
     try {
-      await confirmPasswordReset(email, resetCode, newPassword);
+      const m = await loadCognito();
+      await m.confirmPasswordReset(email, resetCode, newPassword);
       setStage('email');
       setPassword('');
       setNewPassword('');

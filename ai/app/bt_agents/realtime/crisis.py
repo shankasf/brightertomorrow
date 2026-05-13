@@ -8,7 +8,7 @@ from ...prompts import CRISIS_RULE, PRACTICE_CONTEXT, STYLE_VOICE
 
 def build_crisis_agent() -> RealtimeAgent:
     return RealtimeAgent(
-        name="Crisis Support",
+        name="CrisisSupport",
         handoff_description="Safety concerns, self-harm, or crisis.",
         instructions=(
             f"{PRACTICE_CONTEXT}\n\n"

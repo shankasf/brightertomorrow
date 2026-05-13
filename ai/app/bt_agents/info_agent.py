@@ -29,7 +29,7 @@ def build_info_agent() -> Agent:
         "Intake Agent."
     )
     return Agent(
-        name="Info Agent",
+        name="InfoAgent",
         handoff_description=(
             "Answers questions about services, specialties, locations, hours, FAQs, "
             "and practice philosophy."

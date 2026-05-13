@@ -17,13 +17,7 @@ import (
 // AdminContactsHandler handles /admin/contacts endpoints.
 type AdminContactsHandler struct {
 	Pool *pgxpool.Pool
-	PHI  phiReader
-}
-
-// phiReader is the subset of phi.Store used by the admin contacts handler.
-// Defined by the consumer (this package), not the producer.
-type phiReader interface {
-	GetIntake(ctx context.Context, emailHash, submissionUUID string) (*phi.IntakeRecord, error)
+	PHI  *phi.Store
 }
 
 // List handles GET /admin/contacts.
@@ -116,7 +110,7 @@ func (h *AdminContactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	// HIPAA §164.312(b): log every admin PHI read.
 	u, _ := appmw.AdminFromContext(r.Context())
-	admin.LogPHIAccess(r.Context(), h.Pool, r, u, "view_contact", "contact_submission", strconv.FormatInt(id, 10))
+	admin.LogPHIAccess(r.Context(), h.PHI, r, u, "view_contact", "contact_submission", strconv.FormatInt(id, 10))
 
 	httpx.WriteJSON(w, http.StatusOK, c)
 }
@@ -263,7 +257,7 @@ func (h *AdminContactsHandler) GetIntakePointer(w http.ResponseWriter, r *http.R
 
 	// Step 3: log PHI access. §164.312(b)
 	u, _ := appmw.AdminFromContext(r.Context())
-	admin.LogPHIAccess(r.Context(), h.Pool, r, u,
+	admin.LogPHIAccess(r.Context(), h.PHI, r, u,
 		"view_intake_phi", "intake_pointers_phi_access", ptr.SubmissionUUID)
 
 	detail := intakePointerDetail{

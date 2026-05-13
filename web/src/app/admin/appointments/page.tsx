@@ -3,9 +3,22 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { adminFetch, getStoredToken } from '@/components/admin/useAdminAuth';
 import {
-  PageHeader, PageWrap, TableCard, THead, TH, TR, TD,
+  PageHeader, PageWrap, TableCard, THead, TH, TD,
   Pill, Pagination, EmptyState, Input, SkeletonRows, Button, ErrorBanner,
 } from '@/components/admin/ui';
+
+type SortKey =
+  | 'first_name'
+  | 'last_name'
+  | 'date_of_birth'
+  | 'phone'
+  | 'email'
+  | 'home_address'
+  | 'sex'
+  | 'insurance_name'
+  | 'insurance_member_id'
+  | 'created_at';
+type SortDir = 'asc' | 'desc';
 
 type Appointment = {
   id: number;
@@ -35,12 +48,19 @@ function fmtDateTime(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;
   const d = new Date(t);
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    d.toLocaleString('en-US', {
+      timeZone: 'America/Los_Angeles',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }) + ' PT'
+  );
 }
 
-function sourceTone(src: string): 'amber' | 'violet' | 'blue' | 'slate' {
+function sourceTone(src: string): 'amber' | 'violet' | 'cyan' | 'blue' | 'slate' {
   if (src === 'chat-agent') return 'amber';
   if (src === 'voice-agent') return 'violet';
+  if (src === 'voice-phone') return 'cyan';
   if (src.startsWith('website')) return 'blue';
   return 'slate';
 }
@@ -64,9 +84,20 @@ export default function AdminAppointmentsPage() {
   const [page, setPage] = useState(1);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [source, setSource] = useState<'all' | 'chatbot' | 'voice' | 'website'>('all');
+  const [source, setSource] = useState<'all' | 'chatbot' | 'voice' | 'phone' | 'website'>('all');
   const [q, setQ] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>('created_at');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  function toggleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  }
 
   const load = useCallback(async () => {
     setData(null);
@@ -111,6 +142,17 @@ export default function AdminAppointmentsPage() {
   }, [from, to, source, q]);
 
   const items = data?.items ?? [];
+  const sortedItems = useMemo(() => {
+    const list = [...items];
+    list.sort((a, b) => {
+      const av = (a[sortKey] ?? '').toString().toLowerCase();
+      const bv = (b[sortKey] ?? '').toString().toLowerCase();
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [items, sortKey, sortDir]);
   const subtitle = useMemo(() => (
     <>Live view of intake submissions from the chatbot and website forms. PHI is fetched from <span className="font-medium text-ink">DynamoDB</span> on demand and every read is recorded in the <span className="font-medium text-ink">PHI access log</span>. §164.312(b)</>
   ), []);
@@ -144,12 +186,13 @@ export default function AdminAppointmentsPage() {
           Source
           <select
             value={source}
-            onChange={(e) => setSource(e.target.value as 'all' | 'chatbot' | 'voice' | 'website')}
+            onChange={(e) => setSource(e.target.value as 'all' | 'chatbot' | 'voice' | 'phone' | 'website')}
             className="mt-1 h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-ink focus:border-brand focus:outline-none"
           >
             <option value="all">All sources</option>
             <option value="chatbot">Chatbot</option>
-            <option value="voice">Voice</option>
+            <option value="voice">Voice (any)</option>
+            <option value="phone">Voice (phone only)</option>
             <option value="website">Website form</option>
           </select>
         </label>
@@ -181,55 +224,46 @@ export default function AdminAppointmentsPage() {
           <TableCard>
             <THead>
               <tr>
-                <TH>Name</TH>
-                <TH>DOB</TH>
-                <TH>Sex</TH>
-                <TH>Phone</TH>
-                <TH>Email</TH>
-                <TH>Address</TH>
-                <TH>Insurance</TH>
+                <SortableTH label="First Name" col="first_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('first_name')} />
+                <SortableTH label="Last Name" col="last_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('last_name')} />
+                <SortableTH label="Date of Birth" col="date_of_birth" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('date_of_birth')} />
+                <SortableTH label="Phone Number" col="phone" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('phone')} />
+                <SortableTH label="Email Address" col="email" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('email')} />
+                <SortableTH label="Home Address" col="home_address" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('home_address')} />
+                <SortableTH label="Sex" col="sex" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('sex')} />
+                <SortableTH label="Insurance Name" col="insurance_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_name')} />
+                <SortableTH label="Insurance ID Number" col="insurance_member_id" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_member_id')} />
                 <TH>Source</TH>
-                <TH>Received</TH>
+                <SortableTH label="Received" col="created_at" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('created_at')} />
               </tr>
             </THead>
             <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.015 } } }}>
-              {items.map((a) => (
+              {sortedItems.map((a) => (
                 <motion.tr
                   key={a.id}
                   variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
                   className="border-t border-slate-100 transition-colors hover:bg-slate-50/70"
                 >
-                  <TD>
-                    <div className="font-medium text-ink">
-                      {a.first_name} {a.last_name}
-                    </div>
-                  </TD>
+                  <TD className="font-medium text-ink">{a.first_name || '—'}</TD>
+                  <TD className="font-medium text-ink">{a.last_name || '—'}</TD>
                   <TD className="text-slate-600 tabular-nums">{a.date_of_birth || '—'}</TD>
-                  <TD className="text-slate-600">{a.sex || '—'}</TD>
                   <TD className="text-slate-600 tabular-nums">{a.phone || '—'}</TD>
                   <TD className="text-slate-600">{a.email || '—'}</TD>
-                  <TD className="max-w-[220px] truncate text-slate-600" title={a.home_address}>
-                    {a.home_address || '—'}
+                  <TD className="max-w-[220px] truncate text-slate-600">
+                    <span title={a.home_address}>{a.home_address || '—'}</span>
                   </TD>
+                  <TD className="text-slate-600">{a.sex || '—'}</TD>
                   <TD className="text-slate-600">
-                    {a.insurance_name ? (
-                      <div>
-                        <div className="font-medium text-ink">{a.insurance_name}</div>
-                        {a.insurance_member_id && (
-                          <div className="text-[11px] font-mono tabular-nums text-slate-400">
-                            ID {a.insurance_member_id}
-                          </div>
-                        )}
-                      </div>
-                    ) : a.payment_method === 'self_pay' ? (
-                      <Pill tone="slate">Self-pay</Pill>
-                    ) : '—'}
+                    {a.insurance_name || (a.payment_method === 'self_pay' ? <Pill tone="slate">Self-pay</Pill> : '—')}
+                  </TD>
+                  <TD className="font-mono text-xs tabular-nums text-slate-600">
+                    {a.insurance_member_id || '—'}
                   </TD>
                   <TD>
                     <Pill tone={sourceTone(a.source)} dot>{a.source_label}</Pill>
                   </TD>
-                  <TD className="text-xs text-slate-500" title={a.created_at}>
-                    {fmtDateTime(a.created_at)}
+                  <TD className="text-xs text-slate-500">
+                    <span title={a.created_at}>{fmtDateTime(a.created_at)}</span>
                   </TD>
                 </motion.tr>
               ))}
@@ -239,5 +273,31 @@ export default function AdminAppointmentsPage() {
         </>
       )}
     </PageWrap>
+  );
+}
+
+function SortableTH({
+  label, col, sortKey, sortDir, onClick,
+}: {
+  label: string;
+  col: SortKey;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onClick: () => void;
+}) {
+  const active = col === sortKey;
+  const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅';
+  return (
+    <TH>
+      <button
+        type="button"
+        onClick={onClick}
+        className="inline-flex items-center gap-1 hover:text-ink"
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        <span className={active ? 'text-brand' : 'text-slate-300'}>{arrow}</span>
+      </button>
+    </TH>
   );
 }

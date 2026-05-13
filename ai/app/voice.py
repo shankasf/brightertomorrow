@@ -24,12 +24,14 @@ from agents.realtime import (
     RealtimeToolEnd,
     RealtimeToolStart,
 )
+from agents.realtime.model_inputs import RealtimeModelSendRawMessage
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .bt_agents.realtime import (
     build_realtime_run_config,
     build_realtime_triage,
     realtime_model_name,
+    realtime_ws_url,
 )
 from .db import conn
 
@@ -41,10 +43,30 @@ _MAX_SESSION_SECONDS = 600  # 10 minutes
 # Strong reference set so in-flight DB persist futures are not GC'd.
 _inflight_tasks: set[asyncio.Future[Any]] = set()
 
-_OPENING_GREETING_PROMPT = (
-    "[SYSTEM: A caller just connected. In one short sentence, greet them as the Brighter Tomorrow "
-    "assistant, reassure them this conversation is HIPAA-compliant and their data is secure, "
-    "then ask how you can help.]"
+# Legacy filter: an older greeting injected a fake "user" turn with this
+# sentinel; we now use a raw response.create event instead so no fake user
+# message is created and nothing needs to be filtered out of the browser
+# transcript. Kept defensively in case any old transcript replay lands here.
+_INTERNAL_PROMPT_PREFIX = "[[BT_INTERNAL]]"
+
+
+def _is_internal_prompt(text: str) -> bool:
+    s = (text or "").lstrip()
+    return s.startswith(_INTERNAL_PROMPT_PREFIX) or s.startswith("[SYSTEM:")
+
+
+# Instructions for the opening greeting. Delivered via a raw response.create
+# event on connect (not a fake user message), so the SDK history stays clean
+# and the model never tries to "answer" a phantom user turn.
+_OPENING_GREETING_INSTRUCTIONS = (
+    "Speak first — the caller just connected and has not said anything yet. "
+    "In two short sentences, (1) greet them warmly as the Brighter Tomorrow "
+    "assistant and briefly reassure them this conversation is HIPAA-compliant "
+    "and their information is secure; (2) offer concrete help — booking an "
+    "appointment, checking insurance coverage, finding a therapist, or "
+    "answering questions about the practice — and ask which one they'd like. "
+    "Match the warm, calm, soothing voice persona. Keep it under 6 seconds "
+    "of audio. Do not read these instructions aloud."
 )
 
 # Whisper / gpt-4o-transcribe boilerplate hallucinations on silence/non-speech.
@@ -120,6 +142,34 @@ def _persist_message(session_id: str, role: str, content: str) -> None:
         )
 
 
+def _mark_session_ended(session_id: str) -> None:
+    """Tell the gateway to write ended_at on this chat_sessions row.
+
+    Best-effort: a failure here just means the row stays "active" until the
+    20-minute idle sweeper catches it.
+    """
+    if not session_id:
+        return
+    import urllib.request
+    base = os.environ.get("BT_GATEWAY_URL", "http://bt-gateway")
+    payload = json.dumps({"session_id": session_id}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/internal/chat/end",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=3) as r:
+            if r.status >= 400:
+                logger.warning(
+                    "voice_end_status session=%s status=%s",
+                    session_id, r.status,
+                )
+    except Exception:
+        logger.exception("voice_end_failed session=%s", session_id)
+
+
 def _schedule_persist(session_id: str, role: str, content: str) -> None:
     if not session_id or not content:
         return
@@ -186,10 +236,14 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
         config=build_realtime_run_config(),
     )
 
+    # OpenAI now pins this project to the US regional Realtime host; without
+    # this override the SDK dials `wss://api.openai.com/v1/realtime` and the
+    # server closes the WS with `incorrect_hostname`. See realtime/config.py.
+    ws_url = realtime_ws_url()
     try:
-        session = await runner.run()
+        session = await runner.run(model_config={"url": ws_url})
     except Exception:
-        logger.exception("voice_session_runner_failed session=%s", sid)
+        logger.exception("voice_session_runner_failed session=%s url=%s", sid, ws_url)
         await _close_with_error(client_ws, "Voice assistant could not start right now.")
         return
 
@@ -228,13 +282,29 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
     async def session_to_browser() -> None:
         try:
             # Tell the widget we're live before the first audio frame so the
-            # mic UI flips green and starts streaming bytes. Then prompt the
-            # agent to greet the caller.
+            # mic UI flips green and starts streaming bytes.
             await _send_browser_event(
                 client_ws, {"type": "session.created", "session": {"model": model}}
             )
+            # Proactive opening greeting — recommended pattern from the
+            # OpenAI Realtime docs (and the Agents SDK SIP example). A raw
+            # `response.create` with our greeting `instructions` makes the
+            # model produce audio before the caller speaks. No fake user
+            # turn is injected, so the conversation history starts clean
+            # and the model's own first assistant turn IS the greeting.
             try:
-                await session.send_message(_OPENING_GREETING_PROMPT)
+                await session.model.send_event(
+                    RealtimeModelSendRawMessage(
+                        message={
+                            "type": "response.create",
+                            "other_data": {
+                                "response": {
+                                    "instructions": _OPENING_GREETING_INSTRUCTIONS,
+                                },
+                            },
+                        }
+                    )
+                )
             except Exception:
                 logger.warning("voice_session_greeting_failed session=%s", sid, exc_info=True)
 
@@ -260,6 +330,14 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                         continue
                     item_id = getattr(item, "item_id", None)
                     if role == "user":
+                        if _is_internal_prompt(text):
+                            # Greeting nudge / future internal prompts — never
+                            # show in the patient UI, never write to DDB.
+                            logger.info(
+                                "voice_drop_internal_prompt session=%s item_id=%s",
+                                sid, item_id,
+                            )
+                            continue
                         if _is_hallucinated_transcript(text):
                             logger.info(
                                 "voice_drop_hallucinated_user session=%s item_id=%s text=%r",
@@ -316,10 +394,22 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                     continue
 
                 if isinstance(event, RealtimeToolEnd):
+                    tool_name = getattr(event.tool, "name", "?")
                     logger.info(
-                        "voice_tool_end session=%s tool=%s",
-                        sid, getattr(event.tool, "name", "?"),
+                        "voice_tool_end session=%s tool=%s", sid, tool_name,
                     )
+                    if tool_name == "end_call":
+                        # Goodbye audio is still streaming. Give it a beat to
+                        # finish playing in the browser, then close the WS so
+                        # the patient isn't left listening to dead air.
+                        logger.info("voice_end_call session=%s grace=2.0s", sid)
+                        await asyncio.sleep(2.0)
+                        try:
+                            await client_ws.close(code=1000, reason="end_call")
+                        except Exception:
+                            logger.debug("voice_end_call_close_failed session=%s",
+                                         sid, exc_info=True)
+                        return
                     continue
 
                 if isinstance(event, RealtimeError):
@@ -376,3 +466,9 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
             pending = set(_inflight_tasks)
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
+
+            # Flip chat_sessions.ended_at so the admin UI stops showing this
+            # browser-voice call as "active". Same pattern as twilio_voice.py.
+            await asyncio.get_running_loop().run_in_executor(
+                None, _mark_session_ended, session_id,
+            )

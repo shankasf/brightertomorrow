@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/calendar"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/config"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/db"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/handlers"
@@ -65,6 +66,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Calendar store — reads bt-jane-events and bt-soft-holds.
+	calStore, err := calendar.NewStore(calendar.StoreConfig{
+		DDB:             ddbClient,
+		JaneEventsTable: cfg.JaneEventsTable,
+		SoftHoldsTable:  cfg.SoftHoldsTable,
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		slog.Error("calendar store init failed", "err", err)
+		os.Exit(1)
+	}
+
 	// Bootstrap initial superadmin if no admin users exist yet.
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	admin.Bootstrap(bootstrapCtx, pool, cfg.AdminInitialEmail, cfg.AdminInitialPassword)
@@ -85,14 +98,37 @@ func main() {
 	adminContactsH := &handlers.AdminContactsHandler{Pool: pool, PHI: phiStore}
 	adminChatH := &handlers.AdminChatHandler{Pool: pool, PHI: phiStore}
 	adminNewsletterH := &handlers.AdminNewsletterHandler{Pool: pool}
-	adminAuditH := &handlers.AdminAuditHandler{Pool: pool}
+	adminAuditH := &handlers.AdminAuditHandler{Pool: pool, PHI: phiStore}
 	adminContentH := &handlers.AdminContentHandler{Pool: pool, AIClient: ai}
 	adminAppointmentsH := &handlers.AdminAppointmentsHandler{Pool: pool, PHI: phiStore}
 	adminInsuranceChecksH := &handlers.AdminInsuranceChecksHandler{Pool: pool, PHI: phiStore}
+	adminCallbacksH := &handlers.AdminCallbacksHandler{Pool: pool, PHI: phiStore}
+	adminLogsH := &handlers.AdminLogsHandler{Pool: pool, PHI: phiStore, AIServiceURL: cfg.AIServiceURL}
+	adminCalendarH := &handlers.AdminCalendarHandler{Pool: pool, PHI: phiStore, Cal: calStore}
+	internalCalendarH := &handlers.InternalCalendarHandler{
+		Cal:            calStore,
+		Pool:           pool,
+		PHI:            phiStore,
+		InternalSecret: cfg.InternalAPISecret,
+	}
 
 	intakeH := &handlers.IntakeHandler{Pool: pool, PHI: phiStore, CoverageChecker: ai}
 	intakeInternalH := &handlers.IntakeInternalHandler{IntakeHandler: intakeH}
+	callbackInternalH := &handlers.CallbackInternalHandler{PHI: phiStore}
+	coverageInternalH := &handlers.CoverageInternalHandler{PHI: phiStore}
 	chatInternalH := &handlers.ChatInternalHandler{Pool: pool, PHI: phiStore}
+
+	twilioH := &handlers.TwilioHandler{
+		Pool:         pool,
+		AuthToken:    cfg.TwilioAuthToken,
+		PublicHost:   cfg.TwilioPublicHost,
+		AIServiceURL: cfg.AIServiceURL,
+	}
+	if cfg.TwilioAuthToken == "" {
+		slog.Warn("twilio voice disabled — TWILIO_AUTH_TOKEN not set")
+	} else {
+		slog.Info("twilio voice enabled", "public_host", cfg.TwilioPublicHost)
+	}
 
 	readyzH := &handlers.ReadyzHandler{Pool: pool, PHI: phiStore}
 
@@ -103,6 +139,11 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(appmw.Recoverer)
 	r.Use(appmw.Logger)
+	// Compress JSON / text responses. Admin list payloads are typically
+	// 50–200 KB raw and compress 8–10x. Safe under TLS — BREACH N/A because
+	// the bearer JWT is in the request header and never reflected in
+	// responses. PHI is fine: the underlying transport is already TLS.
+	r.Use(chimw.Compress(5))
 	r.Use(corsMiddleware(cfg.CORSOrigins))
 
 	// Health probes.
@@ -117,7 +158,19 @@ func main() {
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/newsletter", (&handlers.NewsletterHandler{Pool: pool}).ServeHTTP)
 		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat", (&handlers.ChatHandler{Pool: pool, PHI: phiStore, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat/stream", (&handlers.ChatStreamHandler{Pool: pool, PHI: phiStore, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
+		// /chat/end — invoked via navigator.sendBeacon on tab-close so the
+		// session flips out of "active" immediately, not 20 min later.
+		r.With(httprate.LimitByIP(60, time.Minute)).Post("/chat/end", (&handlers.ChatEndHandler{Pool: pool, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Get("/voice", (&handlers.VoiceHandler{Pool: pool, AIServiceURL: cfg.AIServiceURL, CookieSecure: cfg.CookieSecure}).ServeHTTP)
+		r.With(httprate.LimitByIP(10, time.Minute)).Post("/coverage/check", (&handlers.CoverageCheckHandler{PHI: phiStore, CoverageChecker: ai}).ServeHTTP)
+		r.With(httprate.LimitByIP(10, time.Minute)).Post("/match", (&handlers.MatchHandler{Pool: pool, PHI: phiStore}).ServeHTTP)
+
+		// Twilio Voice — phone callers reach the same realtime agent graph.
+		// Both endpoints are signature-gated (X-Twilio-Signature) inside
+		// the handler. Per-IP rate limit blocks bursts that bypass Twilio
+		// entirely. Twilio's own infra retries on 5xx, so 429 is acceptable.
+		r.With(httprate.LimitByIP(20, time.Minute)).Post("/twilio/voice", twilioH.HandleVoiceWebhook)
+		r.With(httprate.LimitByIP(20, time.Minute)).Get("/twilio/media", twilioH.HandleMediaWS)
 	})
 
 	// Internal routes — cluster-internal callers only (the bt-ai pod).
@@ -127,10 +180,22 @@ func main() {
 	// the auth boundary; do not expose without adding signature auth.
 	r.Route("/internal", func(r chi.Router) {
 		r.Post("/intake/submit", intakeInternalH.ServeHTTP)
+		r.Post("/callback/submit", callbackInternalH.ServeHTTP)
+		// Coverage-check audit: AI pod records every CLAIM.MD verification
+		// to bt.insurance_checks so standalone checks show up alongside
+		// bookings in /admin/insurance-checks. No cache, no reuse —
+		// CLAIM.MD is always re-hit; this is a pure history log.
+		r.Post("/coverage/record", coverageInternalH.Record)
 		// Chat-turn API used by the AI pod (voice + chat) so message bodies
 		// are written/read through the PHI store, never directly to Postgres.
 		r.Post("/chat/turn", chatInternalH.PutTurn)
+		r.Post("/chat/end", chatInternalH.EndSession)
 		r.Get("/chat/history", chatInternalH.History)
+
+		// Calendar endpoints for AI agents (X-Internal-Secret gated).
+		r.Post("/calendar/free-slots", internalCalendarH.FreeSlots)
+		r.Post("/calendar/book", internalCalendarH.Book)
+		r.Post("/calendar/confirm", internalCalendarH.Confirm)
 	})
 
 	// Admin API — /admin/api/* routes to gateway (see k8s/40-ingress.yaml).
@@ -146,6 +211,7 @@ func main() {
 		// All other admin routes require a valid session token.
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAdmin(pool))
+			r.Use(appmw.LogAdminActivity(pool))
 
 			r.Post("/auth/logout", adminAuthH.Logout)
 			r.Get("/auth/me", adminAuthH.Me)
@@ -170,6 +236,15 @@ func main() {
 			r.Get("/insurance-checks", adminInsuranceChecksH.List)
 			r.Get("/insurance-checks.csv", adminInsuranceChecksH.ExportCSV)
 
+			// Callbacks (non-PHI lightweight requests — name + phone + reason).
+			r.Get("/callbacks", adminCallbacksH.List)
+
+			// Calendar: therapist roster + events (PHI: description field gated
+			// behind a separate /details endpoint). §164.312(b) audited.
+			r.Get("/calendar/therapists", adminCalendarH.Therapists)
+			r.Get("/calendar/events", adminCalendarH.Events)
+			r.Get("/calendar/events/{eventId}/details", adminCalendarH.EventDetails)
+
 			// PHI: chat sessions (access logged on detail view).
 			r.Get("/chat/sessions", adminChatH.ListSessions)
 			r.Get("/chat/sessions/{id}", adminChatH.GetSession)
@@ -182,6 +257,10 @@ func main() {
 			// Superadmin-only: audit logs, purge, content management.
 			r.Group(func(r chi.Router) {
 				r.Use(appmw.RequireSuperadmin(pool))
+
+				// Live AI service log stream (SSE). Superadmin-only because
+				// operational logs include patient identifiers and tool args.
+				r.Get("/logs/ai", adminLogsH.StreamAI)
 
 				r.Get("/audit/phi", adminAuditH.PHIAuditLog)
 				r.Get("/audit/access", adminAuditH.AdminAccessLog)
