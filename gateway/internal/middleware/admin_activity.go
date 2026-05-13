@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"
 )
 
 // clientIP strips the port from r.RemoteAddr so it can be cast to Postgres
@@ -49,13 +50,15 @@ func (sr *statusRecorder) Flush() {
 }
 
 // LogAdminActivity is middleware that records every authenticated admin API
-// call to bt.admin_access_log (async, post-response) and emits a structured
+// call to DynamoDB bt-main (async, post-response) and emits a structured
 // slog event for CloudWatch.
 //
-// It must be installed after RequireAdmin so AdminFromContext is populated.
-// Requests where AdminFromContext returns ok=false are silently skipped (e.g.
-// if the middleware is ever accidentally applied to an unauthenticated route).
-func LogAdminActivity(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+// Now writes to DDB via phi.Store.PutAccessAudit — the Hostinger Postgres
+// bt.admin_access_log table has been dropped (project_hostinger_not_hipaa).
+//
+// Must be installed after RequireAdmin so AdminFromContext is populated.
+// Requests where AdminFromContext returns ok=false are silently skipped.
+func LogAdminActivity(store *phi.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			u, ok := AdminFromContext(r.Context())
@@ -129,35 +132,40 @@ func LogAdminActivity(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 				return
 			}
 
-			// pool == nil is safe to check — keeps unit tests and early-startup
-			// callers from panicking if wired before DB is ready.
-			if pool == nil {
+			// store == nil keeps unit tests and early-startup callers from
+			// panicking if the middleware is wired before phi.Store is ready.
+			if store == nil {
 				return
 			}
 
-			// Write the DB row asynchronously so the response is never delayed.
-			// We use a fresh background context; the request context is already
-			// done by the time this goroutine runs.
+			// Write the DDB row asynchronously so the response is never delayed.
+			// Fresh background context; the request context is already done by
+			// the time this goroutine runs.
 			adminID := u.ID
 			adminEmail := u.Email
+			rec := phi.AccessAuditRecord{
+				AuditID:      uuid.NewString(),
+				AdminUserID:  adminID,
+				AdminEmail:   adminEmail,
+				Action:       action,
+				ResourceType: resourceType,
+				ResourceID:   resourceID,
+				IPAddress:    ipAddr,
+				UserAgent:    ua,
+				Details:      string(detailsJSON),
+				CreatedAt:    time.Now().UTC(),
+				RetainUntil:  time.Now().UTC().AddDate(10, 0, 0),
+			}
 			go func() {
 				defer func() {
-					if rec := recover(); rec != nil {
-						slog.Error("admin_activity: panic in audit goroutine", "recovered", rec)
+					if rcv := recover(); rcv != nil {
+						slog.Error("admin_activity: panic in audit goroutine", "recovered", rcv)
 					}
 				}()
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				_, err := pool.Exec(ctx,
-					`INSERT INTO bt.admin_access_log
-					   (admin_user_id, admin_email, action, resource_type, resource_id,
-					    ip_address, user_agent, details)
-					 VALUES ($1, $2, $3, $4, $5, $6::inet, $7, $8)`,
-					adminID, adminEmail, action, resourceType, nullIfEmpty(resourceID),
-					ipAddr, ua, detailsJSON,
-				)
-				if err != nil {
-					slog.Error("admin_activity: db insert failed",
+				if err := store.PutAccessAudit(ctx, rec); err != nil {
+					slog.Error("admin_activity: ddb put failed",
 						"err", err, "action", action, "admin_email", adminEmail)
 				}
 			}()

@@ -211,7 +211,7 @@ func main() {
 		// All other admin routes require a valid session token.
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAdmin(pool))
-			r.Use(appmw.LogAdminActivity(pool))
+			r.Use(appmw.LogAdminActivity(phiStore))
 
 			r.Post("/auth/logout", adminAuthH.Logout)
 			r.Get("/auth/me", adminAuthH.Me)

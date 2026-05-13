@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
@@ -116,6 +118,11 @@ func (h *AdminContactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 // intakePointerRow is the non-PHI summary returned by ListIntakePointers.
+//
+// Note on `ID`: in the Postgres era this was the bigserial primary key.
+// Now the DDB SubmissionUUID is the stable identifier, but we keep ID in
+// the JSON shape so existing frontend code that uses it as a React key
+// keeps working. Zero is fine — frontend de-dupes on SubmissionUUID.
 type intakePointerRow struct {
 	ID             int64  `json:"id"`
 	SubmissionUUID string `json:"submission_uuid"`
@@ -131,42 +138,46 @@ type intakePointerRow struct {
 
 // ListIntakePointers handles GET /admin/api/intake-pointers.
 // Returns non-PHI pointer metadata only — §164.502(b) minimum necessary.
+// Reads from DynamoDB bt-main (the Postgres bt.intake_pointers table
+// has been dropped — project_hostinger_not_hipaa).
 func (h *AdminContactsHandler) ListIntakePointers(w http.ResponseWriter, r *http.Request) {
+	if h.PHI == nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "phi store not configured")
+		return
+	}
 	page, limit := parsePage(r)
 	offset := (page - 1) * limit
 
-	rows, err := h.Pool.Query(r.Context(),
-		`SELECT id, submission_uuid, email_hash, flow, payment_method, status, source,
-		        to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at
-		 FROM bt.intake_pointers
-		 ORDER BY created_at DESC
-		 LIMIT $1 OFFSET $2`, limit, offset)
+	recs, _, err := h.PHI.ListIntakePointers(r.Context(), phi.IntakeFilter{Limit: 10000})
 	if err != nil {
 		slog.Error("admin intake pointers list", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer rows.Close()
-
-	var pointers []intakePointerRow
-	for rows.Next() {
-		var p intakePointerRow
-		if err := rows.Scan(
-			&p.ID, &p.SubmissionUUID, &p.EmailHash,
-			&p.Flow, &p.PaymentMethod, &p.Status, &p.Source, &p.CreatedAt,
-		); err != nil {
-			slog.Error("admin intake pointers scan", "err", err)
-			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-		pointers = append(pointers, p)
+	total := len(recs)
+	if offset > total {
+		offset = total
 	}
-	if pointers == nil {
-		pointers = []intakePointerRow{}
+	end := offset + limit
+	if end > total {
+		end = total
 	}
+	slice := recs[offset:end]
 
-	var total int
-	_ = h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM bt.intake_pointers`).Scan(&total)
+	pointers := make([]intakePointerRow, 0, len(slice))
+	for _, r := range slice {
+		pointers = append(pointers, intakePointerRow{
+			// Postgres-era schema had bigserial id; submission_uuid is the
+			// stable identifier now. Frontend uses ID as a React key only.
+			SubmissionUUID: r.SubmissionUUID,
+			EmailHash:      r.EmailHash,
+			Flow:           r.Flow,
+			PaymentMethod:  r.PaymentMethod,
+			Status:         r.CoverageStatus,
+			Source:         r.Source,
+			CreatedAt:      r.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, pageResponse(pointers, total, page, limit))
 }
@@ -202,74 +213,55 @@ type intakePointerDetail struct {
 }
 
 // GetIntakePointer handles GET /admin/api/intake-pointers/{id}.
-// Fetches the pointer row from Postgres, then retrieves the full PHI record
-// from DynamoDB. PHI access is logged. §164.312(b)
+//
+// `id` is now treated as the DDB submission_uuid (Postgres bigserial is
+// gone). The handler locates the IntakeRecord on bt-main and returns the
+// merged pointer + PHI shape. PHI access is logged. §164.312(b)
 func (h *AdminContactsHandler) GetIntakePointer(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		httpx.WriteValidationError(w, "invalid id")
+	if h.PHI == nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "phi store not configured")
+		return
+	}
+	submissionUUID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if submissionUUID == "" {
+		httpx.WriteValidationError(w, "id is required")
 		return
 	}
 
-	// Step 1: fetch the non-PHI pointer row.
-	type pointerMeta struct {
-		ID             int64
-		SubmissionUUID string
-		EmailHash      string
-		Flow           string
-		PaymentMethod  string
-		Status         string
-		Source         string
-		CreatedAt      string
-		RetainUntil    string
-	}
-	var ptr pointerMeta
-	err = h.Pool.QueryRow(r.Context(),
-		`SELECT id, submission_uuid, email_hash, flow, payment_method, status, source,
-		        to_char(created_at,   'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(retain_until, 'YYYY-MM-DD"T"HH24:MI:SSOF')
-		 FROM bt.intake_pointers WHERE id = $1`, id,
-	).Scan(
-		&ptr.ID, &ptr.SubmissionUUID, &ptr.EmailHash,
-		&ptr.Flow, &ptr.PaymentMethod, &ptr.Status, &ptr.Source,
-		&ptr.CreatedAt, &ptr.RetainUntil,
-	)
+	// Scan the GSI1 across all status buckets and match on submission_uuid.
+	// At current scale (hundreds of intakes / year) this is one round-trip;
+	// when the table grows past ~10k items add a GSI2 on submissionUuid.
+	recs, _, err := h.PHI.ListIntakePointers(r.Context(), phi.IntakeFilter{Limit: 10000})
 	if err != nil {
+		slog.Error("admin intake pointer get: ddb list failed", "err", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	var rec *phi.IntakeRecord
+	for i := range recs {
+		if recs[i].SubmissionUUID == submissionUUID {
+			rec = &recs[i]
+			break
+		}
+	}
+	if rec == nil {
 		httpx.WriteError(w, http.StatusNotFound, "not found")
 		return
 	}
 
-	// Step 2: fetch PHI from DynamoDB.
-	if h.PHI == nil {
-		slog.Error("admin intake pointer get: PHI store not configured")
-		httpx.WriteError(w, http.StatusInternalServerError, "phi store not configured")
-		return
-	}
-	rec, err := h.PHI.GetIntake(r.Context(), ptr.EmailHash, ptr.SubmissionUUID)
-	if err != nil {
-		slog.Error("admin intake pointer get: dynamo fetch failed",
-			"err", err,
-			"submission_uuid", ptr.SubmissionUUID,
-		)
-		httpx.WriteError(w, http.StatusInternalServerError, "could not retrieve PHI record")
-		return
-	}
-
-	// Step 3: log PHI access. §164.312(b)
 	u, _ := appmw.AdminFromContext(r.Context())
 	admin.LogPHIAccess(r.Context(), h.PHI, r, u,
-		"view_intake_phi", "intake_pointers_phi_access", ptr.SubmissionUUID)
+		"view_intake_phi", "intake_pointers_phi_access", rec.SubmissionUUID)
 
 	detail := intakePointerDetail{
-		ID:             ptr.ID,
-		SubmissionUUID: ptr.SubmissionUUID,
-		EmailHash:      ptr.EmailHash,
-		Flow:           ptr.Flow,
-		PaymentMethod:  ptr.PaymentMethod,
-		Status:         ptr.Status,
-		Source:         ptr.Source,
-		CreatedAt:      ptr.CreatedAt,
-		RetainUntil:    ptr.RetainUntil,
+		SubmissionUUID: rec.SubmissionUUID,
+		EmailHash:      rec.EmailHash,
+		Flow:           rec.Flow,
+		PaymentMethod:  rec.PaymentMethod,
+		Status:         rec.CoverageStatus,
+		Source:         rec.Source,
+		CreatedAt:      rec.CreatedAt.UTC().Format(time.RFC3339),
+		RetainUntil:    rec.RetainUntil.UTC().Format(time.RFC3339),
 		// PHI from DynamoDB.
 		FirstName:              rec.FirstName,
 		LastName:               rec.LastName,
