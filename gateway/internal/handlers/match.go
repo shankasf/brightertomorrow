@@ -219,25 +219,14 @@ func (h *MatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		RetainUntil:    now.AddDate(10, 0, 0),
 	}
 
+	// PHI lands in DynamoDB only — the Hostinger Postgres is not BAA-covered.
+	// IntakeRecord is the source of truth; admin Appointments page reads
+	// from DDB directly via phi.ListIntakePointers.
 	if err := h.PHI.PutIntake(ctx, rec); err != nil {
 		slog.Error("match: phi store put failed",
 			"err", err, "submission_uuid", submissionUUID)
 		httpx.WriteError(w, http.StatusServiceUnavailable, "phi_store_unavailable")
 		return
-	}
-
-	if h.Pool != nil {
-		ddbPK := "PATIENT#" + emailHash
-		ddbSK := "INTAKE#" + submissionUUID
-		if _, err := h.Pool.Exec(ctx, `
-			INSERT INTO bt.intake_pointers
-				(submission_uuid, email_hash, flow, payment_method, status, source, ddb_pk, ddb_sk)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		`, submissionUUID, emailHash, matchFlow, "", "needs_review", matchSource, ddbPK, ddbSK); err != nil {
-			slog.Error("match: pointer insert failed — DynamoDB record exists, manual reconciliation required",
-				"err", err, "submission_uuid", submissionUUID, "email_hash", emailHash)
-			// Return 200 — Dynamo is source of truth.
-		}
 	}
 
 	slog.Info("match: lead recorded",

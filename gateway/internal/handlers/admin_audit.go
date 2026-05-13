@@ -7,12 +7,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	appmw "github.com/brightertomorrowtherapy/bt-gateway/internal/middleware"
-	"github.com/go-chi/chi/v5"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,69 +24,90 @@ type AdminAuditHandler struct {
 }
 
 // PHIAuditLog handles GET /admin/audit/phi — superadmin only.
-// Reading the phi_audit_log is itself a PHI access event and must be logged.
+// Reads from DynamoDB bt-main (BAA-covered). Pagination is page-based
+// over a single DDB Query response; for deep paging the frontend should
+// switch to cursor pagination via NextCursor in the response.
 func (h *AdminAuditHandler) PHIAuditLog(w http.ResponseWriter, r *http.Request) {
+	if h.PHI == nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "phi store not configured")
+		return
+	}
 	page, limit := parsePage(r)
 	offset := (page - 1) * limit
 
 	type entry struct {
-		ID         int64   `json:"id"`
-		EventTime  string  `json:"event_time"`
-		TableName  string  `json:"table_name"`
-		Operation  string  `json:"operation"`
-		RowID      string  `json:"row_id"`
-		Actor      string  `json:"actor"`
-		AppUser    *string `json:"app_user"`
+		ID        string  `json:"id"`
+		EventTime string  `json:"event_time"`
+		TableName string  `json:"table_name"`
+		Operation string  `json:"operation"`
+		RowID     string  `json:"row_id"`
+		Actor     string  `json:"actor"`
+		AppUser   *string `json:"app_user"`
 	}
 
-	rows, err := h.Pool.Query(r.Context(),
-		`SELECT id, to_char(event_time,'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        table_name, operation, row_id, actor, app_user
-		 FROM bt.phi_audit_log
-		 ORDER BY event_time DESC
-		 LIMIT $1 OFFSET $2`, limit, offset)
+	// Over-fetch so page-based offsetting stays correct without forcing
+	// the frontend to switch to cursor pagination immediately.
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	res, err := h.PHI.ListPHIAudit(r.Context(), phi.PHIAuditFilter{
+		Limit:  5000,
+		Cursor: cursor,
+	})
 	if err != nil {
 		slog.Error("admin phi audit log", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer rows.Close()
 
-	var entries []entry
-	for rows.Next() {
-		var e entry
-		if err := rows.Scan(&e.ID, &e.EventTime, &e.TableName, &e.Operation, &e.RowID, &e.Actor, &e.AppUser); err != nil {
-			slog.Error("admin phi audit scan", "err", err)
-			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
-			return
+	total := len(res.Rows)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	slice := res.Rows[offset:end]
+
+	entries := make([]entry, 0, len(slice))
+	for _, r := range slice {
+		var appUser *string
+		if r.AppUser != "" {
+			s := r.AppUser
+			appUser = &s
 		}
-		entries = append(entries, e)
+		entries = append(entries, entry{
+			ID:        r.AuditID,
+			EventTime: r.CreatedAt.UTC().Format(time.RFC3339),
+			TableName: r.TableName,
+			Operation: r.Operation,
+			RowID:     r.RowID,
+			Actor:     r.Actor,
+			AppUser:   appUser,
+		})
 	}
-	if entries == nil {
-		entries = []entry{}
-	}
 
-	// Approximate count from pg_class.reltuples — phi_audit_log is append-
-	// heavy and grows unboundedly; an exact count(*) would be a full scan
-	// on every audit page load. ANALYZE keeps this within a few percent
-	// of truth, which is plenty for pagination UI.
-	total := approxRowCount(r.Context(), h.Pool, "bt.phi_audit_log")
-
-	// LogAdminActivity middleware already records view_phi_audit_log for this
-	// request — no need to call LogPHIAccess here (would be a duplicate row).
-
-	httpx.WriteJSON(w, http.StatusOK, pageResponse(entries, total, page, limit))
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"items":       entries,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"next_cursor": res.NextCursor,
+	})
 }
 
 // AdminAccessLog handles GET /admin/audit/access — superadmin only.
-// Returns enriched rows including user_agent, details JSONB (which carries
-// method, path, and query) so the frontend can render human-readable sentences.
+// Returns enriched rows including user_agent + structured details so the
+// frontend can render human-readable sentences. Reads from DynamoDB.
 func (h *AdminAuditHandler) AdminAccessLog(w http.ResponseWriter, r *http.Request) {
+	if h.PHI == nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "phi store not configured")
+		return
+	}
 	page, limit := parsePage(r)
 	offset := (page - 1) * limit
 
 	type entry struct {
-		ID           int64           `json:"id"`
+		ID           string          `json:"id"`
 		EventTime    string          `json:"event_time"`
 		AdminEmail   string          `json:"admin_email"`
 		Action       string          `json:"action"`
@@ -96,42 +118,66 @@ func (h *AdminAuditHandler) AdminAccessLog(w http.ResponseWriter, r *http.Reques
 		Details      json.RawMessage `json:"details"`
 	}
 
-	rows, err := h.Pool.Query(r.Context(),
-		`SELECT id, to_char(event_time,'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        admin_email, action, resource_type, resource_id, ip_address::text,
-		        user_agent, details
-		 FROM bt.admin_access_log
-		 ORDER BY event_time DESC
-		 LIMIT $1 OFFSET $2`, limit, offset)
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	res, err := h.PHI.ListAccessAudit(r.Context(), phi.AccessAuditFilter{
+		Limit:  5000,
+		Cursor: cursor,
+	})
 	if err != nil {
 		slog.Error("admin access log list", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer rows.Close()
 
-	var entries []entry
-	for rows.Next() {
-		var e entry
-		var detailsBytes []byte
-		if err := rows.Scan(&e.ID, &e.EventTime, &e.AdminEmail, &e.Action, &e.ResourceType,
-			&e.ResourceID, &e.IPAddress, &e.UserAgent, &detailsBytes); err != nil {
-			slog.Error("admin access log scan", "err", err)
-			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-		if len(detailsBytes) > 0 {
-			e.Details = json.RawMessage(detailsBytes)
-		}
-		entries = append(entries, e)
+	total := len(res.Rows)
+	if offset > total {
+		offset = total
 	}
-	if entries == nil {
-		entries = []entry{}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	slice := res.Rows[offset:end]
+
+	entries := make([]entry, 0, len(slice))
+	for _, r := range slice {
+		var rid, ip, ua *string
+		if r.ResourceID != "" {
+			s := r.ResourceID
+			rid = &s
+		}
+		if r.IPAddress != "" {
+			s := r.IPAddress
+			ip = &s
+		}
+		if r.UserAgent != "" {
+			s := r.UserAgent
+			ua = &s
+		}
+		var details json.RawMessage
+		if r.Details != "" {
+			details = json.RawMessage(r.Details)
+		}
+		entries = append(entries, entry{
+			ID:           r.AuditID,
+			EventTime:    r.CreatedAt.UTC().Format(time.RFC3339),
+			AdminEmail:   r.AdminEmail,
+			Action:       r.Action,
+			ResourceType: r.ResourceType,
+			ResourceID:   rid,
+			IPAddress:    ip,
+			UserAgent:    ua,
+			Details:      details,
+		})
 	}
 
-	total := approxRowCount(r.Context(), h.Pool, "bt.admin_access_log")
-
-	httpx.WriteJSON(w, http.StatusOK, pageResponse(entries, total, page, limit))
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"items":       entries,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"next_cursor": res.NextCursor,
+	})
 }
 
 // approxRowCount returns pg_class.reltuples for the given fully-qualified

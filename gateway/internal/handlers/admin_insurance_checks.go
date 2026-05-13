@@ -18,8 +18,9 @@ import (
 )
 
 // AdminInsuranceChecksHandler exposes the eligibility-check history.
-// Each check is recorded in bt.insurance_checks (non-PHI metadata only); the
-// patient PHI lives in DynamoDB and is hydrated on demand via submission_uuid.
+// Reads insurance check summaries from DynamoDB bt-main (BAA-covered)
+// and hydrates patient name/phone/email/member_id from the same DDB
+// store via BatchGetIntakes when a check is linked to a booking.
 //
 // HIPAA: every list / export / detail call writes one access_log row per
 // PHI record returned, so "who looked up which check, when" is auditable.
@@ -30,44 +31,32 @@ type AdminInsuranceChecksHandler struct {
 
 // insuranceCheckRow is the merged shape returned to admins.
 type insuranceCheckRow struct {
-	ID              int64  `json:"id"`
-	CheckUUID       string `json:"check_uuid"`
-	SubmissionUUID  string `json:"submission_uuid,omitempty"`
-	CreatedAt       string `json:"created_at"`
-	Source          string `json:"source"`
-	SourceLabel     string `json:"source_label"`
-	PayerName       string `json:"payer_name"`
-	CoverageStatus  string `json:"coverage_status"`
-	Eligible        bool   `json:"eligible"`
+	ID             string `json:"id"`
+	CheckUUID      string `json:"check_uuid"`
+	SubmissionUUID string `json:"submission_uuid,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	Source         string `json:"source"`
+	SourceLabel    string `json:"source_label"`
+	PayerName      string `json:"payer_name"`
+	CoverageStatus string `json:"coverage_status"`
+	Eligible       bool   `json:"eligible"`
 	// PHI hydrated from DDB (omitted when no submission_uuid is linked).
-	FirstName       string `json:"first_name,omitempty"`
-	LastName        string `json:"last_name,omitempty"`
-	DateOfBirth     string `json:"date_of_birth,omitempty"`
-	Phone           string `json:"phone,omitempty"`
-	Email           string `json:"email,omitempty"`
-	MemberID        string `json:"insurance_member_id,omitempty"`
-}
-
-type insuranceCheckMeta struct {
-	ID              int64
-	CheckUUID       string
-	SubmissionUUID  *string
-	EmailHash       string
-	Source          string
-	PayerName       string
-	CoverageStatus  string
-	Eligible        bool
-	CreatedAt       time.Time
+	FirstName   string `json:"first_name,omitempty"`
+	LastName    string `json:"last_name,omitempty"`
+	DateOfBirth string `json:"date_of_birth,omitempty"`
+	Phone       string `json:"phone,omitempty"`
+	Email       string `json:"email,omitempty"`
+	MemberID    string `json:"insurance_member_id,omitempty"`
 }
 
 type insuranceCheckFilters struct {
-	From      *time.Time
-	To        *time.Time
-	Source    string // "chatbot", "voice", "website", or "" for all
-	Status    string // "verified" | "unverified" | "error" | ""
-	Q         string
-	Limit     int
-	Offset    int
+	From   *time.Time
+	To     *time.Time
+	Source string // friendly: chatbot | voice | phone | website
+	Status string // verified | unverified | error
+	Q      string
+	Limit  int
+	Offset int
 }
 
 func parseInsuranceCheckFilters(r *http.Request, defaultLimit, maxLimit int) (insuranceCheckFilters, error) {
@@ -93,9 +82,9 @@ func parseInsuranceCheckFilters(r *http.Request, defaultLimit, maxLimit int) (in
 		f.To = &end
 	}
 	switch f.Source {
-	case "", "all", "chatbot", "voice", "website":
+	case "", "all", "chatbot", "voice", "phone", "website":
 	default:
-		return f, fmt.Errorf("invalid 'source' — expected chatbot, voice, website, or all")
+		return f, fmt.Errorf("invalid 'source' — expected chatbot, voice, phone, website, or all")
 	}
 	switch f.Status {
 	case "", "all", "verified", "unverified", "error":
@@ -117,159 +106,79 @@ func parseInsuranceCheckFilters(r *http.Request, defaultLimit, maxLimit int) (in
 	return f, nil
 }
 
-// insuranceSourceClause maps the public source filter to one or more source
-// values stored in bt.insurance_checks.
-func insuranceSourceClause(src string, argIdx *int) (string, []any) {
-	switch src {
-	case "chatbot":
-		s := fmt.Sprintf("source = $%d", *argIdx)
-		*argIdx++
-		return s, []any{"chat-agent"}
-	case "voice":
-		s := fmt.Sprintf("source = ANY($%d)", *argIdx)
-		*argIdx++
-		return s, []any{[]string{"voice-agent", "voice-phone"}}
-	case "phone":
-		s := fmt.Sprintf("source = $%d", *argIdx)
-		*argIdx++
-		return s, []any{"voice-phone"}
-	case "website":
-		s := fmt.Sprintf("source = ANY($%d)", *argIdx)
-		*argIdx++
-		return s, []any{[]string{"website-booking-flow", "website-coverage-flow"}}
+// fetchChecks queries DDB for InsuranceCheckSummary, then hydrates the
+// linked intake PHI via BatchGetIntakes. Returns the full filtered set
+// (caller paginates the slice).
+func (h *AdminInsuranceChecksHandler) fetchChecks(ctx context.Context, f insuranceCheckFilters) ([]insuranceCheckRow, error) {
+	pf := phi.InsuranceCheckFilter{
+		From:    f.From,
+		To:      f.To,
+		Sources: sourcesForFriendly(f.Source),
+		Status:  f.Status,
+		Limit:   10000,
 	}
-	return "", nil
-}
-
-func (h *AdminInsuranceChecksHandler) loadChecks(ctx context.Context, f insuranceCheckFilters, limit int) ([]insuranceCheckMeta, int, error) {
-	args := []any{}
-	argIdx := 1
-	where := []string{"purged_at IS NULL"}
-
-	if f.From != nil {
-		where = append(where, fmt.Sprintf("created_at >= $%d", argIdx))
-		args = append(args, *f.From)
-		argIdx++
-	}
-	if f.To != nil {
-		where = append(where, fmt.Sprintf("created_at <= $%d", argIdx))
-		args = append(args, *f.To)
-		argIdx++
-	}
-	if src, srcArgs := insuranceSourceClause(f.Source, &argIdx); src != "" {
-		where = append(where, src)
-		args = append(args, srcArgs...)
-	}
-	if f.Status != "" && f.Status != "all" {
-		where = append(where, fmt.Sprintf("coverage_status = $%d", argIdx))
-		args = append(args, f.Status)
-		argIdx++
+	if f.Status == "all" {
+		pf.Status = ""
 	}
 
-	whereSQL := "WHERE " + strings.Join(where, " AND ")
-
-	var total int
-	if err := h.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM bt.insurance_checks `+whereSQL, args...,
-	).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	args = append(args, limit, f.Offset)
-	listSQL := `SELECT id, check_uuid, submission_uuid, email_hash, source,
-	                   COALESCE(payer_name, ''), coverage_status, eligible, created_at
-	            FROM bt.insurance_checks ` + whereSQL +
-		fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
-
-	rows, err := h.Pool.Query(ctx, listSQL, args...)
+	summaries, _, err := h.PHI.ListInsuranceChecks(ctx, pf)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	defer rows.Close()
 
-	out := make([]insuranceCheckMeta, 0, limit)
-	for rows.Next() {
-		var c insuranceCheckMeta
-		if err := rows.Scan(&c.ID, &c.CheckUUID, &c.SubmissionUUID, &c.EmailHash,
-			&c.Source, &c.PayerName, &c.CoverageStatus, &c.Eligible, &c.CreatedAt); err != nil {
-			return nil, 0, err
-		}
-		out = append(out, c)
-	}
-	return out, total, rows.Err()
-}
-
-// hydrateChecks fills name/phone/email/member_id from DynamoDB for each row
-// that has a submission_uuid. Pure pointer rows (no submission) keep PHI
-// fields empty — which is fine because none was ever written.
-//
-// Uses BatchGetItem so a 25-row page costs one DDB round-trip, not 25.
-func (h *AdminInsuranceChecksHandler) hydrateChecks(ctx context.Context, ms []insuranceCheckMeta) []insuranceCheckRow {
-	keys := make([]phi.IntakeKey, 0, len(ms))
-	for _, m := range ms {
-		if m.SubmissionUUID != nil && *m.SubmissionUUID != "" && m.EmailHash != "" {
-			keys = append(keys, phi.IntakeKey{EmailHash: m.EmailHash, SubmissionUUID: *m.SubmissionUUID})
+	// Hydrate linked intakes in one BatchGetItem.
+	keys := make([]phi.IntakeKey, 0, len(summaries))
+	for _, s := range summaries {
+		if s.SubmissionUUID != "" && s.EmailHash != "" {
+			keys = append(keys, phi.IntakeKey{EmailHash: s.EmailHash, SubmissionUUID: s.SubmissionUUID})
 		}
 	}
 	recs := map[string]*phi.IntakeRecord{}
 	if len(keys) > 0 {
-		got, err := h.PHI.BatchGetIntakes(ctx, keys)
-		if err != nil {
-			slog.Error("insurance_checks: ddb batch get failed", "err", err, "n", len(keys))
+		got, gerr := h.PHI.BatchGetIntakes(ctx, keys)
+		if gerr != nil {
+			slog.Error("insurance_checks: ddb batch get failed", "err", gerr, "n", len(keys))
 		} else {
 			recs = got
 		}
 	}
 
-	out := make([]insuranceCheckRow, 0, len(ms))
-	for _, m := range ms {
+	needle := strings.ToLower(strings.TrimSpace(f.Q))
+	rows := make([]insuranceCheckRow, 0, len(summaries))
+	for _, s := range summaries {
 		row := insuranceCheckRow{
-			ID:             m.ID,
-			CheckUUID:      m.CheckUUID,
-			CreatedAt:      m.CreatedAt.UTC().Format(time.RFC3339),
-			Source:         m.Source,
-			SourceLabel:    sourceLabel(m.Source),
-			PayerName:      m.PayerName,
-			CoverageStatus: m.CoverageStatus,
-			Eligible:       m.Eligible,
+			ID:             s.CheckUUID,
+			CheckUUID:      s.CheckUUID,
+			SubmissionUUID: s.SubmissionUUID,
+			CreatedAt:      s.CreatedAt.UTC().Format(time.RFC3339),
+			Source:         s.Source,
+			SourceLabel:    sourceLabel(s.Source),
+			PayerName:      s.PayerName,
+			CoverageStatus: s.CoverageStatus,
+			Eligible:       s.Eligible,
 		}
-		if m.SubmissionUUID != nil && *m.SubmissionUUID != "" {
-			row.SubmissionUUID = *m.SubmissionUUID
-			if rec, ok := recs[*m.SubmissionUUID]; ok && rec != nil {
+		if s.SubmissionUUID != "" {
+			if rec, ok := recs[s.SubmissionUUID]; ok && rec != nil {
 				row.FirstName = rec.FirstName
 				row.LastName = rec.LastName
 				row.DateOfBirth = rec.DateOfBirth
 				row.Phone = rec.Phone
 				row.Email = rec.Email
 				row.MemberID = rec.InsuranceMemberID
-			} else {
-				slog.Warn("insurance_checks: ddb get missed", "submission_uuid", *m.SubmissionUUID)
 			}
 		}
-		out = append(out, row)
-	}
-	return out
-}
-
-func applyChecksTextFilter(rows []insuranceCheckRow, q string) []insuranceCheckRow {
-	if q == "" {
-		return rows
-	}
-	q = strings.ToLower(q)
-	out := rows[:0]
-	for _, r := range rows {
-		if strings.Contains(strings.ToLower(r.FirstName), q) ||
-			strings.Contains(strings.ToLower(r.LastName), q) ||
-			strings.Contains(strings.ToLower(r.Email), q) ||
-			strings.Contains(strings.ToLower(r.Phone), q) ||
-			strings.Contains(strings.ToLower(r.PayerName), q) {
-			out = append(out, r)
+		if needle != "" {
+			hay := strings.ToLower(row.FirstName + " " + row.LastName + " " + row.Email + " " + row.Phone + " " + row.PayerName)
+			if !strings.Contains(hay, needle) {
+				continue
+			}
 		}
+		rows = append(rows, row)
 	}
-	return out
+	return rows, nil
 }
 
-func (h *AdminInsuranceChecksHandler) auditBulk(ctx context.Context, r *http.Request, action string, rows []insuranceCheckRow) {
+func (h *AdminInsuranceChecksHandler) auditBulk(r *http.Request, action string, rows []insuranceCheckRow) {
 	u, ok := appmw.AdminFromContext(r.Context())
 	if !ok {
 		return
@@ -282,7 +191,7 @@ func (h *AdminInsuranceChecksHandler) auditBulk(ctx context.Context, r *http.Req
 		}
 		ids = append(ids, row.CheckUUID)
 	}
-	admin.LogPHIAccessBatch(ctx, h.PHI, r, u, action, "insurance_checks_phi_access", ids)
+	admin.LogPHIAccessBatch(r.Context(), h.PHI, r, u, action, "insurance_checks_phi_access", ids)
 }
 
 // List handles GET /admin/api/insurance-checks.
@@ -297,28 +206,25 @@ func (h *AdminInsuranceChecksHandler) List(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	fetch := f.Limit
-	if f.Q != "" {
-		fetch = f.Limit * 4
-		if fetch > 200 {
-			fetch = 200
-		}
-	}
-
-	metas, total, err := h.loadChecks(r.Context(), f, fetch)
+	all, err := h.fetchChecks(r.Context(), f)
 	if err != nil {
 		slog.Error("insurance_checks list", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
-	rows := h.hydrateChecks(r.Context(), metas)
-	rows = applyChecksTextFilter(rows, f.Q)
-	if len(rows) > f.Limit {
-		rows = rows[:f.Limit]
+	total := len(all)
+	start := f.Offset
+	end := f.Offset + f.Limit
+	if start > total {
+		start = total
 	}
+	if end > total {
+		end = total
+	}
+	rows := all[start:end]
 
-	h.auditBulk(r.Context(), r, "view_insurance_checks_list", rows)
+	h.auditBulk(r, "view_insurance_checks_list", rows)
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"items": rows,
@@ -342,16 +248,14 @@ func (h *AdminInsuranceChecksHandler) ExportCSV(w http.ResponseWriter, r *http.R
 	f.Limit = 5000
 	f.Offset = 0
 
-	metas, _, err := h.loadChecks(r.Context(), f, 5000)
+	rows, err := h.fetchChecks(r.Context(), f)
 	if err != nil {
 		slog.Error("insurance_checks csv", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	rows := h.hydrateChecks(r.Context(), metas)
-	rows = applyChecksTextFilter(rows, f.Q)
 
-	h.auditBulk(r.Context(), r, "export_insurance_checks_csv", rows)
+	h.auditBulk(r, "export_insurance_checks_csv", rows)
 
 	filename := fmt.Sprintf("insurance-checks-%s.csv", time.Now().UTC().Format("2006-01-02"))
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -379,7 +283,7 @@ func (h *AdminInsuranceChecksHandler) ExportCSV(w http.ResponseWriter, r *http.R
 
 // CanonicalCoverageStatus collapses any upstream/internal status string into
 // one of three admin-facing values: "verified", "unverified", "error".
-// Stored in bt.insurance_checks.coverage_status as the source of truth for
+// Stored in InsuranceCheckRecord.CoverageStatus as the source of truth for
 // admin filtering and display.
 func CanonicalCoverageStatus(raw string, eligible bool) string {
 	if eligible {

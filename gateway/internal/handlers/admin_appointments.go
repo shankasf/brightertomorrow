@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/csv"
 	"fmt"
 	"log/slog"
@@ -18,18 +17,24 @@ import (
 )
 
 // AdminAppointmentsHandler serves /admin/api/appointments and the CSV export.
-// Each request audits the PHI read so the admin_access_log shows exactly which
-// submissions a given admin viewed and when. §164.312(b)
+//
+// Reads from DynamoDB bt-main directly — the legacy bt.intake_pointers
+// Postgres table is no longer populated (Hostinger VPS is not BAA-covered).
+// Pool stays on the handler only for any non-PHI legacy queries; PHI list
+// + audit writes both target DDB via phi.Store.
 type AdminAppointmentsHandler struct {
 	Pool *pgxpool.Pool
 	PHI  *phi.Store
 }
 
-// appointmentRow is the merged pointer + DDB PHI shape returned to admins.
+// appointmentRow is the merged DDB record shape returned to admins.
+// ID is the submissionUUID — no Postgres serial id any more.
 type appointmentRow struct {
-	ID                int64  `json:"id"`
+	ID                string `json:"id"`
 	SubmissionUUID    string `json:"submission_uuid"`
 	CreatedAt         string `json:"created_at"`
+	AppointmentTime   string `json:"appointment_time,omitempty"`
+	TherapistStaffID  int    `json:"therapist_staff_id,omitempty"`
 	Source            string `json:"source"`
 	SourceLabel       string `json:"source_label"`
 	Flow              string `json:"flow"`
@@ -46,25 +51,11 @@ type appointmentRow struct {
 	InsuranceMemberID string `json:"insurance_member_id"`
 }
 
-// pointerMeta is everything we read from Postgres for the list view.
-type pointerMeta struct {
-	ID             int64
-	SubmissionUUID string
-	EmailHash      string
-	Flow           string
-	PaymentMethod  string
-	Status         string
-	Source         string
-	CreatedAt      time.Time
-}
-
-// query parses, validates, and applies the filter set used by both the JSON
-// list and the CSV export endpoints.
 type appointmentFilters struct {
 	From   *time.Time
 	To     *time.Time
-	Source string // "chatbot", "website", or "" for all
-	Q      string // free-text match on first/last/email after PHI hydration
+	Source string // friendly: chatbot | voice | phone | website
+	Q      string
 	Limit  int
 	Offset int
 }
@@ -85,14 +76,13 @@ func parseAppointmentFilters(r *http.Request, defaultLimit, maxLimit int) (appoi
 		if err != nil {
 			return f, fmt.Errorf("invalid 'to' date — expected YYYY-MM-DD")
 		}
-		// Make `to` inclusive of the whole day.
 		end := t.Add(24*time.Hour - time.Second)
 		f.To = &end
 	}
 	switch f.Source {
-	case "", "all", "chatbot", "voice", "website":
+	case "", "all", "chatbot", "voice", "phone", "website":
 	default:
-		return f, fmt.Errorf("invalid 'source' — expected chatbot, voice, website, or all")
+		return f, fmt.Errorf("invalid 'source' — expected chatbot, voice, phone, website, or all")
 	}
 	f.Q = strings.TrimSpace(q.Get("q"))
 
@@ -109,159 +99,30 @@ func parseAppointmentFilters(r *http.Request, defaultLimit, maxLimit int) (appoi
 	return f, nil
 }
 
-// sourceClause returns SQL fragment + arg for the source filter.
+// sourcesForFriendly maps the UI's friendly source filter to the raw
+// source strings stored on the DDB IntakeRecord.
 //
-//	"chatbot" → source = 'chat-agent'                (text chat widget)
-//	"voice"   → source IN ('voice-agent','voice-phone')
-//	             (browser WebRTC widget + Twilio PSTN calls)
-//	"phone"   → source = 'voice-phone'               (Twilio PSTN only)
-//	"website" → website-* flows
-//	""/"all"  → no clause
-func sourceClause(src string, argIdx *int) (string, []any) {
-	switch src {
+//	chatbot → chat-agent
+//	voice   → voice-agent + voice-phone
+//	phone   → voice-phone
+//	website → website-booking-flow + website-coverage-flow + website-match-flow
+//
+// Empty / "all" returns nil (no filter).
+func sourcesForFriendly(f string) []string {
+	switch f {
 	case "chatbot":
-		s := fmt.Sprintf("AND source = $%d", *argIdx)
-		*argIdx++
-		return s, []any{"chat-agent"}
+		return []string{"chat-agent"}
 	case "voice":
-		s := fmt.Sprintf("AND source = ANY($%d)", *argIdx)
-		*argIdx++
-		return s, []any{[]string{"voice-agent", "voice-phone"}}
+		return []string{"voice-agent", "voice-phone"}
 	case "phone":
-		s := fmt.Sprintf("AND source = $%d", *argIdx)
-		*argIdx++
-		return s, []any{"voice-phone"}
+		return []string{"voice-phone"}
 	case "website":
-		s := fmt.Sprintf("AND source = ANY($%d)", *argIdx)
-		*argIdx++
-		return s, []any{[]string{"website-booking-flow", "website-coverage-flow", "website-match-flow"}}
+		return []string{"website-booking-flow", "website-coverage-flow", "website-match-flow"}
 	}
-	return "", nil
+	return nil
 }
 
-// loadPointers fetches the metadata rows for the given filters. PHI is NOT
-// touched here — only the Postgres pointer table.
-func (h *AdminAppointmentsHandler) loadPointers(ctx context.Context, f appointmentFilters, limit int) ([]pointerMeta, int, error) {
-	args := []any{}
-	argIdx := 1
-	where := []string{"purged_at IS NULL"}
-
-	if f.From != nil {
-		where = append(where, fmt.Sprintf("created_at >= $%d", argIdx))
-		args = append(args, *f.From)
-		argIdx++
-	}
-	if f.To != nil {
-		where = append(where, fmt.Sprintf("created_at <= $%d", argIdx))
-		args = append(args, *f.To)
-		argIdx++
-	}
-	src, srcArgs := sourceClause(f.Source, &argIdx)
-	if src != "" {
-		// Drop the leading "AND " — already inside WHERE.
-		where = append(where, strings.TrimPrefix(src, "AND "))
-		args = append(args, srcArgs...)
-	}
-
-	whereSQL := "WHERE " + strings.Join(where, " AND ")
-
-	var total int
-	if err := h.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM bt.intake_pointers `+whereSQL, args...,
-	).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	args = append(args, limit, f.Offset)
-	listSQL := `SELECT id, submission_uuid, email_hash, flow, payment_method, status, source, created_at
-	            FROM bt.intake_pointers ` + whereSQL +
-		fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
-
-	rows, err := h.Pool.Query(ctx, listSQL, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	out := make([]pointerMeta, 0, limit)
-	for rows.Next() {
-		var p pointerMeta
-		if err := rows.Scan(&p.ID, &p.SubmissionUUID, &p.EmailHash,
-			&p.Flow, &p.PaymentMethod, &p.Status, &p.Source, &p.CreatedAt); err != nil {
-			return nil, 0, err
-		}
-		out = append(out, p)
-	}
-	return out, total, rows.Err()
-}
-
-// hydrate fetches the PHI records for all pointers in one BatchGetItem call
-// (DDB caps at 100 keys per call; phi.BatchGetIntakes chunks larger sets).
-// Pointers whose DDB record is missing are skipped (logged). Order of the
-// returned rows matches the pointer order so pagination + CSV stay stable.
-func (h *AdminAppointmentsHandler) hydrate(ctx context.Context, ptrs []pointerMeta) []appointmentRow {
-	if len(ptrs) == 0 {
-		return nil
-	}
-	keys := make([]phi.IntakeKey, 0, len(ptrs))
-	for _, p := range ptrs {
-		keys = append(keys, phi.IntakeKey{EmailHash: p.EmailHash, SubmissionUUID: p.SubmissionUUID})
-	}
-	recs, err := h.PHI.BatchGetIntakes(ctx, keys)
-	if err != nil {
-		slog.Error("appointments: ddb batch get failed", "err", err, "n", len(keys))
-		return nil
-	}
-	out := make([]appointmentRow, 0, len(ptrs))
-	for _, p := range ptrs {
-		rec, ok := recs[p.SubmissionUUID]
-		if !ok || rec == nil {
-			slog.Warn("appointments: ddb get missed", "submission_uuid", p.SubmissionUUID)
-			continue
-		}
-		out = append(out, appointmentRow{
-			ID:                p.ID,
-			SubmissionUUID:    p.SubmissionUUID,
-			CreatedAt:         p.CreatedAt.UTC().Format(time.RFC3339),
-			Source:            p.Source,
-			SourceLabel:       sourceLabel(p.Source),
-			Flow:              p.Flow,
-			Status:            p.Status,
-			PaymentMethod:     p.PaymentMethod,
-			FirstName:         rec.FirstName,
-			LastName:          rec.LastName,
-			DateOfBirth:       rec.DateOfBirth,
-			Phone:             rec.Phone,
-			Email:             rec.Email,
-			HomeAddress:       rec.HomeAddress,
-			Sex:               rec.Sex,
-			InsuranceName:     rec.InsuranceName,
-			InsuranceMemberID: rec.InsuranceMemberID,
-		})
-	}
-	return out
-}
-
-// applyTextFilter narrows hydrated rows by case-insensitive substring match
-// on first name, last name, or email — the only PHI fields admins typically
-// search on. Done after hydration because names live in DynamoDB.
-func applyTextFilter(rows []appointmentRow, q string) []appointmentRow {
-	if q == "" {
-		return rows
-	}
-	q = strings.ToLower(q)
-	out := rows[:0]
-	for _, r := range rows {
-		if strings.Contains(strings.ToLower(r.FirstName), q) ||
-			strings.Contains(strings.ToLower(r.LastName), q) ||
-			strings.Contains(strings.ToLower(r.Email), q) ||
-			strings.Contains(strings.ToLower(r.Phone), q) {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
+// sourceLabel renders one stored source value as the admin UI label.
 func sourceLabel(s string) string {
 	switch s {
 	case "chat-agent":
@@ -281,10 +142,74 @@ func sourceLabel(s string) string {
 	}
 }
 
-// auditBulk records one access_log row per submission viewed.
-// HIPAA §164.312(b) — append-only. One batched INSERT, fired in a detached
-// goroutine so audit writes don't add to response latency. No rows dropped.
-func (h *AdminAppointmentsHandler) auditBulk(ctx context.Context, r *http.Request, action string, rows []appointmentRow) {
+// fetchAppointments queries DDB for intake records and applies the
+// requested filters in-memory. Returns the full filtered set (caller
+// paginates the slice).
+func (h *AdminAppointmentsHandler) fetchAppointments(r *http.Request, f appointmentFilters) ([]appointmentRow, error) {
+	want := sourcesForFriendly(f.Source)
+
+	pf := phi.IntakeFilter{
+		From:       f.From,
+		To:         f.To,
+		SearchText: f.Q,
+		Limit:      10000,
+	}
+	if len(want) == 1 {
+		pf.Source = want[0]
+	}
+
+	recs, _, err := h.PHI.ListIntakePointers(r.Context(), pf)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]appointmentRow, 0, len(recs))
+	for _, rec := range recs {
+		if len(want) > 1 {
+			matched := false
+			for _, w := range want {
+				if rec.Source == w {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+
+		row := appointmentRow{
+			ID:                rec.SubmissionUUID,
+			SubmissionUUID:    rec.SubmissionUUID,
+			CreatedAt:         rec.CreatedAt.UTC().Format(time.RFC3339),
+			Source:            rec.Source,
+			SourceLabel:       sourceLabel(rec.Source),
+			Flow:              rec.Flow,
+			Status:            rec.CoverageStatus,
+			PaymentMethod:     rec.PaymentMethod,
+			FirstName:         rec.FirstName,
+			LastName:          rec.LastName,
+			DateOfBirth:       rec.DateOfBirth,
+			Phone:             rec.Phone,
+			Email:             rec.Email,
+			HomeAddress:       rec.HomeAddress,
+			Sex:               rec.Sex,
+			InsuranceName:     rec.InsuranceName,
+			InsuranceMemberID: rec.InsuranceMemberID,
+		}
+		if rec.AppointmentTime != nil {
+			row.AppointmentTime = rec.AppointmentTime.UTC().Format(time.RFC3339)
+		}
+		if rec.TherapistStaffID != nil {
+			row.TherapistStaffID = *rec.TherapistStaffID
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// auditBulk writes one §164.312(b) row per row returned, fire-and-forget.
+func (h *AdminAppointmentsHandler) auditBulk(r *http.Request, action string, rows []appointmentRow) {
 	u, ok := appmw.AdminFromContext(r.Context())
 	if !ok || len(rows) == 0 {
 		return
@@ -293,7 +218,7 @@ func (h *AdminAppointmentsHandler) auditBulk(ctx context.Context, r *http.Reques
 	for _, row := range rows {
 		ids = append(ids, row.SubmissionUUID)
 	}
-	admin.LogPHIAccessBatch(ctx, h.PHI, r, u, action, "intake_pointers_phi_access", ids)
+	admin.LogPHIAccessBatch(r.Context(), h.PHI, r, u, action, "intake_pointers_phi_access", ids)
 }
 
 // List handles GET /admin/api/appointments.
@@ -308,43 +233,35 @@ func (h *AdminAppointmentsHandler) List(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Over-fetch so q-filter (post-hydrate) still produces a full page when
-	// the search trims results. Capped to keep PHI fanout bounded.
-	fetch := f.Limit
-	if f.Q != "" {
-		fetch = f.Limit * 4
-		if fetch > 200 {
-			fetch = 200
-		}
-	}
-
-	ptrs, total, err := h.loadPointers(r.Context(), f, fetch)
+	all, err := h.fetchAppointments(r, f)
 	if err != nil {
-		slog.Error("appointments list: pointers", "err", err)
+		slog.Error("appointments list: ddb query", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
-	rows := h.hydrate(r.Context(), ptrs)
-	rows = applyTextFilter(rows, f.Q)
-
-	// If we over-fetched for q-filtering, trim to requested page size.
-	if len(rows) > f.Limit {
-		rows = rows[:f.Limit]
+	total := len(all)
+	start := f.Offset
+	end := f.Offset + f.Limit
+	if start > total {
+		start = total
 	}
+	if end > total {
+		end = total
+	}
+	rows := all[start:end]
 
-	h.auditBulk(r.Context(), r, "view_appointments_list", rows)
+	h.auditBulk(r, "view_appointments_list", rows)
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"items": rows,
-		"total": total, // total matching pointers (pre-q-filter)
+		"total": total,
 		"page":  (f.Offset / f.Limit) + 1,
 		"limit": f.Limit,
 	})
 }
 
 // ExportCSV handles GET /admin/api/appointments.csv.
-// Streams CSV with the same filters as List. Capped at 5000 rows per export.
 func (h *AdminAppointmentsHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	if h.PHI == nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "phi store not configured")
@@ -355,37 +272,39 @@ func (h *AdminAppointmentsHandler) ExportCSV(w http.ResponseWriter, r *http.Requ
 		httpx.WriteValidationError(w, err.Error())
 		return
 	}
-	// Force full export — ignore page param.
 	f.Limit = 5000
 	f.Offset = 0
 
-	ptrs, _, err := h.loadPointers(r.Context(), f, 5000)
+	rows, err := h.fetchAppointments(r, f)
 	if err != nil {
-		slog.Error("appointments csv: pointers", "err", err)
+		slog.Error("appointments csv: ddb query", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	rows := h.hydrate(r.Context(), ptrs)
-	rows = applyTextFilter(rows, f.Q)
 
-	h.auditBulk(r.Context(), r, "export_appointments_csv", rows)
+	h.auditBulk(r, "export_appointments_csv", rows)
 
 	filename := fmt.Sprintf("appointments-%s.csv", time.Now().UTC().Format("2006-01-02"))
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	// Don't cache PHI on intermediaries.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{
-		"Submission UUID", "Created At", "Source", "Flow", "Status", "Payment Method",
+		"Submission UUID", "Created At", "Appointment Time", "Therapist Staff ID",
+		"Source", "Flow", "Status", "Payment Method",
 		"First Name", "Last Name", "Date of Birth", "Phone", "Email", "Home Address", "Sex",
 		"Insurance Name", "Insurance ID Number",
 	})
 	for _, r := range rows {
+		staffID := ""
+		if r.TherapistStaffID != 0 {
+			staffID = strconv.Itoa(r.TherapistStaffID)
+		}
 		_ = cw.Write([]string{
-			r.SubmissionUUID, r.CreatedAt, r.SourceLabel, r.Flow, r.Status, r.PaymentMethod,
+			r.SubmissionUUID, r.CreatedAt, r.AppointmentTime, staffID,
+			r.SourceLabel, r.Flow, r.Status, r.PaymentMethod,
 			r.FirstName, r.LastName, r.DateOfBirth, r.Phone, r.Email, r.HomeAddress, r.Sex,
 			r.InsuranceName, r.InsuranceMemberID,
 		})
