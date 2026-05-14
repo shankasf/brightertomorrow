@@ -1,738 +1,436 @@
-# Brighter Tomorrow Therapy
+# Brighter Tomorrow Therapy — Voice & Chat Agents
 
-Full-stack rebuild of brightertomorrowtherapy.com — Las Vegas therapy practice.
+How the AI assistant for **brightertomorrowtherapy.cloud** actually works, end to end.
 
-## Services
+There is **one agent graph**, with **two surfaces**:
 
-| Service | Tech | Port |
-| ------- | ---- | ---- |
-| **web** | Next.js 15, React 19, Tailwind, Framer Motion | 3001 (dev) |
-| **gateway** | Go 1.24, chi (HTTP router + middleware), pgx v5, AWS SDK v2 (DynamoDB) — REST API + admin API | 8080 |
-| **ai** | FastAPI, OpenAI Agents SDK 0.17 (`gpt-realtime-2`) — multi-agent text + voice triage graph | 8001 |
-| **db** | PostgreSQL 17, schema `bt` — non-PHI metadata, FAQ embeddings, admin sessions | 5432 |
-| **PHI store** | DynamoDB `bt-main` (us-east-1), CMK `alias/bt-phi`, PITR enabled | AWS |
+| Surface | Transport | Audio? | Where the prompt lives |
+|---|---|---|---|
+| **Text chat** (widget) | `POST /v1/chat/stream` (SSE) | no | `ai/app/bt_agents/*.py` |
+| **Browser voice** (mic in widget) | `WS /v1/voice` (PCM16, 24 kHz) | yes | `ai/app/bt_agents/realtime/*.py` |
+| **Twilio phone** (PSTN) | `WS /v1/twilio/media` (μ-law, 8 kHz) | yes | `ai/app/bt_agents/realtime/*.py` |
 
-All traffic routes through Traefik: `/v1/*` and `/admin/*` → gateway, everything else → web.
+Both surfaces share the same **tools** (`ai/app/tools.py`), the same **roster** (`ai/app/bt_agents/roster.py`), and the same **payer list** (`ai/app/data/payers.py`). They **diverge** only in: (1) prompts (text vs. voice persona), (2) audio formats, (3) the `end_call` tool that the voice agents have but the chat agent doesn't.
 
-### Go gateway internals
+---
 
-**chi** is the HTTP router — it matches URL patterns (`/admin/contacts/{id}`), chains middleware (auth, rate-limiting, logging), and extracts path params. It has nothing to do with concurrency; it is purely a routing library.
-
-**Goroutines** are used for concurrency in two places:
-
-1. `cmd/gateway/main.go` — the HTTP server runs in a goroutine so the main goroutine can block on OS signals (`SIGINT`/`SIGTERM`) and trigger a graceful shutdown:
-   ```go
-   go func() {
-       srv.ListenAndServe()  // blocks in its own goroutine
-   }()
-   signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-   <-quit  // main goroutine waits here
-   srv.Shutdown(ctx)
-   ```
-
-2. `internal/handlers/chat.go` — after the AI service responds, the assistant reply is persisted using a **background context** (detached from the request context) so a client disconnect after the AI call cannot leave the chat history in a torn state (user message recorded, assistant reply missing):
-   ```go
-   persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-   defer cancel()
-   recordTurn(persistCtx, h.Pool, h.PHI, sessionID, "assistant", reply)
-   // → phi.Store.PutChatTurn writes to DynamoDB
-   // → UPDATE bt.chat_sessions SET message_count=message_count+1, last_message_at=now()
-   ```
-   `net/http` itself also spawns one goroutine per incoming request automatically.
-
-**chi and goroutines are not alternatives** — chi routes requests, goroutines provide concurrency. Both are in use.
-
-### AI service internals
-
-The AI service runs **two parallel agent graphs** sharing the same specialist agents and tools:
-
-| Path | Entry | SDK primitive | Use |
-| ---- | ----- | ------------- | --- |
-| **Text** (`POST /chat`) | `bt_agents/triage_agent.py` | `Agent` + `handoff(...)` | Browser chat widget |
-| **Voice** (`WS /ws/voice`) | `bt_agents/realtime/triage.py` | `RealtimeAgent` + `realtime_handoff(...)` | Mic-button voice mode |
-
-Both flow Triage → one of `{Crisis Support, Info, Therapist Matching, Intake, Booking}`. Each specialist lives in its own file under `ai/app/bt_agents/` (text) and `ai/app/bt_agents/realtime/` (voice). The head Triage agent owns all handoffs; specialists never reach across to peers.
-
-The voice path is driven entirely by `openai-agents` `RealtimeRunner` / `RealtimeSession` — the SDK manages the OpenAI WebSocket, hand-off lifecycle, and tool-calling. `voice.py` only translates browser ↔ session events (audio in/out, user/assistant transcripts, hallucination filtering) and forwards each turn to `bt-gateway` `/internal/chat/turn`, which writes the body to DynamoDB. The AI pod itself never touches Postgres for chat content.
-
-Realtime model is `gpt-realtime-2` with `gpt-4o-mini-transcribe` for input transcription, semantic-VAD turn detection, and PCM16 audio. Override via secret keys `REALTIME_MODEL`, `REALTIME_TRANSCRIPTION_MODEL`, `REALTIME_VOICE` in `bt-config`.
-
-## Local dev
-
-The cluster runs in k3d (`bt` cluster), and **Tilt is managed as a systemd user service** (`tilt-bt.service`) that hot-syncs source edits into the running pods. You should not need to run `tilt up` or `kubectl cp` manually.
-
-```bash
-# Service status / logs
-systemctl --user status tilt-bt
-journalctl --user -u tilt-bt -f
-
-# Pause / resume the watcher (e.g. to run interactive `tilt up` for the UI on :10350)
-systemctl --user stop tilt-bt
-systemctl --user start tilt-bt
-```
-
-What edits go live where:
-
-| Edit | What happens | Restart needed |
-| ---- | ------------ | -------------- |
-| `web/src/**` | Tilt syncs → Next.js HMR | No |
-| `ai/app/**` | Tilt syncs → `uvicorn --reload` | No |
-| `gateway/**` | Tilt rebuilds image + rolls pod | Automatic |
-| `requirements.txt`, `package.json`, `go.mod` | Full image rebuild + roll | Automatic |
-| `Tiltfile`, `k8s/*.yaml` | Tilt re-applies | Automatic |
-
-First-time install of the dev loop on a fresh box:
-
-```bash
-# Install service unit
-cp ops/systemd/tilt-bt.service ~/.config/systemd/user/   # or write the unit by hand
-sudo loginctl enable-linger ubuntu                       # auto-start at boot
-systemctl --user daemon-reload
-systemctl --user enable --now tilt-bt
-```
-
-Run a service standalone (not via systemd) only if you have a specific reason:
-
-```bash
-cd web && npm install && npm run dev          # http://localhost:3001
-cd gateway && go run ./cmd/gateway            # needs DATABASE_URL
-cd ai && pip install -r requirements.txt && uvicorn app.main:app --port 8001
-```
-
-## Admin Dashboard
-
-**URL:** `/admin/login`
-
-A HIPAA-compliant admin dashboard for managing all site data and monitoring compliance.
-
-### Features
-
-| Section | What you can do |
-| ------- | --------------- |
-| **Dashboard** | Live stats — contacts, chat sessions, newsletter, content counts, purge queue alert |
-| **Contacts** | Paginated list (no message body in list view); click row for full record |
-| **Chat Sessions** | Browse all AI chat sessions; view full message transcripts |
-| **Newsletter** | Manage subscribers; unsubscribe or flag for NRS 603A deletion |
-| **PHI Audit Log** | Append-only log of every INSERT/UPDATE/DELETE on PHI tables |
-| **Admin Access Log** | Every admin read of PHI is recorded here |
-| **Purge Queue** | Records past their 10-year retention window; trigger anonymization |
-| **Content** | Edit FAQs, blog posts, site settings, team, services, testimonials, locations, nav, stats |
-
-### First-time setup
-
-On first gateway startup, set these k8s secrets and the first superadmin is created automatically:
-
-```bash
-kubectl -n bt patch secret bt-config --type=json -p='[
-  {"op":"add","path":"/data/ADMIN_INITIAL_EMAIL","value":"'$(echo -n admin@example.com | base64)'"},
-  {"op":"add","path":"/data/ADMIN_INITIAL_PASSWORD","value":"'$(echo -n yourpassword | base64)'"}
-]'
-kubectl -n bt rollout restart deployment/bt-gateway
-```
-
-## HIPAA Compliance (45 CFR Part 164)
-
-This codebase implements HIPAA Technical Safeguards for a therapy practice handling Protected Health Information (PHI). Nevada state law (NRS 629.051, NRS 603A) adds additional requirements.
-
-### Chatbot data — plain-English end-to-end
-
-What happens to a single message the moment a visitor types it into the chat widget, in language anyone can read.
+## 1. The agent graph (identical shape on text + voice)
 
 ```mermaid
 flowchart TD
-    A([Visitor types a message OR speaks<br/>chat widget · voice WebSocket]) --> B[Locked in transit<br/>HTTPS / TLS 1.3<br/>nobody on the network can read it]
-    B --> C[Arrives at our website<br/>brightertomorrowtherapy.cloud]
-    C --> D[Routed inside our private cluster<br/>to the AI service<br/>never exposed to the public internet]
-    D --> E[Sent to OpenAI<br/>HIPAA BAA signed · Zero Data Retention<br/>OpenAI does not keep the message]
-    E --> F[AI reply returned to the visitor]
+    Start([Visitor / Caller]) --> Triage{Triage}
 
-    F --> G[Every turn — yours and the AI's — is written to<br/>the PHI vault on AWS DynamoDB<br/>CMK-encrypted with alias/bt-phi · 1-yr rotation<br/>PK=CHAT#sessionId · SK=TURN#timestamp]
-    G --> H[Postgres on Hostinger holds ONLY non-PHI:<br/>session id · source chat or voice ·<br/>message_count · last_message_at<br/>NEVER the message body]
+    Triage -- safety signal --> Crisis[CrisisSupport<br/>988 / 911]
+    Triage -- &quot;do you take Aetna?&quot; --> InsuranceCheck[InsuranceCheck<br/>verify_coverage]
+    Triage -- &quot;book me&quot; --> BookingAgent[BookingAgent<br/>verify + collect + book]
+    Triage -- &quot;who specializes in X?&quot; --> Matching[TherapistMatching<br/>list_team_members]
+    Triage -- &quot;call me back&quot; --> Intake[IntakeAgent<br/>request_intake_callback]
+    Triage -- hours / services / FAQ --> Info[InfoAgent<br/>kb_search + structured]
 
-    H --> I{Does an admin<br/>need to read it?}
-    I -- No --> J[Sits encrypted in the vault<br/>nobody can see it]
-    I -- Yes --> K[Admin signs in<br/>email + password + phone code TOTP MFA<br/>auto sign-out after 8 hours]
-    K --> L[Every PHI read writes one row to the<br/>tamper-proof admin_access_log<br/>who · what · when · IP]
-    L --> M[Admin sees the transcript hydrated from DDB]
+    InsuranceCheck -. &quot;yes book me&quot; .-> BookingAgent
+    Matching -. caller picked therapist .-> BookingAgent
+    Matching -. excluded therapist .-> Intake
 
-    J --> N{Has 10 years passed?<br/>Nevada NRS 629.051}
-    M --> N
-    N -- No --> O[Stays encrypted · audited · retained]
-    N -- Yes --> P[Auto-purged<br/>BatchWriteItem deletes every TURN#<br/>chat_sessions row marked purged]
-
-    Q[[Visitor requests deletion<br/>NRS 603A right to erasure]] -.-> P
-
-    classDef visitor fill:#e8f4ff,stroke:#06c,color:#003
-    classDef transit fill:#fff4d6,stroke:#c80,color:#330
-    classDef phi fill:#ffe5e5,stroke:#c00,color:#300
-    classDef pointer fill:#e5f5ff,stroke:#06c,color:#003
-    classDef audit fill:#e8ffe8,stroke:#080,color:#030
-    classDef purge fill:#f0e5ff,stroke:#60c,color:#202
-
-    class A,F visitor
-    class B,C,D,E transit
-    class G,J,M phi
-    class H pointer
-    class K,L audit
-    class O,P,Q purge
+    BookingAgent --> Done([book_appointment])
+    Intake --> Done2([request_intake_callback])
+    InsuranceCheck --> EndIns([result + offer to book])
 ```
 
-**One-line summary of each safeguard layer:**
+- **Triage owns no tools.** Its only job is to route via exactly one handoff. It never collects info and never replies in its own voice (except to disambiguate a bare "hi"). See `ai/app/bt_agents/triage_agent.py:33` and `ai/app/bt_agents/realtime/triage.py:22`.
+- **BookingAgent and InsuranceCheck are independent.** BookingAgent runs `verify_coverage` itself if Triage routed straight to it; InsuranceCheck runs `verify_coverage` and offers to hand off to BookingAgent. Whoever runs the verification, the result lives in conversation memory and the other agent reads it from there. (`ai/app/bt_agents/booking_agent.py:48-75`, `ai/app/bt_agents/insurance_agent.py:110-150`.)
+- **Crisis routing is a guardrail + a route.** A keyword guardrail (`bt_agents/guardrails.py`) flags safety language for telemetry but does **not** trip the wire — Triage routes naturally so the caller gets a warm reply, not a 500.
 
-| Step | The plain-English promise | The HIPAA control |
-|---|---|---|
-| In transit | "Nobody between the visitor and us can read it." | §164.312(e) Transmission Security — TLS 1.3, HSTS, cert-manager |
-| Inside our cluster | "Internal services can't be reached from the internet." | Traefik ingress never exposes `/internal/*` |
-| At OpenAI | "OpenAI is a HIPAA business associate and throws the message away." | BAA + Zero Data Retention on the OpenAI account |
-| At rest | "Encrypted with a key only we control." | §164.312(a)(2)(iv) — AWS KMS customer-managed key |
-| Local DB | "The server in our datacenter never sees the PHI." | Minimum Necessary (§164.502(b)) — pointer-only schema |
-| Admin login | "Password alone isn't enough — phone code required." | §164.312(d) — TOTP MFA via Cognito |
-| Admin reads | "Every peek is recorded and can't be erased." | §164.312(b) — append-only `admin_access_log` |
-| Retention | "Erased automatically once we no longer need it." | Nevada NRS 629.051 — 10-year auto-purge |
-| Erasure request | "Visitors can ask us to delete their record." | Nevada NRS 603A — anonymisation procedures |
+---
 
-
-
-### What counts as PHI here — and where it lives
-
-| Data | Storage | Why |
-|---|---|---|
-| Intake records (name, DOB, phone, address, insurance ID) | **DynamoDB `bt-main`** (BAA, KMS) | Identifying — must never touch Hostinger Postgres |
-| Chat / voice transcripts (every turn, plaintext body) | **DynamoDB `bt-main`** (BAA, KMS) | Patients can volunteer PHI mid-conversation |
-| Insurance eligibility check details | **DynamoDB `bt-main`** via the linked intake record | Linked to a named patient via `submission_uuid` |
-| Insurance check metadata (status, payer, source, hashed email) | Postgres `bt.insurance_checks` (non-PHI) | Audit-ready history without exposing identity |
-| Chat session shell (id, source, started_at, message_count) | Postgres `bt.chat_sessions` (non-PHI counters) | Lets the dashboard work without PHI joins |
-| Intake pointer (uuid, hashed email, status, source) | Postgres `bt.intake_pointers` (non-PHI) | Pointer to the DynamoDB record |
-| Contact form submissions | Postgres `bt.contact_submissions` (PHI lite) | Legacy; under retention/anonymisation |
-| Newsletter subscribers | Postgres `bt.newsletter_subscribers` | Email + therapy-inquiry link |
-
-### Safeguards implemented
-
-#### §164.312(a)(1) — Access Control
-- Every admin user has a unique account (`bt.admin_users`)
-- Role-based access: `superadmin` (full access) and `auditor` (read-only on audit logs)
-- Shared credentials are prohibited by design
-
-#### §164.312(a)(2)(iii) — Automatic Logoff
-- Admin sessions have a hard 8-hour TTL (`expires_at = created_at + 8h`)
-- Sessions are revoked on explicit logout; expired sessions are rejected at every request
-
-#### §164.312(b) — Audit Controls
-Three append-only audit tables:
-- **`bt.phi_audit_log`** — database-level trigger captures every INSERT/UPDATE/DELETE on PHI tables (content/message fields redacted)
-- **`bt.admin_access_log`** — application-level log; every admin read of PHI (contact detail, chat transcript, audit log) is recorded with timestamp, admin email, IP address, and resource ID
-- Both tables have `UPDATE`, `DELETE`, `TRUNCATE` revoked from all roles
-
-#### §164.312(c) — Integrity
-- Passwords: bcrypt, cost 12
-- Session tokens: 32-byte `crypto/rand` → base64url; only the SHA-256 hash is stored in DB
-- The raw token is never logged
-
-#### §164.312(d) — Authentication
-- Account lockout: 5 failed login attempts → 30-minute lock
-- Login endpoint rate-limited to 5 requests/minute per IP
-- Timing-safe comparison on unknown email (runs bcrypt regardless to prevent user enumeration)
-
-#### §164.312(e) — Transmission Security
-- All traffic HTTPS only (Traefik redirects HTTP → HTTPS)
-- `HttpOnly`, `Secure`, `SameSite=Strict` on visitor tracking cookie
-
-#### §164.502(b) — Minimum Necessary
-- Contact list endpoint omits `message` body — only returned on the detail endpoint (which is PHI-logged)
-- IP address and user-agent removed from `contact_submissions` (no documented clinical need)
-
-### Nevada state law
-
-#### NRS 629.051 — 10-year medical records retention
-- `retain_until` column set automatically on INSERT to `created_at + 10 years`
-- `bt.phi_due_for_purge` view surfaces records past their retention date
-- Admin purge queue page lists these records; anonymization is one click (logged)
-
-#### NRS 603A — Security of Personal Information / Right to Erasure
-- `bt.anonymise_contact(id)` — redacts name, email, phone, message; sets `purged_at`
-- `bt.anonymise_chat_session(uuid)` — redacts all message content; nulls `visitor_id`
-- Newsletter: `deletion_requested_at` flag for erasure workflow
-
-### Database roles
-
-| Role | Can do |
-| ---- | ------ |
-| `app` | All DML on content + PHI tables; INSERT on audit logs; SELECT on `phi_audit_log` (admin dashboard) |
-| `bt_readonly` | SELECT on all tables in `bt` schema |
-| `bt_auditor` | SELECT on `phi_audit_log`, `admin_access_log`, `admin_users`, `admin_sessions` |
-
-### Migrations
-
-| File | Purpose |
-| ---- | ------- |
-| `db/schema.sql` | Base schema — all content and PHI tables |
-| `db/migrations/001_perf_indexes.sql` | Query performance indexes |
-| `db/migrations/002_hipaa_compliance.sql` | Audit triggers, retention columns, anonymization procedures, DB roles |
-| `db/migrations/002a_hipaa_schema.sql` | Companion to 002 — re-applies in `bt` schema |
-| `db/migrations/003_admin.sql` | Admin users, sessions, access log tables |
-| `db/migrations/004_faq_embeddings.sql` | pgvector column on `faqs` for chatbot RAG |
-| `db/migrations/005_intake_pointers.sql` | Pointer table — intake PHI moved to DynamoDB |
-| `db/migrations/006_voice_source_and_insurance_checks.sql` | `chat_sessions.source` (chat/voice) + `bt.insurance_checks` history table |
-| `db/migrations/007_chat_messages_to_ddb.sql` | Add `chat_sessions.message_count`, `last_message_at`; backfill from old table |
-| `db/migrations/008_drop_chat_messages.sql` | **Drop `chat_messages`** — every turn now lives in DynamoDB |
-
-## PHI Storage — DynamoDB-backed (HIPAA)
-
-**As of 2026-05-13** every patient-identifying field — and every record that
-is *linkable* to one (hashed identifiers + appointment dates + therapist IDs,
-audit references to PHI submission UUIDs, etc.) — lives in AWS DynamoDB
-`bt-main` (CMK-encrypted, BAA-covered) and **never** lands on the local
-Postgres on the Hostinger VPS. Hostinger does not sign a BAA, so anything
-HIPAA-relevant must transit and persist on AWS.
-
-Now resident in DynamoDB:
-
-1. **Intake records** (`PATIENT#<emailHash>` / `INTAKE#<submissionUUID>`) — every form field collected by website, chatbot, or voice agent. Now also carries `appointmentTime` + `therapistStaffId` for confirmed bookings (formerly on `bt.intake_pointers`).
-2. **Chat / voice transcripts** (`CHAT#<sessionID>` / `TURN#…`) — every turn of every conversation, plaintext bodies.
-3. **Insurance checks** (`PATIENT#<emailHash>` / `INSURANCE#<checkUUID>`, `GSI1PK=ENTITY#INSURANCE`) — payer + status + email_hash. Standalone checks created by the AI `verify_coverage` tool are linked to the booking submission via `LinkCheckToSubmission` so one eligibility decision = one DDB item.
-4. **Callbacks** (`PATIENT#callback-<uuid>` / `CALLBACK#meta`, `GSI1PK=ENTITY#CALLBACK`) — `first_name`, `last_name`, `phone`, `reason` from any "please call me back" request.
-5. **Audit log** (`AUDIT#ACCESS#<YYYY-MM-DD>` and `AUDIT#PHI#<YYYY-MM-DD>`, `GSI1PK=ENTITY#AUDIT_ACCESS|AUDIT_PHI`) — §164.312(b) admin-PHI-access events and trigger-generated change history. Day-partitioned to avoid hot keys; ListAccessAudit / ListPHIAudit are cursor-paginated.
-
-Postgres holds only operational non-PHI: admin auth state (sessions, bcrypt hashes — Cognito covers prod), public site content (FAQs, team members, KB), and `bt.chat_sessions` row metadata (visitor cookie UUID + source + counts; transcripts in DDB).
-
-See [project_hostinger_not_hipaa](https://github.com/) memory rule — every new write of patient data must target DDB.
-
-### Why this split
-
-The Postgres instance runs in a Docker container on the application VM (Hostinger). That container is fine for non-PHI workflow data — admin sessions, FAQ vectors, contact-form metadata — but it is **not** a HIPAA-eligible PHI store: no AWS BAA, no customer-managed key, no PITR, no cross-AZ replication. The right place for PHI is AWS DynamoDB with the existing `alias/bt-phi` customer-managed key.
-
-### Data flow with security boundaries
-
-```mermaid
-flowchart TB
-    subgraph EXT["Untrusted Internet"]
-        VISITOR["Website visitor<br/>(chat / voice / form)"]
-    end
-
-    subgraph TRAEFIK["Traefik Ingress · TLS"]
-        INGRESS["TLS 1.3 termination<br/>cert-manager / LetsEncrypt prod<br/>routes /v1/*, /admin/* → gateway<br/>routes /chat, /ws/voice → ai<br/>NEVER routes /internal/*"]
-    end
-
-    subgraph BT["k3s 'bt' namespace · cluster-internal traffic"]
-        WEB["bt-web<br/>Next.js"]
-        AI["bt-ai (FastAPI)<br/>tools.py: book_with_insurance<br/>main.py: /chat /chat/stream<br/>voice.py: /ws/voice<br/>(no DB writes — calls gateway)"]
-        GW["bt-gateway (Go 1.24)<br/>handlers/intake.go<br/>handlers/chat.go · chat_stream.go<br/>handlers/chat_internal.go<br/>handlers/admin_appointments.go<br/>handlers/admin_insurance_checks.go<br/>internal/phi/store.go"]
-        PG[("Postgres 17 · Docker on host<br/>bt.intake_pointers · bt.chat_sessions<br/>bt.insurance_checks<br/>NON-PHI ONLY:<br/>uuids · sha256(email) · counters · status")]
-    end
-
-    subgraph AWS["AWS · account 689517798275 · us-east-1"]
-        IAM["IAM user bt-gateway-vm<br/>scoped to bt-main + GSI1<br/>+ kms:Decrypt via DDB only"]
-        SM["Secrets Manager<br/>bt/gateway/aws-credentials<br/>CMK-encrypted"]
-        CMK["KMS CMK<br/>alias/bt-phi<br/>1-yr rotation"]
-        DDB[("DynamoDB bt-main · CMK<br/>PATIENT#<email_hash> / INTAKE#<uuid><br/>CHAT#<session_id> / TURN#<ts>#<role><br/>PITR · deletion protection · streams")]
-        TRAIL[("CloudTrail<br/>S3 · object lock 365d<br/>encrypted with bt-phi CMK")]
-    end
-
-    VISITOR -- "HTTPS" --> INGRESS
-    INGRESS -- "TLS in-cluster" --> WEB
-    INGRESS -- "TLS in-cluster" --> GW
-    INGRESS -. "/ws/voice WebSocket" .-> AI
-    WEB -- "POST /v1/intake (form)<br/>POST /v1/chat /chat/stream" --> GW
-    GW == "POST /chat (LLM call)" ==> AI
-    AI == "POST /internal/chat/turn<br/>GET /internal/chat/history<br/>POST /internal/intake/submit<br/>(cluster-only — Traefik never exposes /internal/*)" ==> GW
-
-    GW -. "load env at startup" .-> SM
-    SM -. "rotate via CDK redeploy" .-> IAM
-    GW == "TLS · SigV4 · KMS data key<br/>PutChatTurn · PutIntake · BatchWriteItem" ==> DDB
-    DDB -- "encrypts/decrypts<br/>every item with" --> CMK
-    DDB -- "every API call audited" --> TRAIL
-    GW -- "non-PHI only:<br/>pointer · session counter · check status" --> PG
-
-    classDef phi fill:#ffe5e5,stroke:#c00
-    classDef pointer fill:#e5f5ff,stroke:#06c
-    classDef key fill:#fff4d6,stroke:#c80
-    class DDB,SM phi
-    class PG pointer
-    class CMK,IAM key
-```
-
-### Security controls at every layer
-
-| Layer | Control | Protects against |
-|---|---|---|
-| **Transit · visitor → ingress** | TLS 1.3, HSTS, LE-prod cert via cert-manager | Eavesdropping on the public internet |
-| **Transit · gateway → DynamoDB** | TLS to `dynamodb.us-east-1.amazonaws.com`, SigV4 request signing | Man-in-the-middle, request tampering, replay |
-| **Transit · ai → gateway** | Cluster-internal only; `/internal/*` is not in the Traefik ingress at all | External callers reaching internal endpoints |
-| **AuthN · gateway → DynamoDB** | IAM user `bt-gateway-vm` with static access key (rotated via CDK redeploy) | Unauthorised AWS API access |
-| **AuthZ · IAM policy scope** | Only `PutItem/GetItem/Query/UpdateItem/DescribeTable` on `bt-main` + GSI1; `kms:Decrypt` only `ViaService = dynamodb.*.amazonaws.com` | Lateral movement to other AWS resources if the key leaks |
-| **At rest · DynamoDB** | `TableEncryption.CUSTOMER_MANAGED` with `alias/bt-phi` (KMS, 1-yr rotation) | AWS insider access, disk-image exfiltration |
-| **At rest · Secrets Manager** | Same `alias/bt-phi` CMK encrypts the gateway access key secret | Secret leakage from CloudFormation history |
-| **At rest · Postgres pointer table** | No PHI columns. Stores only `submission_uuid`, `sha256(email)`, `status`, `created_at`, `retain_until` | Nothing identifying to leak even if the VM is compromised |
-| **Audit · DynamoDB** | CloudTrail (data events on bt-main → S3 with object lock 365 d) | Tampering with the audit trail |
-| **Audit · Postgres** | `phi_audit_trigger` on `bt.intake_pointers` writes every INSERT/UPDATE/DELETE to `bt.phi_audit_log` (append-only) | Silent admin actions |
-| **Audit · admin PHI access** | `GetIntakePointer` writes to `bt.phi_audit_log` with admin email + row id every time PHI is fetched from DynamoDB on detail view | §164.312(b) "audit controls" |
-| **Retention** | 10-year `retain_until` set on insert (Nevada NRS 629.051); weekly CronJob purges expired rows from both stores | Over-retention liability |
-| **Right to erasure** | `bt.mark_intake_pointer_purged(id)` + DynamoDB `DeleteItem` | NRS 603A erasure request |
-| **Fail-closed** | `/v1/intake` returns 503 if DynamoDB write fails; pointer row is **never** written without DynamoDB success first | Silently downgrading PHI to local Postgres if AWS is unreachable |
-| **Reachability** | `/readyz` pings `DescribeTable` on `bt-main`; pod is removed from k8s service rotation if AWS is unreachable | Sending traffic to a pod that can't store PHI |
-
-### Intake submission lifecycle
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant V as Visitor
-    participant W as bt-web
-    participant GW as bt-gateway
-    participant DDB as DynamoDB bt-main
-    participant PG as Postgres pointer table
-    participant CL as CLAIM.MD eligibility
-
-    V->>W: Fill intake form (9 fields)
-    W->>GW: POST /v1/intake
-    GW->>GW: Validate, normalise, generate submission_uuid (v4)
-    opt payment_method = insurance
-        GW->>CL: POST /internal/intake/check-coverage (via bt-ai)
-        CL-->>GW: {status, plan, copay}
-    end
-    GW->>GW: Build phi.IntakeRecord (CreatedAt, RetainUntil = +10y)
-    GW->>+DDB: PutItem PK=PATIENT#sha256(email) SK=INTAKE#uuid<br/>(condition: attribute_not_exists)
-    Note over GW,DDB: TLS · SigV4 · CMK envelope encryption
-    DDB-->>-GW: 200 OK
-    alt DDB write failed
-        GW-->>W: 503 phi_store_unavailable
-        Note over GW: FAIL CLOSED — Postgres untouched.
-    else DDB write OK
-        GW->>PG: INSERT bt.intake_pointers<br/>(uuid, email_hash, status, ddb_pk, ddb_sk)
-        PG-->>GW: id (BIGSERIAL)
-        Note over PG: phi_audit_trigger writes append-only audit row.
-        GW-->>W: 200 {submission_id, submission_uuid, eligible, next_step}
-    end
-    W-->>V: "We'll contact you within 1 business day."
-```
-
-### Admin PHI access lifecycle
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant A as Admin (browser)
-    participant GW as bt-gateway
-    participant PG as Postgres
-    participant DDB as DynamoDB
-    participant AUD as bt.admin_access_log
-
-    A->>GW: GET /admin/api/appointments?from=&to=&source=
-    GW->>PG: SELECT pointer rows FROM bt.intake_pointers (filtered)
-    PG-->>GW: rows (uuid, email_hash, status — NO PHI)
-    loop for each pointer
-        GW->>DDB: GetItem PK=PATIENT#<hash> SK=INTAKE#<uuid>
-        DDB-->>GW: name, DOB, phone, address, member ID
-        GW->>AUD: INSERT view_appointments_list, resource_id=<uuid>
-    end
-    GW-->>A: 200 hydrated list
-    Note over GW,AUD: One audit row per PHI record returned.
-
-    A->>GW: GET /admin/api/chat/sessions/<id>
-    GW->>PG: SELECT chat_sessions WHERE id=?
-    PG-->>GW: shell (id, source, started_at, message_count)
-    GW->>DDB: Query PK=CHAT#<id> AND begins_with(SK,'TURN#')
-    DDB-->>GW: every turn (oldest first)
-    GW->>AUD: INSERT view_chat_session, resource_id=<id>
-    GW-->>A: 200 transcript
-    Note over GW,AUD: Postgres holds zero message bodies.
-
-    A->>GW: GET /admin/api/insurance-checks.csv?from=&source=
-    GW->>PG: SELECT insurance_checks (filtered)
-    PG-->>GW: status + payer + email_hash + submission_uuid (NO PHI)
-    loop for each check
-        GW->>DDB: GetItem PK=PATIENT#<hash> SK=INTAKE#<uuid>
-        DDB-->>GW: patient name + member ID
-        GW->>AUD: INSERT export_insurance_checks_csv, resource_id=<check_uuid>
-    end
-    GW-->>A: text/csv attachment
-    Note over GW,AUD: CSV downloads are audited row-by-row.
-```
-
-### Chat / voice transcript lifecycle (PHI in DDB)
-
-Every turn — chatbot AND voice — is written straight to DynamoDB. Postgres maintains only non-PHI counters on `bt.chat_sessions` so the dashboard works without ever joining message bodies.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant V as Visitor
-    participant W as bt-web (chat widget) / WebSocket (voice)
-    participant GW as bt-gateway
-    participant AI as bt-ai
-    participant PG as Postgres bt.chat_sessions
-    participant DDB as DynamoDB bt-main
-
-    V->>W: Types message OR speaks
-    W->>GW: POST /v1/chat/stream  (or /v1/voice WS)
-    GW->>GW: ensure visitor cookie + chat_sessions row<br/>(source = 'chat' or 'voice')
-    GW->>DDB: PutItem PK=CHAT#<sid> SK=TURN#<ts>#u  role=user
-    GW->>PG: UPDATE chat_sessions SET message_count++,<br/>last_message_at=now() WHERE id=<sid>
-    GW->>AI: POST /chat/stream (forwards turn)
-    AI->>GW: GET /internal/chat/history?session_id=<sid>
-    GW->>DDB: Query PK=CHAT#<sid> ScanIndexForward=false LIMIT 20
-    DDB-->>GW: recent turns
-    GW-->>AI: history JSON
-    AI-->>GW: SSE stream of assistant tokens
-    GW-->>W: SSE proxied to client
-    GW->>DDB: PutItem PK=CHAT#<sid> SK=TURN#<ts>#a  role=assistant
-    GW->>PG: UPDATE chat_sessions counters again
-    Note over PG,DDB: Postgres never sees content.<br/>DDB stores plaintext under CMK alias/bt-phi.
-```
-
-## Architecture Diagrams
-
-### High Level Design (HLD)
-
-```mermaid
-graph TB
-    subgraph Client["Client Layer"]
-        B[Browser / Mobile]
-    end
-
-    subgraph Ingress["Ingress — Traefik"]
-        T[Traefik Reverse Proxy<br/>HTTP → HTTPS redirect<br/>TLS termination<br/>NEVER routes /internal/*]
-    end
-
-    subgraph Services["Application Services"]
-        W[bt-web<br/>Next.js 15 / React 19<br/>:3001<br/>Pages + Admin UI]
-        G[bt-gateway<br/>Go 1.24 / chi<br/>:8080<br/>REST + Admin + /internal/*<br/>only path that talks to DDB]
-        AI[bt-ai<br/>FastAPI / Python<br/>:8001<br/>Chat + Voice agents<br/>NO direct DB access]
-    end
-
-    subgraph Data["Data Layer"]
-        DB[(PostgreSQL 17 · Hostinger<br/>NON-PHI ONLY<br/>pointers · counters · status)]
-        DDB[(DynamoDB bt-main · AWS<br/>BAA · CMK alias/bt-phi<br/>intake records · chat turns)]
-    end
-
-    subgraph External["External Services"]
-        OAI[OpenAI API<br/>HIPAA BAA · ZDR<br/>GPT-4o / Realtime]
-        CLM[CLAIM.MD<br/>insurance eligibility]
-        COG[AWS Cognito<br/>admin login + MFA]
-    end
-
-    B -->|HTTPS| T
-    T -->|/v1/* /admin/api/*| G
-    T -->|everything else /admin/* HTML| W
-    W -->|server-side fetch| G
-    G -->|pgx v5 · non-PHI only| DB
-    G ==>|TLS · SigV4 · ALL PHI| DDB
-    G -->|/chat /chat/stream| AI
-    AI -->|/internal/chat/turn<br/>/internal/chat/history<br/>/internal/intake/submit| G
-    AI -->|OpenAI SDK + Realtime| OAI
-    G -->|/internal/intake/check-coverage| AI
-    AI -->|via gateway proxy| CLM
-    G -->|admin login token exchange| COG
-```
-
-### Low Level Design (LLD)
-
-#### Go Gateway — Middleware Stack & Request Lifecycle
-
-```mermaid
-flowchart TD
-    R[Incoming Request] --> CORS[CORS Middleware]
-    CORS --> LOG[Structured Logger]
-    LOG --> REC[Panic Recoverer]
-    REC --> RT{Route Match}
-
-    RT -->|POST /admin/auth/login| RL[Rate Limit<br/>5 req/min per IP]
-    RL --> LH[Login Handler<br/>bcrypt verify<br/>lockout check<br/>32-byte token → SHA-256 stored]
-
-    RT -->|/admin/* protected| AA[RequireAdmin<br/>Extract Bearer<br/>SHA-256 hash<br/>ValidateToken DB lookup<br/>expiry + revoke check]
-    AA -->|401| ERR[Error Response]
-    AA -->|OK| SA{Superadmin<br/>required?}
-    SA -->|yes| SG[RequireSuperadmin<br/>role check]
-    SG -->|403| ERR
-    SG -->|OK| AH[Admin Handler]
-    SA -->|no| AH
-
-    RT -->|/v1/* public| PH[Public Handler<br/>contact / chat / newsletter]
-
-    AH -->|PHI read| PAL[Log to admin_access_log<br/>admin_email · action<br/>resource_id · ip · ua]
-    PAL --> DB[(PostgreSQL bt schema)]
-    AH --> DB
-    PH --> DB
-```
-
-#### Admin Auth Sequence
-
-```mermaid
-sequenceDiagram
-    participant C as Browser
-    participant G as Go Gateway
-    participant DB as PostgreSQL
-
-    C->>G: POST /admin/auth/login {email, password}
-    G->>DB: SELECT admin_users WHERE email=?
-    DB-->>G: user row (hash, locked_until, failed_attempts)
-    alt account locked
-        G-->>C: 429 locked
-    else
-        G->>G: bcrypt.CompareHashAndPassword
-        alt wrong password
-            G->>DB: UPDATE failed_attempts++, maybe set locked_until
-            G-->>C: 401 invalid credentials
-        else correct
-            G->>G: crypto/rand 32 bytes → base64url token<br/>SHA-256(token) → tokenHash
-            G->>DB: INSERT admin_sessions (token_hash, expires_at=now+8h)
-            G->>DB: UPDATE last_login_at, failed_attempts=0
-            G-->>C: 200 {token, user} — raw token returned once, never stored server-side
-        end
-    end
-
-    C->>G: GET /admin/... Authorization: Bearer <token>
-    G->>G: SHA-256(token) → hash
-    G->>DB: SELECT session WHERE token_hash=hash AND revoked_at IS NULL AND expires_at > now
-    DB-->>G: session + admin_user row
-    G->>G: inject User into request context
-    G->>DB: INSERT admin_access_log (if PHI endpoint)
-    G-->>C: 200 protected resource
-```
-
-#### PHI Audit Trail Flow
+## 2. Tool surface (one source: `ai/app/tools.py`)
 
 ```mermaid
 flowchart LR
-    subgraph App["Application Layer (bt-gateway)"]
-        H[Admin Handler<br/>appointments · insurance-checks ·<br/>chat session detail · contacts]
-        AL[admin.LogPHIAccess<br/>called once per PHI row]
+    subgraph Tools[ai/app/tools.py - @function_tool]
+        kb_search
+        list_services
+        get_service
+        list_specialties
+        list_locations
+        list_team_members
+        get_business_hours_and_contact
+        search_faqs
+        list_payers
+        verify_coverage
+        propose_slots
+        get_free_slots
+        book_appointment
+        request_intake_callback
+        end_call
     end
 
-    subgraph DB["PostgreSQL — bt schema (non-PHI)"]
-        PTR[(intake_pointers<br/>chat_sessions<br/>insurance_checks<br/>contact_submissions)]
-        AAL[(admin_access_log<br/>append-only<br/>UPDATE/DELETE revoked)]
-        PAL[(phi_audit_log<br/>append-only<br/>DB trigger)]
-        TR[TRIGGER on INSERT/UPDATE/DELETE<br/>pointer tables → phi_audit_log]
+    subgraph Agents
+        InfoAgent --> INFO[INFO_TOOLS:<br/>kb_search, list_*, get_*, search_faqs]
+        TherapistMatching --> MATCH[MATCHING_TOOLS:<br/>list_team_members, list_specialties, list_services]
+        InsuranceCheck --> INS[verify_coverage, list_payers]
+        BookingAgent --> BOOK[BOOKING_TOOLS:<br/>verify_coverage, propose_slots,<br/>get_free_slots, book_appointment, list_payers]
+        IntakeAgent --> INT[INTAKE_TOOLS:<br/>request_intake_callback]
+        CrisisSupport --> NONE[no tools]
     end
 
-    subgraph AWS["DynamoDB bt-main — actual PHI"]
-        DDB[(INTAKE# items<br/>TURN# items<br/>CMK encrypted)]
-        CT[(CloudTrail<br/>data events<br/>S3 object lock)]
-    end
+    INFO --> kb_search
+    INS --> verify_coverage
+    BOOK --> verify_coverage
+    BOOK --> propose_slots
+    BOOK --> book_appointment
+    INT --> request_intake_callback
 
-    H -->|SELECT pointer| PTR
-    H -->|GetItem / Query<br/>per row hydrated| DDB
-    H --> AL
-    AL -->|one row per PHI access| AAL
-    PTR -->|mutation| TR
-    TR -->|INSERT| PAL
-    DDB -->|every API call| CT
+    BookingAgent -. voice only .-> end_call
+    InsuranceCheck -. voice only .-> end_call
+    IntakeAgent -. voice only .-> end_call
+    Matching -. voice only .-> end_call
+    InfoAgent -. voice only .-> end_call
 ```
 
-#### Database ER Diagram (key tables)
+`VOICE_TOOLS = [end_call]` is appended to every realtime agent's tool list (`ai/app/tools.py:398`). Text agents do not get `end_call` — it would be meaningless over SSE.
+
+---
+
+## 3. Text chat — request lifecycle
 
 ```mermaid
-erDiagram
-    admin_users {
-        bigserial id PK
-        text email
-        text password_hash
-        text role
-        smallint failed_attempts
-        timestamptz locked_until
-    }
-    admin_sessions {
-        uuid id PK
-        bigint admin_user_id FK
-        text token_hash
-        timestamptz expires_at
-        timestamptz revoked_at
-    }
-    admin_access_log {
-        bigserial id PK
-        bigint admin_user_id FK
-        text action
-        text resource_type
-        text resource_id
-        inet ip_address
-    }
-    contact_submissions {
-        bigserial id PK
-        text name
-        text email
-        text phone
-        text message
-        timestamptz retain_until
-        timestamptz purged_at
-    }
-    chat_sessions {
-        uuid id PK
-        text visitor_id
-        text source "chat | voice"
-        integer message_count "non-PHI counter"
-        timestamptz last_message_at
-        timestamptz retain_until
-        timestamptz purged_at
-    }
-    intake_pointers {
-        bigserial id PK
-        uuid submission_uuid
-        char64 email_hash
-        text source "chat-agent | voice-agent | website-*"
-        text status
-        text ddb_pk
-        text ddb_sk
-        timestamptz retain_until
-    }
-    insurance_checks {
-        bigserial id PK
-        uuid check_uuid
-        uuid submission_uuid FK
-        text source
-        text payer_name
-        text coverage_status
-        boolean eligible
-        char64 email_hash
-    }
-    phi_audit_log {
-        bigserial id PK
-        text table_name
-        text operation
-        bigint record_id
-        timestamptz event_time
-    }
+sequenceDiagram
+    autonumber
+    participant W as ChatWidget.tsx
+    participant G as bt-gateway (Go)
+    participant DDB as DynamoDB (PHI)
+    participant PG as Postgres (counters)
+    participant AI as bt-ai (FastAPI)
+    participant LLM as OpenAI Responses API
 
-    admin_users ||--o{ admin_sessions : "has"
-    admin_users ||--o{ admin_access_log : "generates"
-    intake_pointers ||--o{ insurance_checks : "linked via submission_uuid"
+    W->>G: POST /v1/chat/stream {session_id?, message}
+    G->>G: visitor cookie + session IDOR check
+    G->>DDB: PutChatTurn(role=user, content)
+    G->>PG: bump message_count, last_message_at
+    G->>AI: POST /chat/stream (detached upstream ctx)
+    AI->>AI: detect_intent(msg) - canned info?
+
+    alt cache hit (hours / locations)
+        AI-->>G: SSE: session, delta(reply), done(cached=true)
+    else LLM path
+        AI->>AI: load history from /internal/chat/history (last 20 turns)
+        AI->>LLM: Runner.run_streamed(triage_agent, history)
+        loop while streaming
+            LLM-->>AI: ResponseTextDeltaEvent
+            AI-->>G: SSE: delta(text)
+            G-->>W: forward SSE block
+        end
+        AI-->>G: SSE: done(usage, cache_hit_pct, agent, tools)
+    end
+
+    G->>DDB: PutChatTurn(role=assistant, accumulated reply)
+    G->>PG: bump counters
 ```
 
-> **NB:** `chat_messages` was dropped in migration 008 — every turn now lives in DynamoDB under `PK=CHAT#<session_id>`, `SK=TURN#<rfc3339nano>#<role>`. `chat_sessions.message_count` and `last_message_at` are non-PHI counters maintained by the gateway on every `PutChatTurn`.
+**Key files / line refs**
 
-To apply all migrations in order:
+- Widget streams via `fetch("/v1/chat/stream")` and parses SSE manually — `web/src/components/ChatWidget.tsx:159-256`.
+- Gateway forwards SSE with a **detached** `context.WithTimeout(5min)` so a tab-close doesn't cancel the upstream and lose the assistant turn — `gateway/internal/handlers/chat_stream.go:130`.
+- AI service builds the agent, hits the canned-reply cache first, then calls `Runner.run_streamed` — `ai/app/main.py:248-402`.
+- Conversation history lives in **DynamoDB**, *not* Postgres, because Hostinger is not HIPAA. The AI loads it via `GET /internal/chat/history` — `ai/app/main.py:113-137`, `gateway/internal/handlers/chat_internal.go:85-117`.
+- Prompt-cache key `bt-chat-v1` pins the OpenAI cache prefix across requests — `ai/app/main.py:64`.
 
-```bash
-for f in db/schema.sql db/migrations/*.sql; do
-  PGPASSWORD=<pass> psql -h localhost -U app -d app -f "$f"
-done
+---
+
+## 4. Canned-reply fast path (info_cache)
+
+```mermaid
+flowchart TD
+    msg[User message] --> rx{regex match<br/>hours / locations?}
+    rx -- no --> LLM[Runner.run_streamed]
+    rx -- yes --> ver[fetch site_settings.updated_at +<br/>md5 of locations rows]
+    ver --> cmp{version key<br/>matches cache?}
+    cmp -- yes --> hit[cache hit - serve in ~5ms]
+    cmp -- no/cold --> render[render markdown from PG]
+    render --> store[store in process-local cache]
+    store --> serve[serve, log miss reason]
+    hit --> sse[SSE: delta + done cached=true]
+    serve --> sse
 ```
 
-## DB schema
+`ai/app/info_cache.py` — process-local, version-keyed against the source rows, so admin edits invalidate automatically. Misses pay one render cost; no LLM is called.
 
-All tables in `bt` schema:
+---
 
-**Content**
-- `site_settings` (singleton) — brand, colors, hours, social
-- `nav_items` — header/footer navigation with parent_id for dropdowns
-- `services`, `specialties` — therapy offerings
-- `team_groups`, `team_members` — staff directory
-- `testimonials`, `faqs`, `stats`, `blog_posts`
-- `locations`, `press_mentions`, `podcast`, `free_resources`
+## 5. Browser voice (mic in widget) — WebRTC-style streaming over WebSocket
 
-**Pointers / non-PHI metadata (Postgres)**
-- `intake_pointers` — uuid, sha256(email), source, status (PHI lives in DDB)
-- `chat_sessions` — id, source (`chat`/`voice`), `message_count`, `last_message_at` (turns live in DDB)
-- `insurance_checks` — eligibility-check history (status, payer, source, sha256(email))
-- `contact_submissions` — legacy contact-form data (retain_until, purged_at)
-- `newsletter_subscribers` — email list (unsubscribed_at, deletion_requested_at)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant W as ChatWidget.tsx
+    participant G as bt-gateway
+    participant PG as Postgres
+    participant AI as bt-ai (voice.py)
+    participant RT as OpenAI Realtime API<br/>wss://us.api.openai.com
 
-**PHI (DynamoDB `bt-main`, CMK alias/bt-phi)**
-- `PATIENT#<email_hash>` / `INTAKE#<submission_uuid>` — full intake record
-- `CHAT#<session_id>` / `TURN#<rfc3339nano>#<role>` — every chat / voice turn
+    W->>W: getUserMedia 24kHz mono
+    W->>G: WS /v1/voice?session_id=<uuid>
+    G->>G: visitor cookie + IDOR
+    G->>PG: INSERT chat_sessions if new (source='voice-agent')
+    G->>AI: WS dial /ws/voice?session_id=...
+    AI->>RT: RealtimeRunner.run() with realtime_triage agent
+    RT-->>AI: session ready
+    AI->>RT: response.create (greeting instructions)
+    RT-->>AI: RealtimeAudio (PCM16 24kHz)
+    AI-->>G: response.audio.delta (b64 PCM16)
+    G-->>W: forward
+    W->>W: decode PCM16, queue, play
 
-**Compliance (Postgres)**
-- `phi_audit_log` — database-level PHI mutation log (append-only)
-- `admin_users` / `admin_sessions` — admin authentication
-- `admin_access_log` — admin PHI read log (append-only)
-- `phi_due_for_purge` — view: rows past NRS 629.051 retention window
+    loop user speaks
+        W->>G: input_audio_buffer.append (b64 PCM16)
+        G->>AI: forward
+        AI->>RT: send_audio
+        RT->>RT: semantic VAD detects turn end
+        RT-->>AI: transcript + audio response
+        AI->>AI: filter ASR hallucinations<br/>(www., subscribe, etc.)
+        AI-->>W: response.audio.delta + transcript
+        AI->>G: POST /internal/chat/turn (DDB)
+    end
+
+    Note over W,RT: barge-in: response.cancel - session.interrupt()<br/>tool calls: book_appointment etc.<br/>end_call - close ws after 2s grace
+```
+
+Files:
+- Browser audio capture + WS protocol: `web/src/components/ChatWidget.tsx:283-444`.
+- Gateway WS proxy (with session IDOR + chat-first→voice-agent source promotion): `gateway/internal/handlers/voice.go`.
+- AI bridge (RealtimeRunner, hallucination filter, DDB persistence): `ai/app/voice.py:216-475`.
+- Realtime config (PCM16, semantic VAD low eagerness, marin voice): `ai/app/bt_agents/realtime/config.py:48-69`.
+
+---
+
+## 6. Twilio phone — PSTN → realtime agent graph
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant T as Twilio (PSTN)
+    participant G as bt-gateway
+    participant PG as Postgres
+    participant AI as bt-ai (twilio_voice.py)
+    participant RT as OpenAI Realtime API
+
+    T->>G: POST /v1/twilio/voice (form-encoded)
+    G->>G: verify X-Twilio-Signature (HMAC-SHA1)
+    G->>PG: INSERT chat_sessions (id=uuid, source='voice-phone',<br/>external_ref=CallSid)
+    G-->>T: TwiML <Connect><Stream url="wss://.../v1/twilio/media"><br/>with <Parameter name="session_id" value="<uuid>">
+
+    T->>G: WS upgrade /v1/twilio/media
+    G->>G: verify signature on upgrade URL
+    G->>AI: WS dial /twilio/media (subprotocol audio.twilio.com)
+
+    T-->>AI: connected, then start (streamSid, callSid, customParams.session_id)
+    AI->>RT: RealtimeRunner.run() with telephony config<br/>(g711_ulaw both ways, far-field denoiser, VAD eagerness=medium)
+    AI->>RT: send_message(opening greeting prompt)
+    RT-->>AI: RealtimeAudio (mulaw)
+    AI-->>T: media event with mulaw payload (verbatim, no resample)
+
+    loop call
+        T-->>AI: media (mulaw 8kHz)
+        AI->>RT: send_audio
+        RT-->>AI: audio + transcripts + tool calls
+        AI->>AI: drop ASR hallucinations
+        AI->>G: POST /internal/chat/turn (DDB) per finalized turn
+        AI-->>T: media frames
+    end
+
+    Note over AI,T: end_call tool → end_call_event.set()<br/>1.5s grace for goodbye<br/>WS close → Twilio hangs up
+```
+
+Files:
+- Gateway TwiML + WS proxy with Twilio HMAC-SHA1 signature check: `gateway/internal/handlers/twilio.go:64-258`.
+- AI Twilio bridge (mulaw passthrough, DTMF forwarding, end_call hangup event): `ai/app/twilio_voice.py:252-602`.
+- Telephony realtime config (mulaw, far-field, VAD medium): `ai/app/bt_agents/realtime/config.py:77-102`.
+- The `end_call` tool sets a `contextvars.ContextVar[asyncio.Event]` that the bridge waits on — `ai/app/tools.py:1107-1139` + `ai/app/twilio_voice.py:67-70,540-566`.
+
+---
+
+## 7. Booking flow inside the BookingAgent
+
+```mermaid
+flowchart TD
+    Entry([BookingAgent activated]) --> Inspect[Step 0: inspect transcript]
+    Inspect --> Case{verified?}
+    Case -- A: prior verify_coverage ok --> S2
+    Case -- B: caller said self-pay --> S2
+    Case -- C: not yet verified --> S1[Step 1: ask 5 insurance fields]
+
+    S1 --> Parse5[parse multi-field paste<br/>or one-at-a-time]
+    Parse5 --> Verify[verify_coverage tool]
+    Verify --> ClaimMD[CLAIM.MD via SigV4 → API Gateway]
+    ClaimMD --> Display[emit display_text verbatim]
+    Display --> S2
+
+    S2[Step 2: collect 5 contact fields] --> Reason
+    Reason[reason] --> Phone --> Email --> Address[home address<br/>US ZIP only] --> Sex
+    Sex --> S3[Step 3: time preference]
+    S3 --> Slots[propose_slots tool]
+    Slots --> Read[read 3 slots aloud]
+    Read --> Loop{caller picked?}
+    Loop -- no - different times --> S3
+    Loop -- yes --> S5[Step 5: recap 10 fields]
+    S5 --> Confirm{caller says yes?}
+    Confirm -- correction --> S5
+    Confirm -- yes --> Book[book_appointment tool]
+    Book --> Hold[/internal/calendar/book - soft hold/]
+    Hold --> Confirmed[/internal/calendar/confirm/]
+    Confirmed --> NextStep[speak next_step verbatim]
+    NextStep --> EndCall{voice?}
+    EndCall -- yes --> end_call
+    EndCall -- no --> Done([done])
+
+    Hold -- 409 slot_taken --> Alts[show alternatives]
+    Alts --> Loop
+```
+
+The booking prompt (`ai/app/bt_agents/booking_agent.py:48-276`) is the longest and most rule-heavy in the system. The voice variant (`ai/app/bt_agents/realtime/booking.py`) has identical steps plus the `VOICE_CONFIRMATION_RULE` (digit-by-digit / letter-by-letter readback) from `prompts.py:84-120` to defend against ASR errors.
+
+---
+
+## 8. Insurance verification — `verify_coverage`
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent as InsuranceCheck / BookingAgent
+    participant Tool as verify_coverage (tools.py)
+    participant GW as bt-gateway
+    participant APIG as AWS API Gateway (us-east-1)
+    participant Lambda as CLAIM.MD Lambda
+    participant DDB
+
+    Agent->>Tool: verify_coverage(name, dob, payer, member_id)
+    Tool->>Tool: validate DOB YYYYMMDD<br/>resolve_payer_id(payer_name)
+
+    alt payer = SELF
+        Tool-->>Agent: ok, eligible=false, display_text="self-pay"
+    else real payer
+        Tool->>APIG: signed_post /internal/insurance/verify (SigV4)
+        APIG->>Lambda: invoke
+        Lambda-->>APIG: {status, copay, plan}
+        APIG-->>Tool: response
+        Tool->>Tool: _parse_claimmd_response<br/>(status in {active, approved, eligible, ...})
+        Tool->>GW: gateway_post /internal/coverage/record<br/>(audit row to bt.insurance_checks)
+        GW->>DDB: write audit fields (no PHI body)
+        Tool-->>Agent: ok, eligible, payer, coverage,<br/>display_text="🎉 covered through Anthem..."
+    end
+```
+
+`display_text` is **composed server-side** so the LLM cannot accidentally skip telling the caller the result. The agent prompt makes this contract explicit ("emit `display_text` VERBATIM as your visible reply"). See `ai/app/tools.py:691-839` and `ai/app/bt_agents/insurance_agent.py:110-150`.
+
+---
+
+## 9. PHI / HIPAA boundary
+
+Hostinger Postgres is **not** under a BAA. Every PHI byte flows through AWS DynamoDB instead.
+
+```mermaid
+flowchart LR
+    subgraph Hostinger[Hostinger - NOT HIPAA]
+        PG[(Postgres)]
+        PG --- non[chat_sessions: id, visitor_id,<br/>source, message_count, last_message_at,<br/>ended_at, external_ref]
+        PG --- ins[insurance_checks audit: payer, eligible,<br/>email_hash - no plaintext PHI]
+    end
+
+    subgraph AWS[AWS us-east-1 - HIPAA BAA]
+        DDB[(DynamoDB:<br/>chat_turns, intake)]
+        KMS[KMS CMK]
+        APIGW[API Gateway + CLAIM.MD Lambda]
+        DDB -.encrypted at rest.- KMS
+    end
+
+    Widget[ChatWidget / Voice] --> Gateway
+    Gateway -- counters / pointers --> PG
+    Gateway -- PutChatTurn / ListChatTurns --> DDB
+    AI[bt-ai] -- /internal/chat/history --> Gateway
+    AI -- signed_post SigV4 --> APIGW
+```
+
+- Message bodies, transcripts, intake details: **DynamoDB only**.
+- Postgres holds non-PHI pointers — counters, source label, ended_at flag, hashed email for joining.
+- The gateway `/internal/*` namespace has **no public ingress route**; cluster network isolation IS the auth boundary (`gateway/internal/handlers/chat_internal.go:14-19`).
+
+---
+
+## 10. Models, voices, and where they're configured
+
+| Knob | Default | Override env |
+|---|---|---|
+| Chat model | (SDK default Responses model) | `OPENAI_MODEL` |
+| Embedding model | `text-embedding-3-small` | `OPENAI_EMBED_MODEL` |
+| Realtime model | `gpt-realtime-2` | `REALTIME_MODEL` |
+| Realtime transcription | `gpt-4o-mini-transcribe` | `REALTIME_TRANSCRIPTION_MODEL` |
+| Realtime voice | `marin` | `REALTIME_VOICE` |
+| Realtime base URL | `wss://us.api.openai.com/v1/realtime` (US-pinned) | `REALTIME_BASE_URL` |
+| Prompt cache key | `bt-chat-v1` | `BT_PROMPT_CACHE_KEY` |
+| Browser-voice max session | 600 s | hard-coded `_MAX_SESSION_SECONDS` |
+| Twilio max call | 900 s | `TWILIO_MAX_CALL_SECONDS` |
+
+Defined in `ai/app/main.py:64`, `ai/app/bt_agents/realtime/config.py:13-28`, `ai/app/voice.py:41`, `ai/app/twilio_voice.py:58`.
+
+---
+
+## 11. Source map
+
+```
+ai/app/
+├── main.py                        FastAPI: /chat, /chat/stream (SSE), /ws/voice, /twilio/voice, /twilio/media
+├── voice.py                       Browser-mic ↔ OpenAI Realtime bridge (PCM16)
+├── twilio_voice.py                Twilio Media Streams ↔ OpenAI Realtime bridge (μ-law)
+├── agent.py                       Returns build_triage_agent()
+├── tools.py                       All @function_tools + INFO/MATCHING/INTAKE/BOOKING/VOICE groups
+├── prompts.py                     Shared prompt constants: PRACTICE_CONTEXT, STYLE_TEXT, STYLE_VOICE,
+│                                  CRISIS_RULE, ANTI_DEFLECTION_RULE, VOICE_CONFIRMATION_RULE
+├── info_cache.py                  Canned-reply cache (hours / locations) — version-keyed
+├── aws_signer.py                  SigV4 signed_post / signed_get → API Gateway; gateway_post → bt-gateway
+├── db.py                          Postgres pool (read-only kb / faqs / services / specialties / locations)
+├── embed_faqs.py                  /internal/embed-faqs — re-embed after admin FAQ edits
+├── log_stream.py + logging_config Live log SSE for /admin/* dashboard
+└── bt_agents/
+    ├── triage_agent.py            Text Triage — handoff-only, no tools
+    ├── booking_agent.py           Text booking — full flow + verify_coverage + propose_slots + book_appointment
+    ├── insurance_agent.py         Text insurance check — verify_coverage + handoff to booking
+    ├── intake_agent.py            Text callback — request_intake_callback only
+    ├── matching_agent.py          Text therapist matching — list_team_members, hands off to booking/intake
+    ├── info_agent.py              Text practice info — kb_search + structured tools
+    ├── crisis_agent.py            Text crisis — no tools, 988/911
+    ├── guardrails.py              Crisis-keyword input guardrail (telemetry only, never trips)
+    ├── roster.py                  Single source of truth: 6 bookable + 4 callback-only therapists
+    └── realtime/
+        ├── __init__.py            Re-exports build_realtime_triage + run/model configs
+        ├── config.py              gpt-realtime-2, marin voice, PCM16 vs g711_ulaw, semantic VAD, US-pinned URL
+        ├── triage.py              Voice Triage — same routing rules, voice persona, handoffs
+        ├── booking.py             Voice booking — same 7 steps + read-back/confirmation rule
+        ├── insurance.py           Voice insurance check
+        ├── intake.py              Voice callback
+        ├── matching.py            Voice therapist matching
+        ├── info.py                Voice practice info
+        └── crisis.py              Voice crisis
+
+web/src/components/
+└── ChatWidget.tsx                 SSE chat client + WS voice client + insurance dropdown picker
+
+gateway/internal/handlers/
+├── chat.go                        POST /v1/chat (non-stream)
+├── chat_stream.go                 POST /v1/chat/stream (SSE proxy with detached upstream ctx)
+├── chat_end.go                    POST /v1/chat/end (sendBeacon on tab close)
+├── chat_internal.go               /internal/chat/{turn,history,end} — bt-ai's PHI-safe DDB API
+├── voice.go                       WS /v1/voice — visitor IDOR + WS proxy to bt-ai
+└── twilio.go                      POST /v1/twilio/voice (TwiML) + WS /v1/twilio/media (HMAC-SHA1 + WS proxy)
+```
+
+---
+
+## 12. Things that look weird but are intentional
+
+- **Two parallel agent trees** (`bt_agents/` and `bt_agents/realtime/`). The OpenAI Agents SDK uses different base classes (`Agent` vs `RealtimeAgent`) and different handoff helpers (`handoff` vs `realtime_handoff`). The voice tree is not a thin wrapper — it has its own prompts (voice persona, read-back rule) and gets `end_call`. Memory `feedback_sync_all_agents`: any prompt or tool change must be applied to **both** trees.
+- **`display_text` composed server-side** in `verify_coverage`. The model used to occasionally call `transfer_to_bookingagent` without first emitting the result, leaving the caller staring at silence. Pre-rendering the message and forcing the prompt to echo it verbatim fixed it. See `ai/app/tools.py:806-838`.
+- **DOB is echoed once in plain English, never as MM/DD vs DD/MM**. Memory `feedback_dob_confirm`: prior phrasing confused callers. Now: "Got it — August 19, 1998, correct?" Period.
+- **ASR hallucination filter**. Whisper / `gpt-4o-mini-transcribe` emit "subscribe to our channel", "thanks for watching" on silence/non-English audio. We drop those before they hit the agent and `session.interrupt()` any response they triggered — `voice.py:74-105`, `twilio_voice.py:102-133`.
+- **Greeting via `response.create` raw event, not a fake user turn**. Earlier code injected a fake "user" message which polluted the transcript. Now the SDK history starts clean and the model's first assistant turn IS the greeting — `voice.py:295-309`.
+- **Detached context when proxying SSE.** A tab-close mid-reply must not cancel the upstream OpenAI call — we still need the full assistant turn for the DDB audit trail (`chat_stream.go:130`).
+- **`agent_source` ContextVar** stamps every intake/coverage submission with `chat-agent` / `voice-agent` / `voice-phone`, so admin reports can split modalities (`tools.py:25`).
