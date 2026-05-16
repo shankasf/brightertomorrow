@@ -2,6 +2,7 @@
 import { motion } from 'framer-motion';
 import { Button } from './ui';
 import type { ViewMode } from '@/app/admin/calendar/types';
+import { LuChevronLeft, LuChevronRight } from 'react-icons/lu';
 
 type Props = {
   title: string;
@@ -36,9 +37,7 @@ export default function CalendarHeader({
           aria-label={prevLabel}
           className="grid h-9 w-9 place-items-center rounded-lg border border-[#E5E5E5] bg-white text-ink/70 transition-colors hover:bg-cream hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
+          <LuChevronLeft width={16} height={16} strokeWidth={2} />
         </button>
         <h2
           className="min-w-[200px] text-center text-[17px] font-semibold tracking-tight text-ink"
@@ -53,9 +52,7 @@ export default function CalendarHeader({
           aria-label={nextLabel}
           className="grid h-9 w-9 place-items-center rounded-lg border border-[#E5E5E5] bg-white text-ink/70 transition-colors hover:bg-cream hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
+          <LuChevronRight width={16} height={16} strokeWidth={2} />
         </button>
         <Button variant="secondary" size="sm" onClick={onToday} className="ml-1">
           Today

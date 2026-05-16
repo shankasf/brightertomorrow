@@ -170,12 +170,18 @@ export function statusGroupOf(s: EventStatus): Exclude<StatusGroup, 'all'> {
 
 // Hour grid — therapy-center standard runs roughly 7 AM – 9 PM. We render the
 // gutter from 6 AM – 10 PM (16 rows) so early-morning intakes / late evening
-// holds aren't clipped. Height per hour matches Cal.com / Linear (~56px).
+// holds aren't clipped. Height per hour bumped to 72px so 30-min appointments
+// get ~36px — comfortably tall enough for time + therapist on one row.
 export const GRID_START_HOUR = 6;
 export const GRID_END_HOUR = 22;          // exclusive (last row label is 9 PM)
-export const HOUR_HEIGHT_PX = 56;
+export const HOUR_HEIGHT_PX = 72;
 export const GRID_TOTAL_HOURS = GRID_END_HOUR - GRID_START_HOUR;
 export const GRID_TOTAL_PX = GRID_TOTAL_HOURS * HOUR_HEIGHT_PX;
+
+// Visible clinic / business-hours band — used to subtly tint 8 AM–6 PM on the
+// grid so staff can scan high-traffic hours at a glance.
+export const BUSINESS_START_HOUR = 8;
+export const BUSINESS_END_HOUR = 18;
 
 // Format a 24h integer hour as "6 AM" / "12 PM" / "9 PM" for the gutter.
 export function fmtHourLabel(h24: number): string {

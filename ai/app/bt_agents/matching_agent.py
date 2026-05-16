@@ -10,15 +10,16 @@ import os
 
 from agents import Agent
 
-from ..prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, STYLE_TEXT
+from ..prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
 from ..tools import MATCHING_TOOLS
 from .roster import ELIGIBLE_FOR_BOOKING, THERAPISTS_WITHOUT_FEEDS
 
 
 def _eligible_list() -> str:
+    sorted_eligible = sorted(ELIGIBLE_FOR_BOOKING, key=lambda t: t["name"])
     return "\n".join(
         f"  - {t['name']} (staffId {t['staffId']})"
-        for t in ELIGIBLE_FOR_BOOKING
+        for t in sorted_eligible
     )
 
 
@@ -31,6 +32,7 @@ def build_matching_agent() -> Agent:
         f"{PRACTICE_CONTEXT}\n\n"
         f"{STYLE_TEXT}\n\n"
         f"{CRISIS_RULE}\n\n"
+        f"{SCOPE_RULE}\n\n"
         f"{ANTI_DEFLECTION_RULE}\n\n"
         "You help visitors find the right therapist at Brighter Tomorrow Therapy.\n\n"
 

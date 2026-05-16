@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { FiCheck, FiShield } from "react-icons/fi";
@@ -86,13 +85,14 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
             transition={{ duration: 0.5 }}
             className="inline-flex items-center"
           >
-            <Link
-              href="/contact"
+            <button
+              type="button"
+              onClick={() => setMatchOpen(true)}
               className="inline-flex items-center gap-2 text-white text-[11px] font-semibold uppercase tracking-[0.18em] px-5 py-2.5 hover:opacity-90 transition"
               style={{ backgroundColor: "#66202A", borderRadius: "20px 0 20px 20px" }}
             >
               Find Your Therapist Here
-            </Link>
+            </button>
           </motion.div>
 
           {/* Brand script preheader */}
@@ -125,9 +125,8 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
             className="mt-7 max-w-2xl mx-auto text-base sm:text-lg leading-relaxed"
             style={{ color: "rgba(255,255,255,0.85)" }}
           >
-            Offering immediate and accessible therapy to individuals, couples, and families.
-            Serving all of Las Vegas, North Las Vegas &amp; Nevada &middot; In-Person &amp;
-            Online Therapy &middot; Evenings and Weekends.
+            Therapy for individuals, couples &amp; families.
+            In-person or online &middot; Evenings &amp; weekends.
           </motion.p>
 
           {/* CTAs — Talkspace-style flow */}
@@ -174,6 +173,43 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
               <FiCheck size={13} style={{ color: "#E1B878" }} /> No credit card to get matched
             </span>
           </motion.div>
+
+          {/* AI 24/7 booking line — glass call strip */}
+          <motion.a
+            href="tel:+17254652385"
+            aria-label="Call our AI booking assistant at (725) 465-2385, available 24/7"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, delay: 1.15, ease: [0.22, 1, 0.36, 1] }}
+            className="group mt-8 inline-flex flex-wrap items-center justify-center gap-x-3 gap-y-2 px-5 sm:px-6 py-3.5 backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.22)",
+              borderRadius: "18px 0 18px 18px",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+            }}
+          >
+            <span
+              aria-hidden
+              className="inline-flex items-center gap-1.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-[0.2em] px-2 py-[5px]"
+              style={{
+                backgroundColor: "#E1B878",
+                color: "#66202A",
+                borderRadius: "8px 0 8px 8px",
+              }}
+            >
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#66202A] animate-pulse" />
+              AI &middot; Available 24 / 7
+            </span>
+            <span className="text-[13px] sm:text-[13.5px] text-white/85 font-medium">
+              Talk to AI to book
+            </span>
+            <span
+              className="font-display text-[1.15rem] sm:text-[1.3rem] font-bold tabular tracking-tight text-white group-hover:text-[#E1B878] transition-colors"
+            >
+              (725) 465-2385
+            </span>
+          </motion.a>
 
           {/* Slide indicator pills */}
           {slides.length > 1 && (

@@ -134,7 +134,7 @@ type blogBody struct {
 func (h *AdminContentHandler) ListBlogPosts(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT id, slug, title, excerpt, cover_url, author, published,
-		        to_char(published_at,'YYYY-MM-DD"T"HH24:MI:SSOF')
+		        to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.blog_posts ORDER BY published_at DESC`)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
@@ -182,7 +182,7 @@ func (h *AdminContentHandler) GetBlogPost(w http.ResponseWriter, r *http.Request
 	var p postDetail
 	err := h.Pool.QueryRow(r.Context(),
 		`SELECT id, slug, title, excerpt, body_md, cover_url, author, published,
-		        to_char(published_at,'YYYY-MM-DD"T"HH24:MI:SSOF')
+		        to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.blog_posts WHERE id=$1`, id,
 	).Scan(&p.ID, &p.Slug, &p.Title, &p.Excerpt, &p.BodyMD, &p.CoverURL, &p.Author, &p.Published, &p.PublishedAt)
 	if err != nil {
@@ -337,7 +337,8 @@ func (h *AdminContentHandler) ListTeamGroups(w http.ResponseWriter, r *http.Requ
 func (h *AdminContentHandler) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT id, group_id, full_name, credentials, role, bio, photo_url,
-		        email, accepts_new, position, published
+		        email, accepts_new, position, published,
+		        office_locations, pricing_tier, network_status, specialties
 		 FROM bt.team_members ORDER BY position`)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
@@ -345,25 +346,36 @@ func (h *AdminContentHandler) ListTeamMembers(w http.ResponseWriter, r *http.Req
 	}
 	defer rows.Close()
 	type memberRow struct {
-		ID          int64   `json:"id"`
-		GroupID     *int64  `json:"group_id"`
-		FullName    string  `json:"full_name"`
-		Credentials *string `json:"credentials"`
-		Role        *string `json:"role"`
-		Bio         *string `json:"bio"`
-		PhotoURL    *string `json:"photo_url"`
-		Email       *string `json:"email"`
-		AcceptsNew  bool    `json:"accepts_new"`
-		Position    int     `json:"position"`
-		Published   bool    `json:"published"`
+		ID              int64    `json:"id"`
+		GroupID         *int64   `json:"group_id"`
+		FullName        string   `json:"full_name"`
+		Credentials     *string  `json:"credentials"`
+		Role            *string  `json:"role"`
+		Bio             *string  `json:"bio"`
+		PhotoURL        *string  `json:"photo_url"`
+		Email           *string  `json:"email"`
+		AcceptsNew      bool     `json:"accepts_new"`
+		Position        int      `json:"position"`
+		Published       bool     `json:"published"`
+		OfficeLocations []string `json:"office_locations"`
+		PricingTier     *string  `json:"pricing_tier"`
+		NetworkStatus   *string  `json:"network_status"`
+		Specialties     []string `json:"specialties"`
 	}
 	var members []memberRow
 	for rows.Next() {
 		var m memberRow
 		if err := rows.Scan(&m.ID, &m.GroupID, &m.FullName, &m.Credentials, &m.Role, &m.Bio,
-			&m.PhotoURL, &m.Email, &m.AcceptsNew, &m.Position, &m.Published); err != nil {
+			&m.PhotoURL, &m.Email, &m.AcceptsNew, &m.Position, &m.Published,
+			&m.OfficeLocations, &m.PricingTier, &m.NetworkStatus, &m.Specialties); err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
+		}
+		if m.OfficeLocations == nil {
+			m.OfficeLocations = []string{}
+		}
+		if m.Specialties == nil {
+			m.Specialties = []string{}
 		}
 		members = append(members, m)
 	}
@@ -375,27 +387,40 @@ func (h *AdminContentHandler) ListTeamMembers(w http.ResponseWriter, r *http.Req
 
 func (h *AdminContentHandler) CreateTeamMember(w http.ResponseWriter, r *http.Request) {
 	type body struct {
-		GroupID     *int64  `json:"group_id"`
-		FullName    string  `json:"full_name"`
-		Credentials *string `json:"credentials"`
-		Role        *string `json:"role"`
-		Bio         *string `json:"bio"`
-		PhotoURL    *string `json:"photo_url"`
-		Email       *string `json:"email"`
-		AcceptsNew  bool    `json:"accepts_new"`
-		Position    int     `json:"position"`
-		Published   bool    `json:"published"`
+		GroupID         *int64   `json:"group_id"`
+		FullName        string   `json:"full_name"`
+		Credentials     *string  `json:"credentials"`
+		Role            *string  `json:"role"`
+		Bio             *string  `json:"bio"`
+		PhotoURL        *string  `json:"photo_url"`
+		Email           *string  `json:"email"`
+		AcceptsNew      bool     `json:"accepts_new"`
+		Position        int      `json:"position"`
+		Published       bool     `json:"published"`
+		OfficeLocations []string `json:"office_locations"`
+		PricingTier     *string  `json:"pricing_tier"`
+		NetworkStatus   *string  `json:"network_status"`
+		Specialties     []string `json:"specialties"`
 	}
 	var b body
 	if err := httpx.ReadJSON(w, r, &b); err != nil {
 		httpx.WriteValidationError(w, "invalid JSON")
 		return
 	}
+	if b.OfficeLocations == nil {
+		b.OfficeLocations = []string{}
+	}
+	if b.Specialties == nil {
+		b.Specialties = []string{}
+	}
 	var id int64
 	err := h.Pool.QueryRow(r.Context(),
-		`INSERT INTO bt.team_members (group_id, full_name, credentials, role, bio, photo_url, email, accepts_new, position, published)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+		`INSERT INTO bt.team_members
+		        (group_id, full_name, credentials, role, bio, photo_url, email, accepts_new, position, published,
+		         office_locations, pricing_tier, network_status, specialties)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
 		b.GroupID, b.FullName, b.Credentials, b.Role, b.Bio, b.PhotoURL, b.Email, b.AcceptsNew, b.Position, b.Published,
+		b.OfficeLocations, b.PricingTier, b.NetworkStatus, b.Specialties,
 	).Scan(&id)
 	if err != nil {
 		slog.Error("admin team member create", "err", err)
@@ -408,27 +433,40 @@ func (h *AdminContentHandler) CreateTeamMember(w http.ResponseWriter, r *http.Re
 func (h *AdminContentHandler) UpdateTeamMember(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	type body struct {
-		GroupID     *int64  `json:"group_id"`
-		FullName    string  `json:"full_name"`
-		Credentials *string `json:"credentials"`
-		Role        *string `json:"role"`
-		Bio         *string `json:"bio"`
-		PhotoURL    *string `json:"photo_url"`
-		Email       *string `json:"email"`
-		AcceptsNew  bool    `json:"accepts_new"`
-		Position    int     `json:"position"`
-		Published   bool    `json:"published"`
+		GroupID         *int64   `json:"group_id"`
+		FullName        string   `json:"full_name"`
+		Credentials     *string  `json:"credentials"`
+		Role            *string  `json:"role"`
+		Bio             *string  `json:"bio"`
+		PhotoURL        *string  `json:"photo_url"`
+		Email           *string  `json:"email"`
+		AcceptsNew      bool     `json:"accepts_new"`
+		Position        int      `json:"position"`
+		Published       bool     `json:"published"`
+		OfficeLocations []string `json:"office_locations"`
+		PricingTier     *string  `json:"pricing_tier"`
+		NetworkStatus   *string  `json:"network_status"`
+		Specialties     []string `json:"specialties"`
 	}
 	var b body
 	if err := httpx.ReadJSON(w, r, &b); err != nil {
 		httpx.WriteValidationError(w, "invalid JSON")
 		return
 	}
+	if b.OfficeLocations == nil {
+		b.OfficeLocations = []string{}
+	}
+	if b.Specialties == nil {
+		b.Specialties = []string{}
+	}
 	tag, err := h.Pool.Exec(r.Context(),
 		`UPDATE bt.team_members SET group_id=$1, full_name=$2, credentials=$3, role=$4, bio=$5,
-		        photo_url=$6, email=$7, accepts_new=$8, position=$9, published=$10 WHERE id=$11`,
+		        photo_url=$6, email=$7, accepts_new=$8, position=$9, published=$10,
+		        office_locations=$11, pricing_tier=$12, network_status=$13, specialties=$14
+		 WHERE id=$15`,
 		b.GroupID, b.FullName, b.Credentials, b.Role, b.Bio,
-		b.PhotoURL, b.Email, b.AcceptsNew, b.Position, b.Published, id)
+		b.PhotoURL, b.Email, b.AcceptsNew, b.Position, b.Published,
+		b.OfficeLocations, b.PricingTier, b.NetworkStatus, b.Specialties, id)
 	if err != nil || tag.RowsAffected() == 0 {
 		httpx.WriteError(w, http.StatusNotFound, "not found")
 		return

@@ -58,21 +58,25 @@ const QUICK_REPLIES: { label: string; prompt: string }[] = [
   { label: "Talk to a human", prompt: "Can someone from your team call me back?" },
 ];
 
+// Synthetic message the widget sends to /chat/stream on first open. The
+// backend recognises it, swaps in the cached system-greet prompt, and
+// streams a varied warm opener back so the user sees the assistant's
+// first message generated live (not a hardcoded string).
+const GREET_MARKER = "__BT_GREET__";
+
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
-  const [msgs, setMsgs] = useState<Msg[]>([
-    { role: "assistant", content: "Hi — I'm the Brighter Tomorrow assistant. This chat is HIPAA-compliant and your data is secure. How can I help?" },
-  ]);
+  const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const greetedRef = useRef(false);
   const [muted, setMuted] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "connecting" | "active" | "error">("idle");
   const [promptIdx, setPromptIdx] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const initialMount = useRef(true);
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxVoiceRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -134,21 +138,27 @@ export default function ChatWidget() {
     return () => clearInterval(t);
   }, [open]);
 
-  // Play a soft two-note chime when a new assistant message arrives (skip first render).
+  // First-open: stream the assistant's greeting from the agent. Fires once
+  // per page-load — re-opening the panel preserves history instead of
+  // re-greeting. The system prompt is cached server-side, so this is fast
+  // and inexpensive.
   useEffect(() => {
-    if (initialMount.current) { initialMount.current = false; return; }
-    if (muted) return;
-    const last = msgs[msgs.length - 1];
-    if (!last || last.role !== "assistant") return;
-    void playChime(audioCtxRef);
-  }, [msgs, muted]);
+    if (!open || greetedRef.current) return;
+    greetedRef.current = true;
+    void send(GREET_MARKER);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   async function send(override?: string) {
     const text = (override ?? input).trim();
     if (!text || loading) return;
     if (override === undefined) setInput("");
-    const next: Msg[] = [...msgs, { role: "user", content: text }];
-    setMsgs(next);
+    // The greet marker is a synthetic prompt — never render it as a user
+    // bubble; the visitor never typed it. Everything else echoes normally.
+    const isGreet = text === GREET_MARKER;
+    if (!isGreet) {
+      setMsgs((prev) => [...prev, { role: "user", content: text }]);
+    }
     setLoading(true);
     const t0 = performance.now();
     let firstTokenMs: number | null = null;
@@ -277,6 +287,7 @@ export default function ChatWidget() {
       });
     } finally {
       setLoading(false);
+      if (!muted) void playChime(audioCtxRef);
     }
   }
 
@@ -510,7 +521,7 @@ export default function ChatWidget() {
             whileHover={{ scale: 1.06 }}
             whileTap={{ scale: 0.94 }}
             onClick={() => setOpen(true)}
-            className="fixed bottom-6 right-6 z-50 bg-brand text-white rounded-full w-14 h-14 shadow-glow ring-1 ring-brand-700/30 flex items-center justify-center hover:bg-brand-600 transition-colors"
+            className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 sm:bottom-6 sm:right-6 z-50 bg-brand text-white rounded-full w-14 h-14 shadow-glow ring-1 ring-brand-700/30 flex items-center justify-center hover:bg-brand-600 transition-colors"
             aria-label="Open chat"
           >
             <FiMessageCircle size={22} />
@@ -524,17 +535,23 @@ export default function ChatWidget() {
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-6 right-6 z-50 w-[380px] max-w-[calc(100vw-2rem)] h-[600px] max-h-[calc(100vh-3rem)] bg-white rounded-2xl shadow-card border border-surface-line flex flex-col overflow-hidden"
+            className="fixed inset-x-0 bottom-0 sm:inset-auto sm:bottom-6 sm:right-6 z-50 w-full sm:w-[380px] sm:max-w-[calc(100vw-2rem)] h-[100dvh] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] bg-white rounded-t-2xl sm:rounded-2xl shadow-card border border-surface-line flex flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]"
           >
-            <div className="bg-brand text-white px-4 py-3 flex items-center justify-between gap-3">
+            <div className="relative bg-brand text-white px-4 py-3 flex items-center justify-between gap-3 shrink-0">
+              {/* iOS-style grab handle — positioned relative to header so it
+                  doesn't drift if the panel's outer height changes. */}
+              <span
+                aria-hidden
+                className="sm:hidden absolute left-1/2 -translate-x-1/2 top-1.5 h-1 w-10 rounded-full bg-white/40"
+              />
               <div className="min-w-0">
                 <div className="font-display font-semibold truncate">Brighter Tomorrow</div>
                 <div className="text-xs opacity-80 truncate">Quick questions, real answers</div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-0.5 shrink-0">
                 <button
                   onClick={() => setMuted((m) => !m)}
-                  className="opacity-80 hover:opacity-100 transition shrink-0 p-1"
+                  className="opacity-80 hover:opacity-100 transition shrink-0 grid place-items-center w-11 h-11 -mr-1 rounded-full hover:bg-white/10"
                   aria-label={muted ? "Unmute" : "Mute"}
                   title={muted ? "Sound off" : "Sound on"}
                 >
@@ -542,7 +559,7 @@ export default function ChatWidget() {
                 </button>
                 <button
                   onClick={() => setOpen(false)}
-                  className="opacity-80 hover:opacity-100 transition shrink-0 p-1"
+                  className="opacity-80 hover:opacity-100 transition shrink-0 grid place-items-center w-11 h-11 -mr-2 rounded-full hover:bg-white/10"
                   aria-label="Close chat"
                   title="Close chat"
                 >
@@ -633,7 +650,7 @@ export default function ChatWidget() {
                   onClick={() => void toggleVoice()}
                   title={voiceActive ? "End voice" : "Talk via voice"}
                   aria-label={voiceActive ? "End voice" : "Start voice"}
-                  className={`p-2.5 rounded-full transition shrink-0 ${
+                  className={`grid place-items-center w-11 h-11 rounded-full transition shrink-0 ${
                     voiceActive
                       ? "bg-red-500 text-white animate-pulse"
                       : voiceStatus === "connecting"
@@ -646,7 +663,7 @@ export default function ChatWidget() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="bg-brand hover:bg-brand-600 text-white p-2.5 rounded-full disabled:opacity-50 transition shrink-0"
+                  className="grid place-items-center w-11 h-11 bg-brand hover:bg-brand-600 text-white rounded-full disabled:opacity-50 transition shrink-0"
                   aria-label="Send"
                 >
                   <FiSend size={16} />
@@ -683,7 +700,7 @@ function Bubble({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-[1.6] tracking-[-0.005em] break-words [overflow-wrap:anywhere] shadow-sm ${
+        className={`max-w-[88%] sm:max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-[1.6] tracking-[-0.005em] break-words [overflow-wrap:anywhere] shadow-sm ${
           isUser
             ? "bg-brand text-white rounded-br-sm font-medium"
             : "bg-white text-ink rounded-bl-sm border border-surface-line"

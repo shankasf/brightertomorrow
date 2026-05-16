@@ -41,6 +41,8 @@ html { scroll-behavior: smooth; }
 html, body {
   background: var(--cream-alt);   /* #F2F2F2 — matches live --secondary */
   color: var(--ink);
+  overflow-x: hidden;             /* fallback */
+  overflow-x: clip;               /* preserves position:sticky on the header (hidden makes body a scroll container, clip does not) */
 }
 
 body {
@@ -238,8 +240,12 @@ h6 {
 .section { padding: 6rem 0; }
 @media (max-width: 768px) { .section { padding: 4rem 0; } }
 .section-tight { padding: 4rem 0; }
-.container-x { max-width: 1340px; margin: 0 auto; padding: 0 1.5rem; }
-.container-narrow { max-width: 880px; margin: 0 auto; padding: 0 1.5rem; }
+.container-x { max-width: 1340px; margin: 0 auto; padding: 0 1rem; }
+.container-narrow { max-width: 880px; margin: 0 auto; padding: 0 1rem; }
+@media (min-width: 640px) {
+  .container-x      { padding: 0 1.5rem; }
+  .container-narrow { padding: 0 1.5rem; }
+}
 
 /* Cards */
 .card-soft {
@@ -315,3 +321,98 @@ h6 {
 @media (prefers-reduced-motion: reduce) {
   .marquee-track { animation: none; }
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   Admin tables — refined tabular layout
+   No horizontal scrolling at any width. Low-priority columns are
+   marked with .bt-col-hide-{sm,md,lg,xl} so the table fits naturally
+   on phones, tablets, and laptops without overflow.
+   ───────────────────────────────────────────────────────────────── */
+.bt-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.875rem;
+  font-feature-settings: "cv11", "ss01", "kern";
+  table-layout: auto;
+}
+
+.bt-table thead {
+  background: linear-gradient(180deg, #faedd5 0%, #f4ead0 100%);
+}
+.bt-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0.85rem 0.9rem;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+  background: linear-gradient(180deg, #faedd5 0%, #f4ead0 100%);
+  border-bottom: 1.5px solid #e5d6b7;
+  white-space: nowrap;
+}
+.bt-table thead th:first-child { padding-left: 1.25rem; }
+.bt-table thead th:last-child  { padding-right: 1.25rem; }
+
+.bt-table tbody tr {
+  transition: background-color 140ms ease;
+}
+.bt-table tbody tr:nth-child(even) { background: rgba(244, 244, 244, 0.5); }
+.bt-table tbody tr:hover { background: rgba(225, 184, 120, 0.11); }
+.bt-table tbody tr + tr td { border-top: 1px solid #f1ece2; }
+
+.bt-table tbody td {
+  padding: 0.95rem 0.9rem;
+  vertical-align: middle;
+  color: rgba(25, 39, 53, 0.88);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+.bt-table tbody td:first-child {
+  padding-left: 1.25rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.bt-table tbody td:last-child { padding-right: 1.25rem; }
+
+/* Numeric / mono cells get tabular figures */
+.bt-table tbody td.num,
+.bt-table tbody td .num { font-variant-numeric: tabular-nums; }
+
+/* Column visibility — hide low-priority columns on narrower screens.
+   Apply matching classes to both the <th> and every <td> in that column. */
+.bt-col-hide-sm,
+.bt-col-hide-md,
+.bt-col-hide-lg,
+.bt-col-hide-xl { display: none; }
+@media (min-width: 640px)  { .bt-col-hide-sm { display: table-cell; } }
+@media (min-width: 768px)  { .bt-col-hide-md { display: table-cell; } }
+@media (min-width: 1024px) { .bt-col-hide-lg { display: table-cell; } }
+@media (min-width: 1280px) { .bt-col-hide-xl { display: table-cell; } }
+
+/* Tighter rhythm at phone widths so the visible columns still feel comfortable */
+@media (max-width: 639.98px) {
+  .bt-table { font-size: 0.825rem; }
+  .bt-table thead th { padding: 0.625rem 0.75rem; font-size: 0.65rem; letter-spacing: 0.08em; }
+  .bt-table thead th:first-child { padding-left: 0.95rem; }
+  .bt-table thead th:last-child  { padding-right: 0.95rem; }
+  .bt-table tbody td { padding: 0.75rem 0.75rem; font-size: 0.835rem; }
+  .bt-table tbody td:first-child { padding-left: 0.95rem; }
+  .bt-table tbody td:last-child  { padding-right: 0.95rem; }
+}
+
+/* Compact scrollbars when something else does scroll (e.g. log console) */
+.bt-scroll-x {
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(225, 184, 120, 0.45) transparent;
+}
+.bt-scroll-x::-webkit-scrollbar { height: 8px; width: 8px; }
+.bt-scroll-x::-webkit-scrollbar-thumb { background: rgba(225, 184, 120, 0.45); border-radius: 999px; }
+.bt-scroll-x::-webkit-scrollbar-track { background: transparent; }

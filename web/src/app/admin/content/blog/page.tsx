@@ -6,6 +6,7 @@ import {
   PageHeader, PageWrap, Card, Button, Input, Textarea, Field,
   Pill, EmptyState, Checkbox,
 } from '@/components/admin/ui';
+import { LuPencil } from 'react-icons/lu';
 
 type Post = { id: number; slug: string; title: string; excerpt: string | null; cover_url: string | null; author: string | null; published: boolean; published_at: string };
 type PostForm = { slug: string; title: string; excerpt: string; body_md: string; cover_url: string; author: string; published: boolean };
@@ -109,7 +110,7 @@ export default function BlogPage() {
             title="No blog posts yet"
             description="Publish your first post to start building the blog."
             action={<Button onClick={startNew}>＋ New post</Button>}
-            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" /></svg>}
+            icon={<LuPencil width={22} height={22} strokeWidth={1.8} />}
           />
         ) : (
           <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.025 } } }} className="space-y-2">
@@ -125,7 +126,7 @@ export default function BlogPage() {
                   <img src={p.cover_url} alt="" className="h-16 w-16 shrink-0 rounded-xl object-cover ring-1 ring-inset ring-slate-200" />
                 ) : (
                   <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-50 to-cyan-50 text-indigo-400 ring-1 ring-inset ring-slate-200">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" /></svg>
+                    <LuPencil width={20} height={20} strokeWidth={1.8} />
                   </div>
                 )}
                 <div className="min-w-0 flex-1">

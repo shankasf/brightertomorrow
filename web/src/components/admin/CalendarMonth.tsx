@@ -87,7 +87,7 @@ export default function CalendarMonth({
         {WEEKDAYS.map((w) => (
           <div
             key={w}
-            className="px-2 text-center text-[10.5px] font-semibold uppercase tracking-[0.14em] text-ink-soft"
+            className="px-2 py-1 text-center text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft"
           >
             {w}
           </div>
@@ -109,7 +109,7 @@ export default function CalendarMonth({
               ? Array.from({ length: 42 }).map((_, i) => (
                   <div
                     key={i}
-                    className="min-h-[92px] animate-pulse rounded-lg border border-[#EDE6D9] bg-cream-alt/40"
+                    className="min-h-[116px] animate-pulse rounded-lg border border-[#EDE6D9] bg-cream-alt/40"
                   />
                 ))
               : grid.map((cell) => {

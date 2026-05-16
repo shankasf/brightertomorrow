@@ -30,9 +30,9 @@ func (h *AdminNewsletterHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT id, email,
-		        to_char(created_at,             'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(unsubscribed_at,         'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(deletion_requested_at,   'YYYY-MM-DD"T"HH24:MI:SSOF')
+		        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(unsubscribed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(deletion_requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.newsletter_subscribers
 		 ORDER BY created_at DESC
 		 LIMIT $1 OFFSET $2`, limit, offset)

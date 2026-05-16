@@ -294,3 +294,24 @@ func CanonicalCoverageStatus(raw string, eligible bool) string {
 	}
 	return "unverified"
 }
+
+// IntakeBucketFromCanonical maps the admin-facing canonical status (used on
+// InsuranceCheckRecord) back to the intake-side bucket used on IntakeRecord
+// and GSI1PK (STATUS#<bucket>). Without this mapping, an intake row that
+// reuses a same-session insurance check ends up with coverageStatus="verified"
+// — a value that ListIntakePointers never queries, so the appointment is
+// invisible on /admin/appointments. Inverse of CanonicalCoverageStatus.
+func IntakeBucketFromCanonical(canonical string, eligible bool) string {
+	if eligible {
+		return phi.StatusEligible
+	}
+	switch strings.ToLower(strings.TrimSpace(canonical)) {
+	case "error", "verification_error":
+		return phi.StatusVerificationError
+	case "verified", "eligible":
+		// Edge: eligible=false but canonical says verified — treat as needs_review.
+		return phi.StatusNeedsReview
+	default:
+		return phi.StatusNeedsReview
+	}
+}

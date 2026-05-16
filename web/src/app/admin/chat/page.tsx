@@ -7,6 +7,8 @@ import {
   PageHeader, PageWrap, TableCard, THead, TH, TD,
   Pill, Pagination, EmptyState, SkeletonRows,
 } from '@/components/admin/ui';
+import { formatPT } from '@/lib/time-pt';
+import { LuMessageCircle } from 'react-icons/lu';
 
 // Canonical source enum across every admin table — bt.chat_sessions,
 // bt.intake_pointers, bt.callback_requests, bt.insurance_checks all speak
@@ -49,8 +51,7 @@ function sourceTone(s: RawSource): 'amber' | 'violet' | 'cyan' {
 }
 
 function fmtDateTime(iso: string | null): string {
-  if (!iso) return '—';
-  return iso.slice(0, 16).replace('T', ' ');
+  return formatPT(iso);
 }
 
 function durationBetween(a: string, b: string | null): string | null {
@@ -110,11 +111,7 @@ export default function AdminChatPage() {
           <EmptyState
             title="No chat sessions yet"
             description="Sessions started from the website chat widget will appear here."
-            icon={
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M21 12a8 8 0 0 1-11.4 7.2L3 21l1.8-6.6A8 8 0 1 1 21 12z" />
-              </svg>
-            }
+            icon={<LuMessageCircle width={22} height={22} strokeWidth={1.8} />}
           />
         ) : (
           <>
@@ -122,11 +119,11 @@ export default function AdminChatPage() {
               <THead>
                 <tr>
                   <TH>Session</TH>
-                  <TH>Source</TH>
-                  <TH>Started</TH>
-                  <TH>Ended</TH>
-                  <TH>Duration</TH>
-                  <TH className="text-center">Messages</TH>
+                  <TH className="bt-col-hide-sm">Source</TH>
+                  <TH className="bt-col-hide-md">Started</TH>
+                  <TH className="bt-col-hide-xl">Ended</TH>
+                  <TH className="bt-col-hide-lg">Duration</TH>
+                  <TH className="bt-col-hide-sm">Msgs</TH>
                   <TH>Status</TH>
                 </tr>
               </THead>
@@ -153,30 +150,30 @@ export default function AdminChatPage() {
                       }}
                       role="link"
                       tabIndex={0}
-                      className="group cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50/70 focus:bg-slate-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-300"
+                      className="group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/50"
                     >
                       <TD>
-                        <span className="inline-flex items-center gap-2 font-mono text-xs text-indigo-600 group-hover:text-indigo-700">
-                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 ring-1 ring-inset ring-slate-200 group-hover:bg-indigo-50 group-hover:ring-indigo-200">
+                        <span className="inline-flex items-center gap-2 font-mono text-[13px] font-bold text-ink group-hover:text-brand-700">
+                          <span className="rounded-md bg-cream px-2 py-0.5 ring-1 ring-inset ring-[#EDE6D9] group-hover:bg-brand-50 group-hover:ring-brand-200">
                             {s.id.slice(0, 8)}
                           </span>
-                          <span className="text-slate-400">…</span>
+                          <span className="text-ink-faint">…</span>
                         </span>
                       </TD>
-                      <TD>
+                      <TD className="bt-col-hide-sm">
                         <Pill tone={sourceTone(s.source)} dot>
                           {sourceLabel(s.source)}
                         </Pill>
                         {s.source === 'voice-phone' && s.external_ref ? (
-                          <div className="mt-1 font-mono text-[10px] text-slate-400" title={`Twilio CallSid: ${s.external_ref}`}>
+                          <div className="mt-1 font-mono text-[10px] text-ink-faint" title={`Twilio CallSid: ${s.external_ref}`}>
                             {s.external_ref.slice(0, 10)}…
                           </div>
                         ) : null}
                       </TD>
-                      <TD className="text-xs text-slate-500">{fmtDateTime(s.started_at)}</TD>
-                      <TD className="text-xs text-slate-500">{fmtDateTime(s.ended_at)}</TD>
-                      <TD className="text-xs tabular-nums text-slate-600">{dur ?? <span className="text-slate-300">—</span>}</TD>
-                      <TD className="text-center font-medium tabular-nums text-slate-700">{s.message_count}</TD>
+                      <TD className="bt-col-hide-md whitespace-nowrap text-[12.5px] text-ink-soft">{fmtDateTime(s.started_at)}</TD>
+                      <TD className="bt-col-hide-xl whitespace-nowrap text-[12.5px] text-ink-soft">{fmtDateTime(s.ended_at)}</TD>
+                      <TD className="bt-col-hide-lg tabular-nums">{dur ?? <span className="text-ink-faint">—</span>}</TD>
+                      <TD className="bt-col-hide-sm tabular-nums font-bold text-ink">{s.message_count}</TD>
                       <TD>
                         {s.purged_at ? (
                           <Pill tone="slate">Anonymized</Pill>

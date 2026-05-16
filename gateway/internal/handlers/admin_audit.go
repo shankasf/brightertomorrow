@@ -212,7 +212,7 @@ func (h *AdminAuditHandler) PurgeQueue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.Pool.Query(r.Context(),
-		`SELECT source, row_id, to_char(retain_until,'YYYY-MM-DD"T"HH24:MI:SSOF')
+		`SELECT source, row_id, to_char(retain_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.phi_due_for_purge ORDER BY retain_until`)
 	if err != nil {
 		slog.Error("admin purge queue", "err", err)

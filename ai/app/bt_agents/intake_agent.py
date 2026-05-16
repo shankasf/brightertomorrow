@@ -13,7 +13,7 @@ import os
 
 from agents import Agent
 
-from ..prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, STYLE_TEXT
+from ..prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
 from ..tools import INTAKE_TOOLS
 
 
@@ -22,6 +22,7 @@ def build_intake_agent() -> Agent:
         f"{PRACTICE_CONTEXT}\n\n"
         f"{STYLE_TEXT}\n\n"
         f"{CRISIS_RULE}\n\n"
+        f"{SCOPE_RULE}\n\n"
         f"{ANTI_DEFLECTION_RULE}\n\n"
         "Your one job is to record a callback request — someone from the "
         "practice will phone the visitor back. You do NOT collect "
@@ -49,6 +50,10 @@ def build_intake_agent() -> Agent:
         "    • Phone: <phone>\n"
         "    • Reason: <reason>\n"
         "    Did I get that right?\n\n"
+        "If the visitor specifies a callback time, repeat it qualified "
+        "with 'Pacific Time'. Brighter Tomorrow operates only on Pacific "
+        "Time — do NOT speak a bare time like '2 PM tomorrow' without "
+        "'Pacific Time' qualifier.\n\n"
         "On any affirmative, call `request_intake_callback` immediately. "
         "Do NOT generate any visitor-facing text on the submission turn — "
         "the tool's success returns control and you can warmly confirm "

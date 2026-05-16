@@ -6,6 +6,8 @@ import {
   PageHeader, PageWrap, TableCard, THead, TH, TD,
   EmptyState, SkeletonRows, Button, ErrorBanner,
 } from '@/components/admin/ui';
+import { formatPTDate } from '@/lib/time-pt';
+import { LuCheck } from 'react-icons/lu';
 
 type PurgeItem = { source: string; row_id: string; retain_until: string };
 
@@ -53,9 +55,7 @@ export default function PurgeQueuePage() {
           <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div className="rounded-2xl border border-emerald-200/70 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/30 p-8 text-center">
               <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 ring-1 ring-inset ring-emerald-200">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="m5 13 4 4L19 7" />
-                </svg>
+                <LuCheck width={22} height={22} strokeWidth={2.5} />
               </div>
               <h3 className="text-base font-semibold text-emerald-900">All clear</h3>
               <p className="mt-1 text-sm text-emerald-700/80">No records require purging — every retention period is within compliance.</p>
@@ -66,8 +66,8 @@ export default function PurgeQueuePage() {
             <THead>
               <tr>
                 <TH>Source</TH>
-                <TH>Row ID</TH>
-                <TH>Retain until</TH>
+                <TH className="bt-col-hide-md">Row ID</TH>
+                <TH className="bt-col-hide-sm">Retain until</TH>
                 <TH className="text-right">Action</TH>
               </tr>
             </THead>
@@ -78,14 +78,13 @@ export default function PurgeQueuePage() {
                   <motion.tr
                     key={key}
                     variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
-                    className="border-t border-slate-100 hover:bg-slate-50/70"
                   >
-                    <TD className="font-mono text-xs text-slate-700">{item.source}</TD>
-                    <TD className="font-mono text-xs text-slate-600">{item.row_id}</TD>
-                    <TD>
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-rose-700">
+                    <TD className="font-mono text-[13px]">{item.source}</TD>
+                    <TD className="bt-col-hide-md font-mono text-[12.5px] text-ink-soft">{item.row_id}</TD>
+                    <TD className="bt-col-hide-sm">
+                      <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-rose-700">
                         <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-                        {item.retain_until.slice(0, 10)}
+                        {formatPTDate(item.retain_until)}
                       </span>
                     </TD>
                     <TD className="text-right">

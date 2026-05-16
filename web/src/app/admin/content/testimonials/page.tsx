@@ -6,6 +6,7 @@ import {
   PageHeader, PageWrap, Card, Button, Input, Textarea, Field,
   Pill, EmptyState, Checkbox,
 } from '@/components/admin/ui';
+import { LuStar, LuQuote } from 'react-icons/lu';
 
 type Testimonial = { id: number; author: string; quote: string; rating: number | null; position: number; published: boolean };
 type TestimonialForm = Omit<Testimonial, 'id'>;
@@ -15,9 +16,7 @@ function Stars({ n, max = 5 }: { n: number; max?: number }) {
   return (
     <span className="inline-flex items-center gap-0.5">
       {Array.from({ length: max }).map((_, i) => (
-        <svg key={i} width="12" height="12" viewBox="0 0 24 24" className={i < n ? 'fill-amber-400 text-amber-400' : 'fill-slate-200 text-slate-200'}>
-          <polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.5 12 2" />
-        </svg>
+        <LuStar key={i} width={12} height={12} className={i < n ? 'fill-amber-400 text-amber-400' : 'fill-slate-200 text-slate-200'} />
       ))}
     </span>
   );
@@ -107,7 +106,7 @@ export default function TestimonialsPage() {
             title="No testimonials yet"
             description="Add a client quote to display on the public site."
             action={<Button onClick={startNew}>＋ Add testimonial</Button>}
-            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.76-2.02-2-2H4c-1.24 0-2 .77-2 2v8c0 1.24.76 2 2 2h2c0 4-3 5-3 5zM15 21c3 0 7-1 7-8V5c0-1.25-.76-2.02-2-2h-4c-1.24 0-2 .77-2 2v8c0 1.24.76 2 2 2h2c0 4-3 5-3 5z" /></svg>}
+            icon={<LuQuote width={22} height={22} strokeWidth={1.8} />}
           />
         ) : (
           <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.03 } } }} className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -118,9 +117,7 @@ export default function TestimonialsPage() {
                 whileHover={{ y: -2 }}
                 className="group relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_8px_20px_rgba(15,23,42,0.05)]"
               >
-                <svg className="absolute right-3 top-3 h-8 w-8 text-slate-100" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.76-2.02-2-2H4c-1.24 0-2 .77-2 2v8c0 1.24.76 2 2 2h2c0 4-3 5-3 5zM15 21c3 0 7-1 7-8V5c0-1.25-.76-2.02-2-2h-4c-1.24 0-2 .77-2 2v8c0 1.24.76 2 2 2h2c0 4-3 5-3 5z" />
-                </svg>
+                <LuQuote className="absolute right-3 top-3 h-8 w-8 fill-slate-100 text-slate-100" />
                 <div className="relative">
                   <p className="text-sm leading-relaxed text-slate-700">"{t.quote}"</p>
                   <div className="mt-4 flex items-center justify-between gap-2">

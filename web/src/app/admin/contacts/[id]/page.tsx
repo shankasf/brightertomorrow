@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
 import { Card, ErrorBanner, PageWrap, PHIBadge, Pill } from '@/components/admin/ui';
+import { formatPT, formatPTDate } from '@/lib/time-pt';
+import { LuChevronLeft, LuMessageSquare } from 'react-icons/lu';
 
 type ContactDetail = {
   id: number; full_name: string; email: string; phone: string | null;
@@ -27,9 +29,7 @@ export default function ContactDetailPage() {
   return (
       <PageWrap max="max-w-3xl">
         <Link href="/admin/contacts" className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-indigo-600">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m15 18-6-6 6-6" />
-          </svg>
+          <LuChevronLeft width={14} height={14} strokeWidth={2} />
           Back to contacts
         </Link>
 
@@ -66,8 +66,8 @@ export default function ContactDetailPage() {
                   ['Phone', contact.phone ?? '—'],
                   ['Subject', contact.subject ?? '—'],
                   ['Source', contact.source ?? '—'],
-                  ['Received', contact.created_at.slice(0, 16).replace('T', ' ')],
-                  ['Retain until', contact.retain_until ? contact.retain_until.slice(0, 10) : '—'],
+                  ['Received', formatPT(contact.created_at)],
+                  ['Retain until', formatPTDate(contact.retain_until)],
                 ] as [string, string][]
               ).map(([label, value]) => (
                 <div key={label} className="flex items-center px-5 py-3">
@@ -78,7 +78,7 @@ export default function ContactDetailPage() {
               <div className="flex items-center px-5 py-3">
                 <span className="w-36 shrink-0 text-[11px] font-medium uppercase tracking-wider text-slate-500">Status</span>
                 {contact.purged_at ? (
-                  <Pill tone="slate">Anonymized · {contact.purged_at.slice(0, 10)}</Pill>
+                  <Pill tone="slate">Anonymized · {formatPTDate(contact.purged_at)}</Pill>
                 ) : (
                   <Pill tone="green" dot>Active</Pill>
                 )}
@@ -87,9 +87,7 @@ export default function ContactDetailPage() {
 
             <Card className="mt-4">
               <div className="mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
+                <LuMessageSquare width={13} height={13} strokeWidth={2} />
                 Message
               </div>
               <div className="whitespace-pre-wrap rounded-xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white p-4 text-sm leading-relaxed text-slate-800">

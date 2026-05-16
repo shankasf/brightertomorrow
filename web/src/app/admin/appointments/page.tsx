@@ -6,6 +6,8 @@ import {
   PageHeader, PageWrap, TableCard, THead, TH, TD,
   Pill, Pagination, EmptyState, Input, SkeletonRows, Button, ErrorBanner,
 } from '@/components/admin/ui';
+import { formatPT } from '@/lib/time-pt';
+import { LuCalendar } from 'react-icons/lu';
 
 type SortKey =
   | 'first_name'
@@ -45,16 +47,7 @@ type ListResponse = { items: Appointment[]; total: number; page: number; limit: 
 const PAGE_SIZE = 25;
 
 function fmtDateTime(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso;
-  const d = new Date(t);
-  return (
-    d.toLocaleString('en-US', {
-      timeZone: 'America/Los_Angeles',
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }) + ' PT'
-  );
+  return formatPT(iso);
 }
 
 function sourceTone(src: string): 'amber' | 'violet' | 'cyan' | 'blue' | 'slate' {
@@ -213,60 +206,54 @@ export default function AdminAppointmentsPage() {
         <EmptyState
           title={from || to || q || source !== 'all' ? 'No appointment requests match these filters' : 'No appointment requests yet'}
           description="Submissions from the chatbot and website intake form will appear here."
-          icon={
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <rect x="3" y="4" width="18" height="17" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
-            </svg>
-          }
+          icon={<LuCalendar width={22} height={22} strokeWidth={1.8} />}
         />
       ) : (
         <>
           <TableCard>
             <THead>
               <tr>
-                <SortableTH label="First Name" col="first_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('first_name')} />
-                <SortableTH label="Last Name" col="last_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('last_name')} />
-                <SortableTH label="Date of Birth" col="date_of_birth" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('date_of_birth')} />
-                <SortableTH label="Phone Number" col="phone" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('phone')} />
-                <SortableTH label="Email Address" col="email" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('email')} />
-                <SortableTH label="Home Address" col="home_address" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('home_address')} />
-                <SortableTH label="Sex" col="sex" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('sex')} />
-                <SortableTH label="Insurance Name" col="insurance_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_name')} />
-                <SortableTH label="Insurance ID Number" col="insurance_member_id" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_member_id')} />
+                <SortableTH label="Name" col="last_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('last_name')} />
+                <SortableTH label="Phone" col="phone" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('phone')} />
+                <SortableTH label="DOB" col="date_of_birth" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('date_of_birth')} className="bt-col-hide-sm" />
+                <SortableTH label="Email" col="email" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('email')} className="bt-col-hide-md" />
+                <SortableTH label="Address" col="home_address" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('home_address')} className="bt-col-hide-xl" />
+                <SortableTH label="Sex" col="sex" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('sex')} className="bt-col-hide-xl" />
+                <SortableTH label="Insurance" col="insurance_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_name')} className="bt-col-hide-lg" />
+                <SortableTH label="Member ID" col="insurance_member_id" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_member_id')} className="bt-col-hide-xl" />
                 <TH>Source</TH>
-                <SortableTH label="Received" col="created_at" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('created_at')} />
+                <SortableTH label="Received" col="created_at" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('created_at')} className="bt-col-hide-md" />
               </tr>
             </THead>
             <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.015 } } }}>
-              {sortedItems.map((a) => (
+              {sortedItems.map((a) => {
+                const fullName = [a.first_name, a.last_name].filter(Boolean).join(' ') || '—';
+                return (
                 <motion.tr
                   key={a.id}
                   variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
-                  className="border-t border-slate-100 transition-colors hover:bg-slate-50/70"
                 >
-                  <TD className="font-medium text-ink">{a.first_name || '—'}</TD>
-                  <TD className="font-medium text-ink">{a.last_name || '—'}</TD>
-                  <TD className="text-slate-600 tabular-nums">{a.date_of_birth || '—'}</TD>
-                  <TD className="text-slate-600 tabular-nums">{a.phone || '—'}</TD>
-                  <TD className="text-slate-600">{a.email || '—'}</TD>
-                  <TD className="max-w-[220px] truncate text-slate-600">
-                    <span title={a.home_address}>{a.home_address || '—'}</span>
-                  </TD>
-                  <TD className="text-slate-600">{a.sex || '—'}</TD>
-                  <TD className="text-slate-600">
+                  <TD>{fullName}</TD>
+                  <TD className="tabular-nums whitespace-nowrap">{a.phone || '—'}</TD>
+                  <TD className="bt-col-hide-sm tabular-nums whitespace-nowrap">{a.date_of_birth || '—'}</TD>
+                  <TD className="bt-col-hide-md break-all">{a.email || '—'}</TD>
+                  <TD className="bt-col-hide-xl max-w-[260px] truncate" title={a.home_address}>{a.home_address || '—'}</TD>
+                  <TD className="bt-col-hide-xl">{a.sex || '—'}</TD>
+                  <TD className="bt-col-hide-lg">
                     {a.insurance_name || (a.payment_method === 'self_pay' ? <Pill tone="slate">Self-pay</Pill> : '—')}
                   </TD>
-                  <TD className="font-mono text-xs tabular-nums text-slate-600">
+                  <TD className="bt-col-hide-xl font-mono text-[12.5px] tabular-nums">
                     {a.insurance_member_id || '—'}
                   </TD>
                   <TD>
                     <Pill tone={sourceTone(a.source)} dot>{a.source_label}</Pill>
                   </TD>
-                  <TD className="text-xs text-slate-500">
-                    <span title={a.created_at}>{fmtDateTime(a.created_at)}</span>
+                  <TD className="bt-col-hide-md whitespace-nowrap text-[12.5px] text-ink-soft" title={a.created_at}>
+                    {fmtDateTime(a.created_at)}
                   </TD>
                 </motion.tr>
-              ))}
+                );
+              })}
             </motion.tbody>
           </TableCard>
           <Pagination page={page} total={data!.total} pageSize={PAGE_SIZE} onChange={setPage} />
@@ -277,26 +264,27 @@ export default function AdminAppointmentsPage() {
 }
 
 function SortableTH({
-  label, col, sortKey, sortDir, onClick,
+  label, col, sortKey, sortDir, onClick, className,
 }: {
   label: string;
   col: SortKey;
   sortKey: SortKey;
   sortDir: SortDir;
   onClick: () => void;
+  className?: string;
 }) {
   const active = col === sortKey;
   const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅';
   return (
-    <TH>
+    <TH className={className}>
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex items-center gap-1 hover:text-ink"
+        className="inline-flex items-center gap-1 transition-colors hover:text-brand-700"
         aria-label={`Sort by ${label}`}
       >
         {label}
-        <span className={active ? 'text-brand' : 'text-slate-300'}>{arrow}</span>
+        <span className={active ? 'text-brand-700' : 'text-ink-faint'}>{arrow}</span>
       </button>
     </TH>
   );

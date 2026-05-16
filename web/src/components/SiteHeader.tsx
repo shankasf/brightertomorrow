@@ -17,6 +17,9 @@ const OFFICE_2 = "6955 N Durango Dr. Unit 1004 Las Vegas, Nevada 89149";
 const UTILITY_TAGLINE =
   "In-person & telehealth therapy for individuals, couples & families — evenings & weekends at both locations.";
 
+const AI_PHONE_DISPLAY = "(725) 465-2385";
+const AI_PHONE_TEL = "+17254652385";
+
 // Items that should render as a single link, never as a dropdown.
 // /team renders one mixed grid now, so its sub-team children are redundant.
 const FLAT_HREFS = new Set<string>(["/team"]);
@@ -73,16 +76,37 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
                 {UTILITY_TAGLINE}
               </p>
 
-              {/* Phone + socials on right */}
-              <div className="flex items-center gap-4 shrink-0">
-                {settings.primary_phone && (
-                  <a
-                    href={`tel:${settings.primary_phone}`}
-                    className="inline-flex items-center gap-1.5 text-white hover:text-brand transition tabular-nums font-medium"
+              {/* Phone + socials on right — AI 24/7 line is the headline */}
+              <div className="flex items-center gap-3 shrink-0">
+                <a
+                  href={`tel:${AI_PHONE_TEL}`}
+                  aria-label={`Call our AI booking assistant at ${AI_PHONE_DISPLAY}, available 24/7`}
+                  className="group inline-flex items-center gap-2 text-white hover:text-[#E1B878] transition tabular-nums font-semibold"
+                >
+                  <span
+                    aria-hidden
+                    className="inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-[0.16em] px-1.5 py-[3px]"
+                    style={{ backgroundColor: "#E1B878", color: "#66202A", borderRadius: "6px 0 6px 6px" }}
                   >
-                    <FiPhone size={13} className="text-brand" />
-                    {settings.primary_phone}
-                  </a>
+                    <span className="inline-block w-1 h-1 rounded-full bg-[#66202A] animate-pulse" />
+                    AI&nbsp;&middot;&nbsp;24/7
+                  </span>
+                  <FiPhone size={13} className="text-[#E1B878]" />
+                  {AI_PHONE_DISPLAY}
+                </a>
+                {settings.primary_phone && (
+                  <>
+                    <span aria-hidden className="hidden xl:inline-block w-px h-4 bg-white/25" />
+                    <a
+                      href={`tel:${settings.primary_phone}`}
+                      aria-label={`Speak with our team at ${settings.primary_phone}, Monday through Friday 9am to 5pm`}
+                      className="hidden xl:inline-flex items-center gap-1.5 text-white/80 hover:text-white transition tabular-nums text-[12.5px]"
+                      title="Speak with our team — Mon–Fri 9 AM–5 PM"
+                    >
+                      <FiPhone size={11} className="text-white/55" />
+                      {settings.primary_phone}
+                    </a>
+                  </>
                 )}
                 <span aria-hidden className="w-px h-4 bg-white/25" />
                 {settings.social.facebook && (
@@ -214,12 +238,36 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
                 >
                   Get Scheduled <FiArrowRight size={14} />
                 </Link>
+                <a
+                  href={`tel:${AI_PHONE_TEL}`}
+                  aria-label={`Call our AI booking assistant at ${AI_PHONE_DISPLAY}, available 24/7`}
+                  className="w-full inline-flex justify-center items-center gap-2.5 text-white font-semibold text-[14px] px-4 py-3.5 transition tabular-nums"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #66202A 0%, #4d1820 100%)",
+                    borderRadius: "20px 0 20px 20px",
+                  }}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <span
+                    aria-hidden
+                    className="inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-[0.16em] px-1.5 py-[3px]"
+                    style={{ backgroundColor: "#E1B878", color: "#66202A", borderRadius: "5px 0 5px 5px" }}
+                  >
+                    <span className="inline-block w-1 h-1 rounded-full bg-[#66202A] animate-pulse" />
+                    AI&nbsp;24/7
+                  </span>
+                  <FiPhone size={14} /> {AI_PHONE_DISPLAY}
+                </a>
                 {settings.primary_phone && (
                   <a
                     href={`tel:${settings.primary_phone}`}
-                    className="w-full inline-flex justify-center items-center gap-2 border border-ink/15 text-ink font-semibold text-[14px] px-4 py-3.5 rounded-full hover:border-ink/40 transition"
+                    aria-label={`Speak with our team at ${settings.primary_phone}, Monday through Friday 9am to 5pm`}
+                    className="w-full inline-flex justify-center items-center gap-2 border border-ink/15 text-ink font-medium text-[13px] px-4 py-3 rounded-full hover:border-ink/40 transition tabular-nums"
                   >
-                    <FiPhone size={14} /> {settings.primary_phone}
+                    <FiPhone size={13} className="text-ink/55" />
+                    <span>{settings.primary_phone}</span>
+                    <span className="text-ink/45 text-[11.5px]">&middot; Mon&ndash;Fri 9&ndash;5</span>
                   </a>
                 )}
               </div>

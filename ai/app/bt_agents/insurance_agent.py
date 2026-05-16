@@ -22,7 +22,7 @@ import os
 
 from agents import Agent, handoff
 
-from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, STYLE_TEXT
+from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
 from ..tools import verify_coverage, list_payers
 
 
@@ -34,6 +34,7 @@ def build_insurance_agent(booking_handoff: Agent | None = None) -> Agent:
         f"{PRACTICE_CONTEXT}\n\n"
         f"{STYLE_TEXT}\n\n"
         f"{CRISIS_RULE}\n\n"
+        f"{SCOPE_RULE}\n\n"
         "Your job is COVERAGE-ONLY verification via CLAIM.MD. Triage "
         "routes visitors here when they ask 'do you take my insurance?', "
         "'is <plan> in network?', 'what's my copay?', etc. Visitors who "
@@ -100,7 +101,14 @@ def build_insurance_agent(booking_handoff: Agent | None = None) -> Agent:
         "    everything at once and the insurance company was "
         "    already given, you don't need to render the picker — "
         "    skip the marker.\n"
-        "  • **Member ID** — 'What's the member ID on your card?'\n\n"
+        "  • **Member ID** — 'What's the member ID on your card?'\n"
+        "    MEMBER ID — never concatenate partial member-ID fragments "
+        "    across multiple visitor turns into a single ID. If the "
+        "    visitor splits the ID across messages, ask: 'Could you paste "
+        "    the whole member ID in one message?' Read back the complete "
+        "    value once, get an explicit confirmation, and only then call "
+        "    `verify_coverage`. Stitching fragments from different turns "
+        "    is a HIPAA risk (wrong-patient verification).\n\n"
 
         "# Run the check\n"
         "As soon as you have all five values, IMMEDIATELY call "

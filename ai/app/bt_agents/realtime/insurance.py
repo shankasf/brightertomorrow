@@ -15,8 +15,10 @@ from ...prompts import (
     ANTI_DEFLECTION_RULE,
     CRISIS_RULE,
     PRACTICE_CONTEXT,
+    SCOPE_RULE,
     STYLE_VOICE,
     VOICE_CONFIRMATION_RULE,
+    VOICE_PACING_RULE,
 )
 from ...tools import VOICE_TOOLS, list_payers, verify_coverage
 
@@ -39,8 +41,10 @@ def build_insurance_agent(booking_handoff: RealtimeAgent | None = None) -> Realt
             f"{PRACTICE_CONTEXT}\n\n"
             f"{STYLE_VOICE}\n\n"
             f"{CRISIS_RULE}\n\n"
+            f"{SCOPE_RULE}\n\n"
             f"{ANTI_DEFLECTION_RULE}\n\n"
             f"{VOICE_CONFIRMATION_RULE}\n\n"
+            f"{VOICE_PACING_RULE}\n\n"
             "You verify insurance coverage via CLAIM.MD. Your scope "
             "is COVERAGE-ONLY — callers asking 'do you take my "
             "insurance', 'is my plan in network', 'what's my copay'. "
@@ -54,6 +58,12 @@ def build_insurance_agent(booking_handoff: RealtimeAgent | None = None) -> Realt
             "  3) date of birth\n"
             "  4) insurance company\n"
             "  5) member ID\n\n"
+            "MEMBER ID — NEVER concatenate partial member-ID fragments across multiple caller turns "
+            "into a single ID. If the caller spells fragments across turns, discard and say: "
+            "'Let's start the member ID fresh — could you spell the whole thing, one character at a time?' "
+            "Require NATO phonetic spelling ('K as in Kilo, M as in Mike') for any letter. "
+            "Read back letter-by-letter with NATO and require an explicit yes before accepting. "
+            "Do NOT guess letters that sound similar (B/D/E/P/V).\n\n"
             "Opening turn ONLY: list the five things and offer the "
             "caller a choice — 'I need five quick things to verify "
             "your coverage: first name, last name, date of birth, "

@@ -53,7 +53,7 @@ export default function NewsletterForm({ variant = "light" }: { variant?: Varian
         <button
           type="submit"
           disabled={state === "loading"}
-          className="relative shrink-0 inline-flex items-center justify-center h-10 px-4 rounded-[16px_0_16px_16px] bg-brand text-ink text-[13px] font-semibold uppercase tracking-[0.12em] hover:bg-ink hover:text-cream transition shadow-[0_8px_22px_-10px_rgba(25,39,53,0.4)]"
+          className="relative shrink-0 inline-flex items-center justify-center min-h-[44px] h-11 px-4 rounded-[16px_0_16px_16px] bg-brand text-ink text-[13px] font-semibold uppercase tracking-[0.12em] hover:bg-ink hover:text-cream transition shadow-[0_8px_22px_-10px_rgba(25,39,53,0.4)]"
           aria-label={state === "ok" ? "Subscribed" : "Subscribe"}
         >
           {state === "ok" ? (
@@ -97,7 +97,7 @@ export default function NewsletterForm({ variant = "light" }: { variant?: Varian
       <button
         type="submit"
         disabled={state === "loading"}
-        className="relative shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full bg-brand text-white hover:bg-brand-400 disabled:opacity-60 transition"
+        className="relative shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-full bg-brand text-white hover:bg-brand-400 disabled:opacity-60 transition"
         aria-label={state === "ok" ? "Subscribed" : "Subscribe"}
       >
         {state === "ok" ? (

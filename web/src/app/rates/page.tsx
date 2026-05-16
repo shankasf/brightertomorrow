@@ -1,174 +1,300 @@
-"use client";
-
 import Link from "next/link";
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { FiCheck, FiArrowUpRight, FiPlus, FiMinus } from "react-icons/fi";
+import Reveal from "@/components/Reveal";
+import { FiArrowUpRight, FiPhone, FiMail, FiHeart } from "react-icons/fi";
 
-const tiers = [
-  {
-    name: "Standard",
-    price: "$140",
-    note: "Per 50-min session",
-    features: ["Licensed clinician", "In-person or telehealth", "Most insurance accepted"],
-    highlight: false,
-  },
-  {
-    name: "Sliding Scale",
-    price: "$70+",
-    note: "Income-based",
-    features: ["Reduced fee", "Limited slots available", "Apply through intake"],
-    highlight: true,
-  },
-  {
-    name: "Student Therapist",
-    price: "$50",
-    note: "Supervised graduate clinician",
-    features: ["Great accessibility", "Weekly supervision", "Same care standards"],
-    highlight: false,
-  },
+export const metadata = {
+  title: "Fees & Insurance — Brighter Tomorrow Therapy",
+  description:
+    "Cash rates, accepted insurance carriers, out-of-network reimbursement, and your Good Faith Estimate rights at Brighter Tomorrow Therapy.",
+};
+
+type Row = { label: string; price: string; sub?: string };
+
+const INDIVIDUAL: Row[] = [
+  { label: "Licensed Therapist", price: "$150", sub: "50-minute session" },
+  { label: "Pre-Licensed Master's Level", price: "$125", sub: "50-minute session" },
+  { label: "Master's Level Student", price: "$25 – $60", sub: "50-minute session, pay-what-you-can" },
 ];
 
-const RATE_FAQS = [
-  {
-    q: "Do you accept insurance?",
-    a: "We accept most major Nevada insurance plans. Bring your card to the intake call and we'll verify benefits before your first session.",
-  },
-  {
-    q: "How does the sliding scale work?",
-    a: "Sliding-scale fees are based on household income. Apply through our intake form — we have a limited number of reduced-fee slots reserved for clients who need them.",
-  },
-  {
-    q: "What if I can't afford weekly sessions?",
-    a: "We can adjust cadence (biweekly is common) or pair you with a student therapist for the most affordable option without sacrificing care quality.",
-  },
-  {
-    q: "Do you charge for cancellations?",
-    a: "Cancellations within 24 hours of your appointment are charged the full session fee. We try to be flexible — just communicate with your therapist.",
-  },
+const COUPLES: Row[] = [
+  { label: "Licensed Therapist", price: "$180", sub: "50-minute session" },
+  { label: "Licensed Therapist", price: "$260", sub: "75-minute session" },
+  { label: "Pre-Licensed Master's Level", price: "$150", sub: "50-minute session" },
+  { label: "Pre-Licensed Master's Level", price: "$225", sub: "75-minute session" },
 ];
+
+const COACHING: Row[] = [
+  { label: "Life Coaching", price: "$75", sub: "50-minute session" },
+  { label: "6-Session Package", price: "$440", sub: "Valid 3 months" },
+];
+
+const CARRIERS = [
+  "Anthem Blue Cross Blue Shield",
+  "Cigna",
+  "United Healthcare",
+  "Ambetter / Silver Summit Health Plans",
+  "Health Plan of Nevada",
+  "Aetna",
+];
+
+function RateTable({ rows }: { rows: Row[] }) {
+  return (
+    <ul className="divide-y divide-surface-line border-y border-surface-line">
+      {rows.map((r, i) => (
+        <li key={i} className="flex items-baseline justify-between gap-6 py-4">
+          <div className="min-w-0">
+            <div className="font-display text-base sm:text-lg text-ink leading-snug">
+              {r.label}
+            </div>
+            {r.sub && (
+              <div className="text-sm text-ink-soft mt-1 leading-relaxed">{r.sub}</div>
+            )}
+          </div>
+          <div className="shrink-0 font-display text-xl sm:text-2xl text-brand-700 tabular">
+            {r.price}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default function RatesPage() {
-  const [openIdx, setOpenIdx] = useState<number | null>(null);
-
   return (
     <>
       {/* Page header */}
       <section className="bg-cream-alt relative overflow-hidden">
         <div aria-hidden className="absolute inset-0 bg-grid opacity-[0.06]" />
         <div className="container-narrow relative py-20 sm:py-28 lg:py-32 text-center">
-          <span className="eyebrow center">Rates</span>
+          <span className="eyebrow center">Fees &amp; Insurance</span>
           <h1 className="mt-6 display text-5xl sm:text-6xl lg:text-7xl text-ink">
-            Affordable <span className="italic-accent">therapy.</span>
+            Transparent <span className="italic-accent">rates.</span>
           </h1>
           <svg aria-hidden viewBox="0 0 200 8" className="mx-auto mt-7 w-36 h-2 text-brand">
             <path d="M2 5 Q 50 0 100 4 T 198 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
           <p className="mt-7 text-ink-muted text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto">
-            Transparent pricing — and several ways to lower the cost.
+            Cash-pay rates, in-network insurance, and out-of-network reimbursement — all in one place.
           </p>
         </div>
       </section>
 
-      {/* Pricing — 3 cream cards */}
+      {/* Affordable-therapy banner */}
+      <section className="bg-white border-b border-surface-line">
+        <div className="container-x py-5">
+          <Link
+            href="/affordable-therapy"
+            className="group flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-3xl border border-brand-200 bg-brand-50 px-5 sm:px-7 py-4 hover:border-brand-700/40 hover:bg-brand-100/60 transition"
+          >
+            <div className="flex items-start sm:items-center gap-4">
+              <span className="shrink-0 w-10 h-10 rounded-full bg-brand/15 text-brand-700 grid place-items-center">
+                <FiHeart />
+              </span>
+              <div>
+                <div className="eyebrow-bare text-brand-700 text-[11px]">Need a lower-cost option?</div>
+                <div className="font-display text-ink text-base sm:text-lg mt-1">
+                  Learn about our affordable therapy program — sessions from $25.
+                </div>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-brand-700 sm:shrink-0">
+              Explore
+              <FiArrowUpRight className="transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-0.5" />
+            </span>
+          </Link>
+        </div>
+      </section>
+
+      {/* Section 1 — Cash Rates */}
       <section className="section bg-white">
         <div className="container-x">
-          <div className="grid md:grid-cols-3 gap-6 lg:gap-8">
-            {tiers.map((t, i) => (
-              <motion.div
-                key={t.name}
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-50px" }}
-                transition={{ delay: i * 0.06 }}
-                className={`relative h-full flex flex-col rounded-4xl border p-8 lg:p-10 transition-all duration-500 ${
-                  t.highlight
-                    ? "bg-cream-deep border-brand-300 shadow-card"
-                    : "bg-cream border-surface-line shadow-soft hover:shadow-card"
-                }`}
-              >
-                {t.highlight && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-brand text-white text-[11px] font-semibold uppercase tracking-[0.18em]">
-                    Most flexible
-                  </span>
-                )}
-                <div className="font-display text-xl text-ink">{t.name}</div>
-                <div className="mt-4 pt-4 border-t border-surface-line">
-                  <div className="flex items-baseline gap-2">
-                    <span className="display text-6xl text-brand-700">{t.price}</span>
-                  </div>
-                  <div className="text-sm text-ink-muted mt-2">{t.note}</div>
+          <Reveal>
+            <div className="max-w-2xl">
+              <span className="eyebrow">Cash rates</span>
+              <h2 className="mt-5 display text-4xl sm:text-5xl text-ink leading-[1.05]">
+                Pay-per-session <span className="italic-accent">pricing.</span>
+              </h2>
+              <p className="mt-5 text-ink-muted leading-relaxed">
+                Straightforward rates for clients paying out-of-pocket or using HSA/FSA. No surprises.
+              </p>
+            </div>
+          </Reveal>
+
+          <div className="mt-12 grid lg:grid-cols-3 gap-6 lg:gap-8">
+            <Reveal>
+              <article className="h-full rounded-4xl border border-surface-line bg-cream p-7 lg:p-8 shadow-soft">
+                <header className="flex items-baseline justify-between gap-4 pb-5 border-b border-surface-line">
+                  <h3 className="font-display text-xl text-ink">Individual Therapy</h3>
+                  <span className="text-xs uppercase tracking-[0.18em] text-brand-700 font-semibold">50 min</span>
+                </header>
+                <div className="mt-5">
+                  <RateTable rows={INDIVIDUAL} />
                 </div>
-                <ul className="mt-7 space-y-3 text-sm text-ink flex-1">
-                  {t.features.map((f) => (
-                    <li key={f} className="flex gap-3">
-                      <span className="mt-0.5 w-5 h-5 rounded-full bg-sage-100 text-sage-700 grid place-items-center shrink-0">
-                        <FiCheck size={12} />
-                      </span>
-                      <span className="leading-relaxed">{f}</span>
+                <div className="mt-6 rounded-2xl bg-white border border-surface-line p-5">
+                  <div className="eyebrow-bare text-brand-700 text-[11px]">Package options</div>
+                  <ul className="mt-3 space-y-2 text-sm text-ink leading-relaxed">
+                    <li className="flex justify-between gap-4">
+                      <span>5 sessions</span>
+                      <span className="font-display text-brand-700 tabular">$150</span>
                     </li>
-                  ))}
-                </ul>
-                <Link
-                  href="/contact"
-                  className={`mt-8 ${t.highlight ? "btn-primary" : "btn-ghost"} w-full justify-center`}
-                >
-                  Get started <FiArrowUpRight />
-                </Link>
-              </motion.div>
-            ))}
+                    <li className="flex justify-between gap-4">
+                      <span>10 sessions</span>
+                      <span className="font-display text-brand-700 tabular">$250</span>
+                    </li>
+                  </ul>
+                  <div className="mt-3 text-xs text-ink-soft">Valid 6 months from purchase.</div>
+                </div>
+              </article>
+            </Reveal>
+
+            <Reveal delay={0.05}>
+              <article className="h-full rounded-4xl border border-surface-line bg-cream p-7 lg:p-8 shadow-soft">
+                <header className="flex items-baseline justify-between gap-4 pb-5 border-b border-surface-line">
+                  <h3 className="font-display text-xl text-ink">Couples Therapy</h3>
+                  <span className="text-xs uppercase tracking-[0.18em] text-brand-700 font-semibold">50 / 75 min</span>
+                </header>
+                <div className="mt-5">
+                  <RateTable rows={COUPLES} />
+                </div>
+              </article>
+            </Reveal>
+
+            <Reveal delay={0.1}>
+              <article className="h-full rounded-4xl border border-surface-line bg-cream p-7 lg:p-8 shadow-soft">
+                <header className="flex items-baseline justify-between gap-4 pb-5 border-b border-surface-line">
+                  <h3 className="font-display text-xl text-ink">Life Coaching</h3>
+                  <span className="text-xs uppercase tracking-[0.18em] text-brand-700 font-semibold">50 min</span>
+                </header>
+                <div className="mt-5">
+                  <RateTable rows={COACHING} />
+                </div>
+                <div className="mt-6 text-xs text-ink-soft leading-relaxed">
+                  Package valid 3 months from purchase.
+                </div>
+              </article>
+            </Reveal>
           </div>
 
-          <p className="mt-10 text-center text-sm text-ink-soft max-w-xl mx-auto leading-relaxed">
-            Rates listed are private-pay. We&apos;ll verify your insurance benefits during intake — most plans cover the bulk of session costs.
+          <p className="mt-10 text-sm text-ink-soft leading-relaxed">
+            Payment methods include HSA and FSA cards.
           </p>
         </div>
       </section>
 
-      {/* FAQ */}
+      {/* Section 2 — In-Network Insurance */}
+      <section className="section bg-cream-alt">
+        <div className="container-x">
+          <Reveal>
+            <div className="max-w-2xl">
+              <span className="eyebrow">Insurance Networks</span>
+              <h2 className="mt-5 display text-4xl sm:text-5xl text-ink leading-[1.05]">
+                We&apos;re in-network <span className="italic-accent">with major carriers.</span>
+              </h2>
+              <p className="mt-5 text-ink-muted leading-relaxed">
+                Bring your insurance card to intake and we&apos;ll verify your benefits before your first session.
+              </p>
+            </div>
+          </Reveal>
+
+          <ul className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {CARRIERS.map((name, i) => (
+              <Reveal key={name} delay={i * 0.03}>
+                <li className="h-full flex items-center gap-4 bg-white rounded-3xl border border-surface-line px-5 py-5 shadow-soft hover:border-brand-700/40 transition">
+                  <span aria-hidden className="shrink-0 w-10 h-10 rounded-full bg-brand/15 text-brand-700 grid place-items-center font-display text-sm tabular">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="font-display text-ink text-base sm:text-lg leading-snug">
+                    {name}
+                  </span>
+                </li>
+              </Reveal>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* Section 3 — Out-of-Network */}
+      <section className="section bg-white">
+        <div className="container-x grid lg:grid-cols-12 gap-10 lg:gap-16 items-start">
+          <Reveal className="lg:col-span-5">
+            <span className="eyebrow">Out-of-Network Coverage</span>
+            <h2 className="mt-5 display text-4xl sm:text-5xl text-ink leading-[1.05]">
+              Don&apos;t see your <span className="italic-accent">carrier?</span>
+            </h2>
+          </Reveal>
+          <Reveal delay={0.05} className="lg:col-span-7">
+            <p className="text-ink-muted text-lg leading-relaxed">
+              Most insurance companies cover a significant portion of the cost for &ldquo;out of network&rdquo; behavioral health services.
+              We provide monthly invoices for clients to submit for reimbursement.
+            </p>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* Section 4 — Good Faith Estimate */}
       <section className="section bg-cream">
         <div className="container-narrow">
-          <div className="text-center mb-12">
-            <span className="eyebrow center">Common questions</span>
-            <h2 className="mt-5 display text-4xl sm:text-5xl text-ink">
-              About our <span className="italic-accent">rates.</span>
-            </h2>
-          </div>
+          <Reveal>
+            <div className="rounded-4xl bg-white border border-surface-line p-8 sm:p-10 lg:p-12 shadow-soft">
+              <span className="eyebrow">Your rights</span>
+              <h2 className="mt-5 display text-3xl sm:text-4xl text-ink leading-[1.1]">
+                Your Right to a <span className="italic-accent">Good Faith Estimate.</span>
+              </h2>
+              <p className="mt-6 text-ink-muted text-lg leading-relaxed">
+                Patients may request cost estimates and dispute bills exceeding estimates by $400 or more.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <a
+                  href="https://www.cms.gov/nosurprises"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-ghost"
+                >
+                  www.cms.gov/nosurprises <FiArrowUpRight />
+                </a>
+                <a href="tel:1-800-985-3059" className="btn-ghost">
+                  <FiPhone /> 1-800-985-3059
+                </a>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
 
-          <div className="divide-y divide-surface-line border-y border-surface-line">
-            {RATE_FAQS.map((f, i) => {
-              const open = openIdx === i;
-              return (
-                <div key={i}>
-                  <button
-                    onClick={() => setOpenIdx(open ? null : i)}
-                    className="w-full flex items-center justify-between gap-6 text-left py-6 group"
-                  >
-                    <span className="font-display text-lg sm:text-xl text-ink group-hover:text-brand-700 transition">
-                      {f.q}
-                    </span>
-                    <span className="shrink-0 w-9 h-9 rounded-full border border-surface-line grid place-items-center text-brand-700 group-hover:border-brand-700 transition">
-                      {open ? <FiMinus size={15} /> : <FiPlus size={15} />}
-                    </span>
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {open && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                        className="overflow-hidden"
-                      >
-                        <div className="pb-6 pr-12 text-ink-muted leading-[1.75] text-base">
-                          {f.a}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
+      {/* Section 5 — Contact strip */}
+      <section className="bg-ink text-white">
+        <div className="container-x py-14 sm:py-16 grid lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+          <div className="lg:col-span-7">
+            <span className="eyebrow">Questions?</span>
+            <h2 className="mt-4 display text-3xl sm:text-4xl text-white leading-[1.1]">
+              We&apos;ll verify your <span className="italic-accent">benefits.</span>
+            </h2>
+            <p className="mt-4 text-white/80 leading-relaxed max-w-xl">
+              Call or email and we&apos;ll walk you through what your plan covers — before you commit to anything.
+            </p>
+          </div>
+          <div className="lg:col-span-5 flex flex-col sm:flex-row lg:flex-col gap-4 lg:items-end">
+            <a
+              href="tel:725-238-6990"
+              className="group inline-flex items-center gap-3 text-white hover:text-brand transition"
+            >
+              <span className="w-10 h-10 rounded-full bg-white/10 grid place-items-center group-hover:bg-brand group-hover:text-ink transition">
+                <FiPhone />
+              </span>
+              <span className="font-display text-lg sm:text-xl">725-238-6990</span>
+            </a>
+            <a
+              href="mailto:admin@brightertomorrowtherapy.com"
+              className="group inline-flex items-center gap-3 text-white hover:text-brand transition break-all"
+            >
+              <span className="w-10 h-10 rounded-full bg-white/10 grid place-items-center group-hover:bg-brand group-hover:text-ink transition shrink-0">
+                <FiMail />
+              </span>
+              <span className="font-display text-base sm:text-lg">admin@brightertomorrowtherapy.com</span>
+            </a>
+            <Link href="/contact" className="btn-primary mt-2 lg:mt-4">
+              Book an appointment <FiArrowUpRight />
+            </Link>
           </div>
         </div>
       </section>

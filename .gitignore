@@ -40,6 +40,10 @@ gateway/*.test
 .DS_Store
 Thumbs.db
 
+# Local log dumps
+BT.TXT
+*.log
+
 # CDK
 infra/node_modules/
 infra/cdk.out/

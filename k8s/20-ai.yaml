@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: ai
-          image: bt-ai:latest
+          image: bt-ai:prod-31c3ab2-1778955684
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
           env:
@@ -48,6 +48,8 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: TWILIO_API_KEY_SID, optional: true } }
             - name: TWILIO_API_KEY_SECRET
               valueFrom: { secretKeyRef: { name: bt-config, key: TWILIO_API_KEY_SECRET, optional: true } }
+            - name: TWILIO_ECHO_GATE_RMS
+              value: "1700"
           readinessProbe:
             httpGet: { path: /health, port: 8001 }
             periodSeconds: 5

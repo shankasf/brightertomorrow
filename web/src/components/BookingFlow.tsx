@@ -327,7 +327,7 @@ export default function BookingFlow() {
   // -------- Render --------
   return (
     <div
-      className="bg-cream-alt p-7 sm:p-10 lg:p-12 shadow-soft"
+      className="bg-cream-alt p-5 sm:p-10 lg:p-12 shadow-soft"
       style={{ borderRadius: "28px 0 28px 28px" }}
     >
       {/* Header */}
@@ -440,7 +440,7 @@ export default function BookingFlow() {
             type="button"
             onClick={goBack}
             disabled={stepsFor(form.paymentMethod).indexOf(step) <= 0 || coverageLoading}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft hover:text-ink disabled:opacity-30 transition px-3 py-2"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft hover:text-ink disabled:opacity-30 transition px-3 py-3 min-h-[44px]"
           >
             <FiArrowLeft size={14} /> Back
           </button>

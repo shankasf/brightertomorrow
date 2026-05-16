@@ -292,7 +292,7 @@ export default function CalendarClient() {
 
   // -------------------- render --------------------
   return (
-    <PageWrap max="max-w-7xl">
+    <PageWrap max="max-w-[1480px]">
       <PageHeader
         title="Calendar"
         subtitle={

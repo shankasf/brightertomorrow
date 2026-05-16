@@ -6,6 +6,7 @@ import {
   PageHeader, PageWrap, Card, Button, Input, Field,
   Pill, EmptyState, Checkbox,
 } from '@/components/admin/ui';
+import { LuMapPin } from 'react-icons/lu';
 
 type Location = { id: number; name: string; address1: string | null; address2: string | null; city: string | null; state: string | null; postal_code: string | null; phone: string | null; is_telehealth: boolean; position: number };
 type LocationForm = Omit<Location, 'id'>;
@@ -89,7 +90,7 @@ export default function LocationsPage() {
             title="No locations yet"
             description="Add your first office or telehealth listing."
             action={<Button onClick={startNew}>＋ Add location</Button>}
-            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>}
+            icon={<LuMapPin width={22} height={22} strokeWidth={1.8} />}
           />
         ) : (
           <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.025 } } }} className="space-y-2">
@@ -102,9 +103,7 @@ export default function LocationsPage() {
               >
                 <div className="flex min-w-0 flex-1 items-start gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-50 to-cyan-50 text-indigo-600 ring-1 ring-inset ring-slate-200">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1 1 18 0z" /><circle cx="12" cy="10" r="3" />
-                    </svg>
+                    <LuMapPin width={18} height={18} strokeWidth={1.8} />
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">

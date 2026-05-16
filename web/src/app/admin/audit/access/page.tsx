@@ -13,6 +13,7 @@ import {
   ErrorBanner,
   Card,
 } from '@/components/admin/ui';
+import { LuShieldCheck } from 'react-icons/lu';
 
 type ActionDetails = {
   method?: string;
@@ -187,6 +188,7 @@ function prettifyEmail(email: string): string {
 }
 
 const DATE_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
   weekday: 'long',
   month: 'short',
   day: 'numeric',
@@ -208,7 +210,7 @@ function formatLongDateTime(iso: string): string {
   const hour = get('hour');
   const minute = get('minute');
   const period = get('dayPeriod').toLowerCase().replace(/\s|\./g, ''); // "PM" → "pm"
-  return `${weekday} ${month} ${day} ${year} at ${hour}:${minute}${period}`;
+  return `${weekday} ${month} ${day} ${year} at ${hour}:${minute}${period} PT`;
 }
 
 function isPrivateIp(ip: string | null | undefined): boolean {
@@ -249,19 +251,7 @@ const KIND_STYLES: Record<ActionKind, { dot: string; pill: string; label: string
 function ComplianceBadge() {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-cream px-2.5 py-1 text-[11px] font-medium text-ink/70 ring-1 ring-inset ring-[#D9D9D9]">
-      <svg
-        width="11"
-        height="11"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-      >
-        <path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6z" />
-      </svg>
+      <LuShieldCheck width={11} height={11} strokeWidth={2.5} aria-hidden />
       Compliance · append-only
     </span>
   );
@@ -443,7 +433,7 @@ export default function AdminActivityLogPage() {
     setPage(1);
   }, [from, to, debouncedAdminQ, actionFilter]);
 
-  const [data, setData] = useState<{ data: Entry[]; total: number } | null>(null);
+  const [data, setData] = useState<{ items: Entry[]; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -461,7 +451,7 @@ export default function AdminActivityLogPage() {
     adminFetch(`/admin/audit/access?${qs.toString()}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`Request failed (${r.status})`);
-        return r.json() as Promise<{ data: Entry[]; total: number }>;
+        return r.json() as Promise<{ items: Entry[]; total: number }>;
       })
       .then((res) => {
         if (cancelled) return;
@@ -479,7 +469,7 @@ export default function AdminActivityLogPage() {
   // Client-side fallback filtering — backend may not support every param yet.
   const visible = useMemo(() => {
     if (!data) return [];
-    let rows = data.data;
+    let rows = data.items;
     if (debouncedAdminQ) {
       const needle = debouncedAdminQ.toLowerCase();
       rows = rows.filter(

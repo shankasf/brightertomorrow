@@ -6,6 +6,8 @@ import {
   PageHeader, PageWrap, TableCard, THead, TH, TD,
   Pill, Pagination, EmptyState, Input, SkeletonRows, Button,
 } from '@/components/admin/ui';
+import { formatPTDate } from '@/lib/time-pt';
+import { LuSearch, LuNewspaper } from 'react-icons/lu';
 
 type Subscriber = {
   id: number; email: string; created_at: string;
@@ -88,9 +90,7 @@ export default function AdminNewsletterPage() {
           subtitle="Manage opt-ins, unsubscribes, and right-to-erasure requests (Nevada NRS 603A)."
           action={
             <div className="relative">
-              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
-              </svg>
+              <LuSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={2} />
               <Input placeholder="Search email…" value={query} onChange={(e) => setQuery(e.target.value)} className="!w-60 !pl-9" />
             </div>
           }
@@ -109,11 +109,7 @@ export default function AdminNewsletterPage() {
           <EmptyState
             title={query || filter !== 'all' ? 'No matches' : 'No subscribers yet'}
             description={query || filter !== 'all' ? 'Try a different search or filter.' : 'New newsletter signups will appear here.'}
-            icon={
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M4 4h12a2 2 0 0 1 2 2v14H4z" /><path d="M18 8h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2" />
-              </svg>
-            }
+            icon={<LuNewspaper width={22} height={22} strokeWidth={1.8} />}
           />
         ) : (
           <>
@@ -121,9 +117,9 @@ export default function AdminNewsletterPage() {
               <THead>
                 <tr>
                   <TH>Email</TH>
-                  <TH>Subscribed</TH>
+                  <TH className="bt-col-hide-md">Subscribed</TH>
                   <TH>Status</TH>
-                  <TH className="text-right">Actions</TH>
+                  <TH className="bt-col-hide-sm text-right">Actions</TH>
                 </tr>
               </THead>
               <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.012 } } }}>
@@ -131,10 +127,12 @@ export default function AdminNewsletterPage() {
                   <motion.tr
                     key={s.id}
                     variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
-                    className="group border-t border-slate-100 transition-colors hover:bg-slate-50/70"
+                    className="group"
                   >
-                    <TD className="font-medium text-slate-900">{s.email}</TD>
-                    <TD className="text-xs tabular-nums text-slate-500">{s.created_at.slice(0, 10)}</TD>
+                    <TD className="break-all">{s.email}</TD>
+                    <TD className="bt-col-hide-md tabular-nums whitespace-nowrap text-[12.5px] text-ink-soft">
+                      {formatPTDate(s.created_at)}
+                    </TD>
                     <TD>
                       {s.deletion_requested_at ? (
                         <Pill tone="red" dot>Deletion requested</Pill>
@@ -144,15 +142,15 @@ export default function AdminNewsletterPage() {
                         <Pill tone="green" dot>Active</Pill>
                       )}
                     </TD>
-                    <TD className="text-right">
-                      <div className="flex justify-end gap-1.5 opacity-70 transition-opacity group-hover:opacity-100">
+                    <TD className="bt-col-hide-sm text-right">
+                      <div className="flex flex-wrap justify-end gap-1.5 opacity-80 transition-opacity group-hover:opacity-100">
                         {!s.unsubscribed_at && !s.deletion_requested_at && (
                           <Button variant="ghost" size="sm" disabled={busy[s.id]} onClick={() => unsubscribe(s.id)}>
                             Unsubscribe
                           </Button>
                         )}
                         {!s.deletion_requested_at && (
-                          <Button variant="ghost" size="sm" disabled={busy[s.id]} onClick={() => requestDeletion(s.id)} className="!text-rose-600 hover:!bg-rose-50">
+                          <Button variant="ghost" size="sm" disabled={busy[s.id]} onClick={() => requestDeletion(s.id)} className="!text-rose-700 hover:!bg-rose-50">
                             Request deletion
                           </Button>
                         )}

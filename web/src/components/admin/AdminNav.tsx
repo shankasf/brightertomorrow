@@ -3,106 +3,50 @@ import type { ReactElement } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
+import {
+  LuLayoutDashboard,
+  LuMail,
+  LuMessageCircle,
+  LuNewspaper,
+  LuShieldCheck,
+  LuUser,
+  LuTrash2,
+  LuSettings,
+  LuCircleHelp,
+  LuPencil,
+  LuUsers,
+  LuStethoscope,
+  LuStar,
+  LuMapPin,
+  LuCalendar,
+  LuLink,
+  LuChartLine,
+  LuLogOut,
+  LuX,
+} from 'react-icons/lu';
 import { AdminUser } from './useAdminAuth';
 
 type Icon = (props: { className?: string }) => ReactElement;
 
 const I = {
-  dashboard: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" />
-      <rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" />
-    </svg>
-  ),
-  mail: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" />
-    </svg>
-  ),
-  chat: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12a8 8 0 0 1-11.4 7.2L3 21l1.8-6.6A8 8 0 1 1 21 12z" />
-    </svg>
-  ),
-  newsletter: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 4h12a2 2 0 0 1 2 2v14H4z" /><path d="M18 8h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2" /><path d="M8 8h6M8 12h6M8 16h4" />
-    </svg>
-  ),
-  shield: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6z" /><path d="m9 12 2 2 4-4" />
-    </svg>
-  ),
-  user: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
-    </svg>
-  ),
-  trash: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14" />
-    </svg>
-  ),
-  settings: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09c0 .67.4 1.27 1 1.51a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.24.6.84 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.67 0-1.27.4-1.51 1z" />
-    </svg>
-  ),
-  question: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 1 1 5.8 1c-.5 1.6-2.9 1.7-2.9 4M12 17h.01" />
-    </svg>
-  ),
-  pencil: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" />
-    </svg>
-  ),
-  users: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  ),
-  stethoscope: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .2.3" />
-      <path d="M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4" /><circle cx="20" cy="10" r="2" />
-    </svg>
-  ),
-  star: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.5 12 2" />
-    </svg>
-  ),
-  pin: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1 1 18 0z" /><circle cx="12" cy="10" r="3" />
-    </svg>
-  ),
-  calendar: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="17" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
-    </svg>
-  ),
-  link: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07L11 5" />
-      <path d="M14 11a5 5 0 0 0-7.07 0l-3 3A5 5 0 1 0 11 21l1.5-1.5" />
-    </svg>
-  ),
-  chart: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 3v18h18" /><path d="M7 14l3-3 4 4 6-6" />
-    </svg>
-  ),
-  logout: ({ className = '' }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" />
-    </svg>
-  ),
+  dashboard: ({ className = '' }) => <LuLayoutDashboard className={className} strokeWidth={1.7} />,
+  mail: ({ className = '' }) => <LuMail className={className} strokeWidth={1.7} />,
+  chat: ({ className = '' }) => <LuMessageCircle className={className} strokeWidth={1.7} />,
+  newsletter: ({ className = '' }) => <LuNewspaper className={className} strokeWidth={1.7} />,
+  shield: ({ className = '' }) => <LuShieldCheck className={className} strokeWidth={1.7} />,
+  user: ({ className = '' }) => <LuUser className={className} strokeWidth={1.7} />,
+  trash: ({ className = '' }) => <LuTrash2 className={className} strokeWidth={1.7} />,
+  settings: ({ className = '' }) => <LuSettings className={className} strokeWidth={1.7} />,
+  question: ({ className = '' }) => <LuCircleHelp className={className} strokeWidth={1.7} />,
+  pencil: ({ className = '' }) => <LuPencil className={className} strokeWidth={1.7} />,
+  users: ({ className = '' }) => <LuUsers className={className} strokeWidth={1.7} />,
+  stethoscope: ({ className = '' }) => <LuStethoscope className={className} strokeWidth={1.7} />,
+  star: ({ className = '' }) => <LuStar className={className} strokeWidth={1.7} />,
+  pin: ({ className = '' }) => <LuMapPin className={className} strokeWidth={1.7} />,
+  calendar: ({ className = '' }) => <LuCalendar className={className} strokeWidth={1.7} />,
+  link: ({ className = '' }) => <LuLink className={className} strokeWidth={1.7} />,
+  chart: ({ className = '' }) => <LuChartLine className={className} strokeWidth={1.7} />,
+  logout: ({ className = '' }) => <LuLogOut className={className} strokeWidth={1.7} />,
 };
 
 type NavLink = { href: string; label: string; icon: Icon; superadminOnly?: boolean };
@@ -135,19 +79,27 @@ const nav: NavEntry[] = [
   { href: '/admin/content/stats', label: 'Stats', icon: I.chart, superadminOnly: true },
 ];
 
-export default function AdminNav({ user, onLogout }: { user: AdminUser; onLogout: () => void }) {
+export default function AdminNav({
+  user,
+  onLogout,
+  onClose,
+}: {
+  user: AdminUser;
+  onLogout: () => void;
+  onClose?: () => void;
+}) {
   const pathname = usePathname();
   const isSuperadmin = user.role === 'superadmin';
   const initial = (user.email[0] ?? 'A').toUpperCase();
 
   return (
-    <aside className="relative flex w-64 shrink-0 flex-col overflow-hidden border-r border-black/30 bg-gradient-to-b from-[#192735] via-[#1d2c3d] to-[#253A4D] text-cream/90">
+    <aside className="relative flex h-full w-64 shrink-0 flex-col overflow-hidden border-r border-black/30 bg-gradient-to-b from-[#192735] via-[#1d2c3d] to-[#253A4D] text-cream/90">
       {/* Warm accent glows */}
       <div className="pointer-events-none absolute -left-12 top-0 h-48 w-48 rounded-full bg-brand/20 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-20 -right-10 h-48 w-48 rounded-full bg-[#66202A]/25 blur-3xl" />
 
       {/* Brand */}
-      <div className="relative px-5 pb-4 pt-5">
+      <div className="relative flex items-start justify-between px-5 pb-4 pt-5">
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-[#cf9e57] text-[13px] font-bold text-ink shadow-[0_6px_20px_rgba(225,184,120,0.45)]">
             BT
@@ -157,6 +109,16 @@ export default function AdminNav({ user, onLogout }: { user: AdminUser; onLogout
             <div className="text-[10.5px] font-medium uppercase tracking-[0.18em] text-brand/85">Admin Console</div>
           </div>
         </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close navigation"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-cream/70 ring-1 ring-inset ring-white/15 transition hover:bg-white/10 hover:text-white lg:hidden"
+          >
+            <LuX width={16} height={16} strokeWidth={2} />
+          </button>
+        )}
       </div>
 
       {/* User */}

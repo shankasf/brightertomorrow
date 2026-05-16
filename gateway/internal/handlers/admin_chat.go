@@ -57,10 +57,10 @@ func (h *AdminChatHandler) ListSessions(w http.ResponseWriter, r *http.Request) 
 
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT s.id, s.visitor_id, s.source, s.external_ref,
-		        to_char(s.started_at, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(s.ended_at,   'YYYY-MM-DD"T"HH24:MI:SSOF'),
+		        to_char(s.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(s.ended_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		        s.message_count,
-		        to_char(s.purged_at,  'YYYY-MM-DD"T"HH24:MI:SSOF')
+		        to_char(s.purged_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.chat_sessions s
 		 `+where+`
 		 ORDER BY s.started_at DESC
@@ -124,10 +124,10 @@ func (h *AdminChatHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 	var s sessionDetail
 	err := h.Pool.QueryRow(ctx,
 		`SELECT id, visitor_id, source, external_ref,
-		        to_char(started_at,   'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(ended_at,     'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(retain_until, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(purged_at,    'YYYY-MM-DD"T"HH24:MI:SSOF')
+		        to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(ended_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(retain_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(purged_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.chat_sessions WHERE id = $1`, sessionID,
 	).Scan(&s.ID, &s.VisitorID, &s.Source, &s.ExternalRef, &s.StartedAt, &s.EndedAt, &s.RetainUntil, &s.PurgedAt)
 	if err != nil {

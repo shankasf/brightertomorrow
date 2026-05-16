@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
 import { Card, ErrorBanner, PageWrap, PHIBadge, Pill } from '@/components/admin/ui';
+import { formatPT, formatPTDate, formatPTTime } from '@/lib/time-pt';
+import { LuChevronLeft } from 'react-icons/lu';
 
 type Message = { id: number; role: string; content: string; tool_name: string | null; created_at: string };
 // Canonical agent enum (migration 014). Older rows may still arrive with
@@ -65,9 +67,7 @@ export default function ChatSessionDetailPage() {
   return (
       <PageWrap max="max-w-4xl">
         <Link href="/admin/chat" className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-indigo-600">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m15 18-6-6 6-6" />
-          </svg>
+          <LuChevronLeft width={14} height={14} strokeWidth={2} />
           Back to chat sessions
         </Link>
 
@@ -107,10 +107,10 @@ export default function ChatSessionDetailPage() {
             <Card className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
               {(
                 [
-                  ['Started', detail.session.started_at.slice(0, 16).replace('T', ' ')],
-                  ['Ended', detail.session.ended_at?.slice(0, 16).replace('T', ' ') ?? '—'],
-                  ['Retain until', detail.session.retain_until?.slice(0, 10) ?? '—'],
-                  ['Anonymized', detail.session.purged_at ? detail.session.purged_at.slice(0, 10) : 'No'],
+                  ['Started', formatPT(detail.session.started_at)],
+                  ['Ended', formatPT(detail.session.ended_at)],
+                  ['Retain until', formatPTDate(detail.session.retain_until)],
+                  ['Anonymized', detail.session.purged_at ? formatPTDate(detail.session.purged_at) : 'No'],
                 ] as [string, string][]
               ).map(([label, value]) => (
                 <div key={label}>
@@ -134,7 +134,7 @@ export default function ChatSessionDetailPage() {
                     <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-sm ${s.bg}`}>
                       <div className={`mb-1 flex items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-wider opacity-70 ${s.text}`}>
                         <span>{s.label}{m.tool_name ? ` · ${m.tool_name}` : ''}</span>
-                        <span className="font-mono opacity-70">{m.created_at.slice(11, 16)}</span>
+                        <span className="font-mono opacity-70">{formatPTTime(m.created_at)}</span>
                       </div>
                       <p className={`whitespace-pre-wrap text-sm leading-relaxed ${s.text}`}>{m.content}</p>
                     </div>

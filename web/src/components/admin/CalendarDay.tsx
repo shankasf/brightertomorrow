@@ -4,6 +4,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   type CalEvent,
   type Therapist,
+  BUSINESS_END_HOUR,
+  BUSINESS_START_HOUR,
   GRID_END_HOUR,
   GRID_START_HOUR,
   GRID_TOTAL_PX,
@@ -136,16 +138,17 @@ export default function CalendarDay({ day, loading, events, therapistsById }: Pr
           )}
         </div>
 
-        <div ref={scrollRef} className="relative max-h-[640px] overflow-y-auto">
+        <div ref={scrollRef} className="relative max-h-[720px] overflow-y-auto">
           <div className="relative grid" style={{ gridTemplateColumns: '64px minmax(0, 1fr)', minHeight: GRID_TOTAL_PX }}>
             {/* Hour gutter */}
-            <div className="relative border-r border-[#EDE6D9] bg-white">
+            <div className="sticky left-0 z-10 border-r border-[#EDE6D9] bg-white">
               {Array.from({ length: GRID_END_HOUR - GRID_START_HOUR }).map((_, i) => {
                 const h = GRID_START_HOUR + i;
                 return (
                   <div
                     key={h}
-                    className="-mt-2 flex h-[56px] items-start justify-end pr-2 pt-0 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-faint"
+                    className="-mt-2 flex items-start justify-end pr-2 pt-0 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-faint"
+                    style={{ height: HOUR_HEIGHT_PX }}
                   >
                     <span className="bg-white px-1">{fmtHourLabel(h)}</span>
                   </div>
@@ -158,13 +161,28 @@ export default function CalendarDay({ day, loading, events, therapistsById }: Pr
               className={`relative ${isToday ? 'bg-amber-50/20' : 'bg-white'}`}
               style={{ minHeight: GRID_TOTAL_PX }}
             >
+              {/* Business-hours band */}
+              <div
+                className="pointer-events-none absolute left-0 right-0 bg-cream-alt/30"
+                style={{
+                  top: (BUSINESS_START_HOUR - GRID_START_HOUR) * HOUR_HEIGHT_PX,
+                  height: (BUSINESS_END_HOUR - BUSINESS_START_HOUR) * HOUR_HEIGHT_PX,
+                }}
+                aria-hidden
+              />
               {Array.from({ length: GRID_END_HOUR - GRID_START_HOUR }).map((_, i) => (
                 <div
                   key={i}
-                  className={`absolute left-0 right-0 ${i === 0 ? '' : 'border-t border-[#F1ECE2]'}`}
+                  className="pointer-events-none absolute left-0 right-0"
                   style={{ top: i * HOUR_HEIGHT_PX, height: HOUR_HEIGHT_PX }}
                   aria-hidden
-                />
+                >
+                  {i !== 0 && <div className="absolute inset-x-0 top-0 h-px bg-[#EAE2D2]" />}
+                  <div
+                    className="absolute inset-x-0 border-t border-dashed border-[#F1ECE2]"
+                    style={{ top: HOUR_HEIGHT_PX / 2 }}
+                  />
+                </div>
               ))}
 
               {isToday && <NowLine />}

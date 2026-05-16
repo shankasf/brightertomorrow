@@ -6,6 +6,7 @@ import {
   PageHeader, PageWrap, Card, Button, Input, Textarea, Field,
   Pill, EmptyState, Checkbox,
 } from '@/components/admin/ui';
+import { LuCircleHelp } from 'react-icons/lu';
 
 type FAQ = { id: number; question: string; answer: string; category: string | null; position: number; published: boolean };
 type FAQForm = Omit<FAQ, 'id'>;
@@ -96,7 +97,7 @@ export default function FAQsPage() {
             title="No FAQs yet"
             description="Add your first FAQ to start populating the help section."
             action={<Button onClick={startNew}>＋ New FAQ</Button>}
-            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 1 1 5.8 1c-.5 1.6-2.9 1.7-2.9 4M12 17h.01" /></svg>}
+            icon={<LuCircleHelp width={22} height={22} strokeWidth={1.8} />}
           />
         ) : (
           <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.025 } } }} className="space-y-2">

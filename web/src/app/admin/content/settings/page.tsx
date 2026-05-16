@@ -5,6 +5,7 @@ import { adminFetch } from '@/components/admin/useAdminAuth';
 import {
   PageHeader, PageWrap, Card, Button, Input, Field, LoadingScreen,
 } from '@/components/admin/ui';
+import { LuCheck } from 'react-icons/lu';
 
 type Settings = {
   brand_name: string; tagline: string | null; primary_phone: string | null; primary_email: string | null;
@@ -66,9 +67,7 @@ export default function SettingsPage() {
                     exit={{ opacity: 0, x: 6 }}
                     className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="m5 13 4 4L19 7" />
-                    </svg>
+                    <LuCheck width={14} height={14} strokeWidth={2.5} />
                     Saved
                   </motion.span>
                 )}

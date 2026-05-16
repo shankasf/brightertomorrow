@@ -5,7 +5,7 @@ import os
 
 from agents import Agent
 
-from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, STYLE_TEXT
+from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
 from ..tools import INFO_TOOLS
 
 
@@ -14,6 +14,7 @@ def build_info_agent() -> Agent:
         f"{PRACTICE_CONTEXT}\n\n"
         f"{STYLE_TEXT}\n\n"
         f"{CRISIS_RULE}\n\n"
+        f"{SCOPE_RULE}\n\n"
         "You answer questions about Brighter Tomorrow Therapy's services, specialties, "
         "locations, business hours, FAQs, and practice philosophy.\n\n"
         "Tool guidance:\n"

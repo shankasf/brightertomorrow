@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
 import {
-  PageHeader, PageWrap, TableCard, THead, TH, TR, TD,
+  PageHeader, PageWrap, TableCard, THead, TH, TD,
   Pill, Pagination, EmptyState, Input, SkeletonRows, ErrorBanner,
 } from '@/components/admin/ui';
+import { formatPT } from '@/lib/time-pt';
+import { LuPhone } from 'react-icons/lu';
 
 type CallbackRow = {
   id: number;
@@ -25,10 +27,7 @@ type SortKey = 'first_name' | 'last_name' | 'phone' | 'reason' | 'source' | 'cre
 type SortDir = 'asc' | 'desc';
 
 function fmtDateTime(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso;
-  const d = new Date(t);
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return formatPT(iso);
 }
 
 function sourceTone(src: string): 'amber' | 'violet' | 'cyan' | 'blue' | 'slate' {
@@ -158,46 +157,40 @@ export default function AdminCallbacksPage() {
         <EmptyState
           title={q || source !== 'all' ? 'No callback requests match these filters' : 'No callback requests yet'}
           description="Visitors who ask to be phoned back from the chatbot or voice agent show up here."
-          icon={
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-            </svg>
-          }
+          icon={<LuPhone width={22} height={22} strokeWidth={1.8} />}
         />
       ) : (
         <>
           <TableCard>
             <THead>
               <tr>
-                <SortableTH label="First Name" col="first_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('first_name')} />
-                <SortableTH label="Last Name" col="last_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('last_name')} />
+                <SortableTH label="Name" col="last_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('last_name')} />
                 <SortableTH label="Phone" col="phone" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('phone')} />
-                <SortableTH label="Reason" col="reason" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('reason')} />
-                <SortableTH label="Source" col="source" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('source')} />
-                <SortableTH label="Submitted" col="created_at" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('created_at')} />
+                <SortableTH label="Reason" col="reason" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('reason')} className="bt-col-hide-md" />
+                <SortableTH label="Source" col="source" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('source')} className="bt-col-hide-sm" />
+                <SortableTH label="Submitted" col="created_at" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('created_at')} className="bt-col-hide-lg" />
               </tr>
             </THead>
             <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.015 } } }}>
-              {sorted.map((c) => (
+              {sorted.map((c) => {
+                const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ') || '—';
+                return (
                 <motion.tr
                   key={c.id}
                   variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
-                  className="border-t border-slate-100 transition-colors hover:bg-slate-50/70"
                 >
-                  <TD className="font-medium text-ink">{c.first_name}</TD>
-                  <TD className="font-medium text-ink">{c.last_name}</TD>
-                  <TD className="text-slate-600 tabular-nums">{c.phone}</TD>
-                  <TD className="max-w-[360px] truncate text-slate-600">
-                    <span title={c.reason}>{c.reason}</span>
-                  </TD>
-                  <TD>
+                  <TD>{fullName}</TD>
+                  <TD className="tabular-nums whitespace-nowrap">{c.phone}</TD>
+                  <TD className="bt-col-hide-md max-w-[420px] truncate" title={c.reason}>{c.reason}</TD>
+                  <TD className="bt-col-hide-sm">
                     <Pill tone={sourceTone(c.source)} dot>{sourceLabel(c.source)}</Pill>
                   </TD>
-                  <TD className="text-xs text-slate-500">
-                    <span title={c.created_at}>{fmtDateTime(c.created_at)}</span>
+                  <TD className="bt-col-hide-lg whitespace-nowrap text-[12.5px] text-ink-soft" title={c.created_at}>
+                    {fmtDateTime(c.created_at)}
                   </TD>
                 </motion.tr>
-              ))}
+                );
+              })}
             </motion.tbody>
           </TableCard>
           <Pagination page={page} total={data!.total} pageSize={PAGE_SIZE} onChange={setPage} />
@@ -208,26 +201,27 @@ export default function AdminCallbacksPage() {
 }
 
 function SortableTH({
-  label, col, sortKey, sortDir, onClick,
+  label, col, sortKey, sortDir, onClick, className,
 }: {
   label: string;
   col: SortKey;
   sortKey: SortKey;
   sortDir: SortDir;
   onClick: () => void;
+  className?: string;
 }) {
   const active = col === sortKey;
   const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅';
   return (
-    <TH>
+    <TH className={className}>
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex items-center gap-1 hover:text-ink"
+        className="inline-flex items-center gap-1 transition-colors hover:text-brand-700"
         aria-label={`Sort by ${label}`}
       >
         {label}
-        <span className={active ? 'text-brand' : 'text-slate-300'}>{arrow}</span>
+        <span className={active ? 'text-brand-700' : 'text-ink-faint'}>{arrow}</span>
       </button>
     </TH>
   );

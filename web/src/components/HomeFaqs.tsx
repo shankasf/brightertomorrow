@@ -13,13 +13,13 @@ export default function HomeFaqs({ faqs }: { faqs: Faq[] }) {
     <section className="section bg-white">
       <div className="container-narrow">
         <div className="text-center mb-14">
-          <span className="eyebrow center">FAQs</span>
+          <span className="eyebrow center">Frequently Asked Questions</span>
           <h2 className="display mt-5 text-4xl md:text-5xl text-ink leading-[1.05]">
-            Quick answers to the things{" "}
+            Answers to the things{" "}
             <span className="italic-accent">people ask most.</span>
           </h2>
           <p className="mt-4 text-ink-muted text-base md:text-lg leading-relaxed max-w-xl mx-auto">
-            Don't see what you're looking for? Reach out — we're happy to help.
+            Don&rsquo;t see what you&rsquo;re looking for? Reach out &mdash; we&rsquo;re happy to help.
           </p>
         </div>
 
@@ -30,14 +30,14 @@ export default function HomeFaqs({ faqs }: { faqs: Faq[] }) {
               <div key={f.id} className="border-b border-surface-line">
                 <button
                   onClick={() => setOpenId(open ? null : f.id)}
-                  className="w-full flex items-center justify-between text-left py-5 sm:py-6 gap-6 group"
+                  className="w-full flex items-center justify-between text-left py-5 sm:py-6 gap-3 sm:gap-6 group min-h-[44px]"
                   aria-expanded={open}
                 >
-                  <span className={`font-display text-lg md:text-xl leading-snug transition-colors ${open ? "text-brand-700" : "text-ink group-hover:text-brand-700"}`}>
+                  <span className={`font-display text-[1.05rem] md:text-xl leading-snug transition-colors ${open ? "text-brand-700" : "text-ink group-hover:text-brand-700"}`}>
                     {f.question}
                   </span>
                   <span
-                    className={`w-9 h-9 grid place-items-center rounded-full border flex-shrink-0 transition-all duration-300 ${
+                    className={`w-10 h-10 sm:w-9 sm:h-9 grid place-items-center rounded-full border flex-shrink-0 transition-all duration-300 ${
                       open
                         ? "bg-brand text-white border-brand rotate-180"
                         : "bg-transparent text-ink-muted border-surface-line group-hover:border-brand group-hover:text-brand"
@@ -56,7 +56,7 @@ export default function HomeFaqs({ faqs }: { faqs: Faq[] }) {
                       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                       className="overflow-hidden"
                     >
-                      <div className="pb-6 pr-12 text-ink-muted leading-relaxed text-base">
+                      <div className="pb-6 pr-4 sm:pr-12 text-ink-muted leading-relaxed text-base">
                         {f.answer}
                       </div>
                     </motion.div>

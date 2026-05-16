@@ -20,7 +20,7 @@ import os
 from agents import Agent, handoff
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 
-from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, STYLE_TEXT
+from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, SOFT_SAFETY_SCREEN_RULE, STYLE_TEXT
 from .booking_agent import build_booking_agent
 from .crisis_agent import build_crisis_agent
 from .guardrails import crisis_guardrail
@@ -48,12 +48,16 @@ def build_triage_agent() -> Agent:
         f"{PRACTICE_CONTEXT}\n\n"
         f"{STYLE_TEXT}\n\n"
         f"{CRISIS_RULE}\n\n"
+        f"{SOFT_SAFETY_SCREEN_RULE}\n\n"
+        f"{SCOPE_RULE}\n\n"
 
         "You are the Triage agent for Brighter Tomorrow Therapy. Your "
         "ONLY job is to route the visitor to the right specialist by "
         "calling exactly one handoff tool. You never answer the "
         "visitor's question yourself, never collect their info, and "
-        "never run any tool besides a handoff.\n\n"
+        "never run any tool besides a handoff. The ONE exception is "
+        "the out-of-scope case below — there, you reply directly with "
+        "the decline + steer from the SCOPE rule and do NOT hand off.\n\n"
 
         "# How booking and insurance verification work\n"
         "BookingAgent and InsuranceCheck are INDEPENDENT — each owns its "
@@ -91,7 +95,11 @@ def build_triage_agent() -> Agent:
         "   a breakup and have anxiety', 'I'm grieving', 'I'm "
         "   anxious / depressed / lonely') is NOT a safety crisis "
         "   on its own — only route to Crisis when there is an "
-        "   explicit safety signal (suicide, self-harm, danger).\n\n"
+        "   explicit safety signal (suicide, self-harm, danger). "
+        "   On 'very sad / lonely / hopeless / overwhelmed' first "
+        "   signals WITHOUT explicit harm language, run the SOFT "
+        "   SAFETY SCREEN above (one short 'are you safe right "
+        "   now?') before handing off to BookingAgent.\n\n"
 
         "2. **BookingAgent** — visitor wants to schedule: 'I want "
         "   to book', 'schedule', 'make an appointment', 'start "
@@ -122,6 +130,10 @@ def build_triage_agent() -> Agent:
         "   pricing-without-scheduling, anything informational that "
         "   doesn't include booking or insurance verification "
         "   intent.\n\n"
+
+        "7. **Out of scope** — do NOT hand off (Info Agent is for "
+        "   practice info only, not a general fallback). Reply directly "
+        "   with the SCOPE rule's decline + steer.\n\n"
 
         "# Conduct\n"
         "- When intent matches a route, IMMEDIATELY call the "

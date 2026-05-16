@@ -66,6 +66,9 @@ type intakeDB interface {
 // Defined by the consumer (this package), not the producer.
 type phiStorer interface {
 	PutIntake(ctx context.Context, r phi.IntakeRecord) error
+	PutInsuranceCheck(ctx context.Context, r phi.InsuranceCheckRecord) error
+	FindStandaloneCheckForReuse(ctx context.Context, emailHash, payerName string, within time.Duration) (*phi.InsuranceReuse, error)
+	LinkCheckToSubmission(ctx context.Context, checkUUID, oldEmailHash, submissionUUID, newEmailHash string) error
 }
 
 type CoverageChecker interface {
@@ -247,7 +250,10 @@ func (h *IntakeHandler) submit(ctx context.Context, body intakeRequest) (intakeR
 					reusedCheckUUID = reuse.CheckUUID
 					reusedCheckEmailHash = nameDOBHash
 					eligible = reuse.Eligible
-					coverageStatus = reuse.CoverageStatus
+					// reuse.CoverageStatus is canonical ("verified"/etc.); IntakeRecord
+					// needs the intake bucket so the row indexes under a GSI1 partition
+					// that ListIntakePointers actually queries.
+					coverageStatus = IntakeBucketFromCanonical(reuse.CoverageStatus, reuse.Eligible)
 					coverage = map[string]any{
 						"status": coverageStatus,
 						"plan":   body.InsuranceName,

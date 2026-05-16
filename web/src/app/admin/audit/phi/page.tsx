@@ -6,6 +6,7 @@ import {
   PageHeader, PageWrap, TableCard, THead, TH, TD,
   Pill, Pagination, EmptyState, SkeletonRows, PHIBadge,
 } from '@/components/admin/ui';
+import { formatPT } from '@/lib/time-pt';
 
 type AuditEntry = {
   id: number; event_time: string; table_name: string;
@@ -19,7 +20,7 @@ const opTone: Record<string, 'green' | 'amber' | 'red' | 'slate'> = {
 };
 
 export default function PHIAuditLogPage() {
-  const [data, setData] = useState<{ data: AuditEntry[]; total: number } | null>(null);
+  const [data, setData] = useState<{ items: AuditEntry[]; total: number } | null>(null);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function PHIAuditLogPage() {
 
         {!data ? (
           <SkeletonRows rows={8} cols={5} />
-        ) : data.data.length === 0 ? (
+        ) : data.items.length === 0 ? (
           <EmptyState title="No mutations recorded" description="Inserts, updates, and deletes against PHI tables will appear here." />
         ) : (
           <>
@@ -45,26 +46,25 @@ export default function PHIAuditLogPage() {
               <THead>
                 <tr>
                   <TH>Time</TH>
-                  <TH>Table</TH>
+                  <TH className="bt-col-hide-sm">Table</TH>
                   <TH>Op</TH>
-                  <TH>Row ID</TH>
-                  <TH>Actor</TH>
+                  <TH className="bt-col-hide-md">Row ID</TH>
+                  <TH className="bt-col-hide-lg">Actor</TH>
                 </tr>
               </THead>
               <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.01 } } }}>
-                {data.data.map((e) => (
+                {data.items.map((e) => (
                   <motion.tr
                     key={e.id}
                     variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
-                    className="border-t border-slate-100 hover:bg-slate-50/70"
                   >
-                    <TD className="font-mono text-xs tabular-nums text-slate-500">{e.event_time.slice(0, 19).replace('T', ' ')}</TD>
-                    <TD className="font-mono text-xs text-slate-700">{e.table_name}</TD>
+                    <TD className="font-mono text-[12.5px] tabular-nums whitespace-nowrap">{formatPT(e.event_time)}</TD>
+                    <TD className="bt-col-hide-sm font-mono text-[12.5px]">{e.table_name}</TD>
                     <TD>
                       <Pill tone={opTone[e.operation] ?? 'slate'}>{e.operation}</Pill>
                     </TD>
-                    <TD className="font-mono text-xs text-slate-600">{e.row_id}</TD>
-                    <TD className="text-xs text-slate-600">{e.app_user ?? e.actor}</TD>
+                    <TD className="bt-col-hide-md font-mono text-[12.5px] text-ink-soft">{e.row_id}</TD>
+                    <TD className="bt-col-hide-lg text-[12.5px]">{e.app_user ?? e.actor}</TD>
                   </motion.tr>
                 ))}
               </motion.tbody>

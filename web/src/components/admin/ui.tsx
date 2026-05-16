@@ -2,6 +2,7 @@
 import { motion, type HTMLMotionProps } from 'framer-motion';
 import { ReactNode } from 'react';
 import { BTSpinner, InlineSpinner, LoadingScreen } from './Spinner';
+import { LuCircleAlert, LuLock } from 'react-icons/lu';
 
 export { BTSpinner, InlineSpinner, LoadingScreen };
 
@@ -40,12 +41,12 @@ export function PageHeader({
       className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between"
     >
       <div className="min-w-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-[26px] font-semibold tracking-tight text-ink">{title}</h1>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-[22px] font-bold tracking-tight text-ink sm:text-[26px]">{title}</h1>
           {badge}
         </div>
         {subtitle && (
-          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-ink-soft">{subtitle}</p>
+          <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-soft sm:text-sm">{subtitle}</p>
         )}
       </div>
       {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
@@ -72,26 +73,26 @@ export function Card({
   );
 }
 
-export function TableCard({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function TableCard({
+  children,
+  className = '',
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <Card padded={false} className={`overflow-hidden ${className}`}>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">{children}</table>
-      </div>
+      <table className="bt-table">{children}</table>
     </Card>
   );
 }
 
 export function THead({ children }: { children: ReactNode }) {
-  return (
-    <thead className="bg-gradient-to-b from-cream/80 to-cream/40 text-[11px] uppercase tracking-[0.06em] text-ink-soft">
-      {children}
-    </thead>
-  );
+  return <thead>{children}</thead>;
 }
 
 export function TH({ children, className = '' }: { children?: ReactNode; className?: string }) {
-  return <th className={`px-4 py-3 text-left font-semibold ${className}`}>{children}</th>;
+  return <th className={className}>{children}</th>;
 }
 
 export function TR({
@@ -106,17 +107,19 @@ export function TR({
   return (
     <tr
       onClick={onClick}
-      className={`group border-t border-[#EDE6D9] transition-colors hover:bg-brand-50/40 ${
-        onClick ? 'cursor-pointer' : ''
-      } ${className}`}
+      className={`group ${onClick ? 'cursor-pointer' : ''} ${className}`}
     >
       {children}
     </tr>
   );
 }
 
-export function TD({ children, className = '' }: { children?: ReactNode; className?: string }) {
-  return <td className={`px-4 py-3.5 align-middle text-ink/80 ${className}`}>{children}</td>;
+export function TD({
+  children,
+  className = '',
+  ...rest
+}: React.TdHTMLAttributes<HTMLTableCellElement> & { children?: ReactNode; className?: string }) {
+  return <td className={className} {...rest}>{children}</td>;
 }
 
 type Tone = 'green' | 'amber' | 'red' | 'blue' | 'slate' | 'violet' | 'cyan' | 'brand' | 'wine';
@@ -212,7 +215,7 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-ink/60">
+      <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.1em] text-ink/70">
         {label}
       </span>
       {children}
@@ -293,12 +296,12 @@ export function Pagination({
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
   return (
-    <div className="mt-4 flex flex-col items-center justify-between gap-2 text-xs text-ink-soft sm:flex-row">
+    <div className="mt-4 flex flex-col items-center justify-between gap-3 rounded-xl border border-[#EDE6D9] bg-white/60 px-3 py-2.5 text-xs text-ink-soft backdrop-blur-sm sm:flex-row">
       <span className="tabular-nums">
         Showing <span className="font-medium text-ink">{start.toLocaleString()}–{end.toLocaleString()}</span> of{' '}
         <span className="font-medium text-ink">{total.toLocaleString()}</span>
       </span>
-      <div className="flex items-center gap-1">
+      <div className="flex w-full items-center justify-between gap-1 sm:w-auto sm:justify-end">
         <Button
           variant="secondary"
           size="sm"
@@ -339,10 +342,7 @@ export function ErrorBanner({ children }: { children: ReactNode }) {
       animate={{ opacity: 1, y: 0 }}
       className="mb-4 flex items-start gap-3 rounded-xl border border-rose-200/70 bg-rose-50/80 px-4 py-3 text-sm text-rose-800"
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 shrink-0">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 8v4M12 16h.01" />
-      </svg>
+      <LuCircleAlert width={16} height={16} strokeWidth={2} className="mt-0.5 shrink-0" />
       <span>{children}</span>
     </motion.div>
   );
@@ -351,10 +351,7 @@ export function ErrorBanner({ children }: { children: ReactNode }) {
 export function PHIBadge() {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200/70">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="11" width="18" height="11" rx="2" />
-        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-      </svg>
+      <LuLock width={11} height={11} strokeWidth={2.5} />
       PHI access logged
     </span>
   );
@@ -362,7 +359,7 @@ export function PHIBadge() {
 
 export function PageWrap({ children, max = 'max-w-6xl' }: { children: ReactNode; max?: string }) {
   return (
-    <div className="mx-auto w-full px-6 py-8 lg:px-10">
+    <div className="mx-auto w-full px-3 py-5 sm:px-6 sm:py-7 lg:px-10 lg:py-8">
       <div className={`mx-auto ${max}`}>{children}</div>
     </div>
   );

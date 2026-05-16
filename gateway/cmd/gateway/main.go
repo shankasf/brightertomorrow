@@ -94,7 +94,7 @@ func main() {
 		slog.Warn("admin Cognito verifier disabled — COGNITO_USER_POOL_ID/COGNITO_CLIENT_ID not set")
 	}
 	adminAuthH := &handlers.AdminAuthHandler{Pool: pool, Cognito: cognitoVerifier}
-	adminStatsH := &handlers.AdminStatsHandler{Pool: pool}
+	adminStatsH := &handlers.AdminStatsHandler{Pool: pool, PHI: phiStore}
 	adminContactsH := &handlers.AdminContactsHandler{Pool: pool, PHI: phiStore}
 	adminChatH := &handlers.AdminChatHandler{Pool: pool, PHI: phiStore}
 	adminNewsletterH := &handlers.AdminNewsletterHandler{Pool: pool}

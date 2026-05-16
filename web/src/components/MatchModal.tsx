@@ -146,7 +146,7 @@ export default function MatchModal({
                 style={{ borderRadius: "24px 0 24px 24px" }}
               >
                 {/* Header */}
-                <div className="px-7 pt-6 pb-5 border-b border-surface-line flex items-start justify-between gap-4">
+                <div className="px-5 sm:px-7 pt-6 pb-5 border-b border-surface-line flex items-start justify-between gap-4">
                   <div>
                     <span
                       className="text-[11px] font-semibold uppercase tracking-[0.18em]"
@@ -160,7 +160,7 @@ export default function MatchModal({
                   </div>
                   <button
                     onClick={onClose}
-                    className="w-9 h-9 grid place-items-center rounded-full hover:bg-cream-alt text-ink-soft hover:text-ink transition shrink-0"
+                    className="w-11 h-11 grid place-items-center rounded-full hover:bg-cream-alt text-ink-soft hover:text-ink transition shrink-0"
                     aria-label="Close"
                   >
                     <FiX size={18} />
@@ -169,7 +169,7 @@ export default function MatchModal({
 
                 {/* Progress dots */}
                 {submitState !== "ok" && (
-                  <div className="px-7 pt-5">
+                  <div className="px-5 sm:px-7 pt-5">
                     <div className="flex items-center gap-1.5">
                       {Array.from({ length: totalSteps }).map((_, i) => (
                         <span
@@ -188,7 +188,7 @@ export default function MatchModal({
                 )}
 
                 {/* Body */}
-                <div className="px-7 py-6 min-h-[260px]">
+                <div className="px-5 sm:px-7 py-6 min-h-[260px]">
                   {submitState === "ok" ? (
                     <SuccessPanel onClose={onClose} />
                   ) : (
@@ -299,7 +299,7 @@ export default function MatchModal({
                         heading="Tell us about yourself"
                         sub="We'll match you and a care-team member will reach out within one business day."
                       >
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <Field
                             label="First name"
                             value={lead.firstName}
@@ -351,7 +351,7 @@ export default function MatchModal({
 
                 {/* Footer */}
                 {submitState !== "ok" && (
-                  <div className="px-7 pb-6 pt-2 flex items-center justify-between gap-3 border-t border-surface-line">
+                  <div className="px-5 sm:px-7 pb-6 pt-2 flex items-center justify-between gap-3 border-t border-surface-line">
                     <button
                       type="button"
                       onClick={() => setStep((s) => Math.max(0, s - 1))}
@@ -388,7 +388,7 @@ export default function MatchModal({
                 )}
 
                 {submitState === "err" && (
-                  <div className="px-7 pb-5 -mt-2">
+                  <div className="px-5 sm:px-7 pb-5 -mt-2">
                     <p className="text-sm text-red-700">
                       Something went wrong. Please try again or call 725-238-6990.
                     </p>

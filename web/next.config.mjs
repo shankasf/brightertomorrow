@@ -3,6 +3,9 @@ const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
   devIndicators: false,
+  // Strip `x-powered-by: Next.js` — info disclosure that gives attackers a
+  // free hint about stack version. No functional impact.
+  poweredByHeader: false,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "brightertomorrowtherapy.com" },

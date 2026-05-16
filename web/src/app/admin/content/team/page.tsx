@@ -6,17 +6,28 @@ import {
   PageHeader, PageWrap, Card, Button, Input, Textarea, Select, Field,
   Pill, EmptyState, Checkbox,
 } from '@/components/admin/ui';
+import { LuUser } from 'react-icons/lu';
 
 type Group = { id: number; slug: string; title: string; description: string | null; position: number };
 type Member = {
   id: number; group_id: number | null; full_name: string; credentials: string | null;
   role: string | null; bio: string | null; photo_url: string | null; email: string | null;
   accepts_new: boolean; position: number; published: boolean;
+  office_locations: string[]; pricing_tier: string | null;
+  network_status: string | null; specialties: string[];
 };
 type MemberForm = Omit<Member, 'id'>;
+
+const OFFICE_OPTIONS = [
+  { slug: 'e-russell', label: 'E Russell' },
+  { slug: 'n-durango', label: 'N Durango' },
+  { slug: 'telehealth', label: 'Telehealth' },
+];
+
 const emptyMember: MemberForm = {
   group_id: null, full_name: '', credentials: null, role: null, bio: null,
   photo_url: null, email: null, accepts_new: true, position: 0, published: true,
+  office_locations: [], pricing_tier: null, network_status: null, specialties: [],
 };
 
 export default function TeamPage() {
@@ -26,6 +37,9 @@ export default function TeamPage() {
   const [form, setForm] = useState<MemberForm>(emptyMember);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Local text state for comma-separated specialties input
+  const [specialtiesText, setSpecialtiesText] = useState('');
 
   const load = async () => {
     const [g, m] = await Promise.all([
@@ -37,22 +51,53 @@ export default function TeamPage() {
   };
   useEffect(() => { load(); }, []);
 
-  const startNew = () => { setEditing(null); setForm(emptyMember); setOpen(true); };
+  const startNew = () => {
+    setEditing(null);
+    setForm(emptyMember);
+    setSpecialtiesText('');
+    setOpen(true);
+  };
   const startEdit = (m: Member) => {
     setEditing(m);
     setForm({
       group_id: m.group_id, full_name: m.full_name, credentials: m.credentials, role: m.role,
       bio: m.bio, photo_url: m.photo_url, email: m.email, accepts_new: m.accepts_new,
       position: m.position, published: m.published,
+      office_locations: m.office_locations ?? [],
+      pricing_tier: m.pricing_tier,
+      network_status: m.network_status,
+      specialties: m.specialties ?? [],
     });
+    setSpecialtiesText((m.specialties ?? []).join(', '));
     setOpen(true);
   };
-  const close = () => { setOpen(false); setEditing(null); setForm(emptyMember); };
+  const close = () => { setOpen(false); setEditing(null); setForm(emptyMember); setSpecialtiesText(''); };
+
+  const toggleOffice = (slug: string) => {
+    setForm((f) => {
+      const locs = f.office_locations ?? [];
+      return {
+        ...f,
+        office_locations: locs.includes(slug)
+          ? locs.filter((s) => s !== slug)
+          : [...locs, slug],
+      };
+    });
+  };
 
   const save = async () => {
     setSaving(true);
-    if (editing) await adminFetch(`/admin/content/team/members/${editing.id}`, { method: 'PUT', body: JSON.stringify(form) });
-    else await adminFetch('/admin/content/team/members', { method: 'POST', body: JSON.stringify(form) });
+    // Parse specialties from the text field before saving
+    const parsed = specialtiesText
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const payload = { ...form, specialties: parsed };
+    if (editing) {
+      await adminFetch(`/admin/content/team/members/${editing.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    } else {
+      await adminFetch('/admin/content/team/members', { method: 'POST', body: JSON.stringify(payload) });
+    }
     setSaving(false);
     close();
     load();
@@ -109,9 +154,50 @@ export default function TeamPage() {
                       <Input value={form.photo_url ?? ''} onChange={(e) => setForm({ ...form, photo_url: e.target.value || null })} />
                     </Field>
                   </div>
+
                   <Field label="Bio">
                     <Textarea rows={4} value={form.bio ?? ''} onChange={(e) => setForm({ ...form, bio: e.target.value || null })} />
                   </Field>
+
+                  {/* Office locations — multi-select checkboxes */}
+                  <Field label="Office locations">
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      {OFFICE_OPTIONS.map(({ slug, label }) => (
+                        <Checkbox
+                          key={slug}
+                          label={label}
+                          checked={(form.office_locations ?? []).includes(slug)}
+                          onChange={() => toggleOffice(slug)}
+                        />
+                      ))}
+                    </div>
+                  </Field>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Pricing tier" hint="e.g. $125–$150 / session">
+                      <Input
+                        value={form.pricing_tier ?? ''}
+                        onChange={(e) => setForm({ ...form, pricing_tier: e.target.value || null })}
+                        placeholder="$25–$60 / session"
+                      />
+                    </Field>
+                    <Field label="Network status" hint="e.g. In-Network: Aetna, Cigna, BCBS, UHC">
+                      <Input
+                        value={form.network_status ?? ''}
+                        onChange={(e) => setForm({ ...form, network_status: e.target.value || null })}
+                        placeholder="Sliding Scale Available"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label="Specialties" hint="Comma-separated, e.g. Anxiety, Trauma, LGBTQIA+">
+                    <Input
+                      value={specialtiesText}
+                      onChange={(e) => setSpecialtiesText(e.target.value)}
+                      placeholder="Anxiety, Trauma, Couples"
+                    />
+                  </Field>
+
                   <div className="flex flex-wrap items-end gap-6">
                     <Field label="Position">
                       <Input type="number" value={form.position} onChange={(e) => setForm({ ...form, position: +e.target.value })} className="!w-24" />
@@ -136,7 +222,7 @@ export default function TeamPage() {
             title="No team members yet"
             description="Add your first staff profile."
             action={<Button onClick={startNew}>＋ Add member</Button>}
-            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>}
+            icon={<LuUser width={22} height={22} strokeWidth={1.8} />}
           />
         ) : (
           <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.03 } } }} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -170,6 +256,9 @@ export default function TeamPage() {
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {!m.published && <Pill tone="slate">Draft</Pill>}
                     {m.accepts_new ? <Pill tone="green" dot>Accepting</Pill> : <Pill tone="amber">Waitlist</Pill>}
+                    {(m.office_locations ?? []).map((s) => (
+                      <Pill key={s} tone="slate">{s}</Pill>
+                    ))}
                   </div>
                 </div>
               </motion.div>

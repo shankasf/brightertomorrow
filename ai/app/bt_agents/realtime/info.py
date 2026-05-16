@@ -3,7 +3,14 @@ from __future__ import annotations
 
 from agents.realtime import RealtimeAgent
 
-from ...prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, STYLE_VOICE
+from ...prompts import (
+    ANTI_DEFLECTION_RULE,
+    CRISIS_RULE,
+    PRACTICE_CONTEXT,
+    SCOPE_RULE,
+    STYLE_VOICE,
+    VOICE_PACING_RULE,
+)
 from ...tools import INFO_TOOLS, VOICE_TOOLS
 
 
@@ -16,7 +23,9 @@ def build_info_agent() -> RealtimeAgent:
             f"{PRACTICE_CONTEXT}\n\n"
             f"{STYLE_VOICE}\n\n"
             f"{CRISIS_RULE}\n\n"
+            f"{SCOPE_RULE}\n\n"
             f"{ANTI_DEFLECTION_RULE}\n\n"
+            f"{VOICE_PACING_RULE}\n\n"
             "Answer questions about services, specialties, locations, hours, and FAQs. "
             "Use kb_search for open-ended questions; use structured tools for canonical facts. "
             "Cite source URLs when you use kb_search results. Speak in complete, natural sentences. "

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Karla, Mukta_Vaani, Radley } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
@@ -27,6 +27,15 @@ export const metadata: Metadata = {
   title: "Brighter Tomorrow Therapy Collective — Las Vegas Therapy",
   description:
     "Las Vegas and North Las Vegas therapy for children, teens, and adults. In-person and online. Evenings and weekends. Compassionate, accessible care.",
+};
+
+// viewport-fit=cover unlocks env(safe-area-inset-*) on notched phones so the
+// chat bottom-sheet sits flush against the home indicator without overlap.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#192735",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   type CalEvent,
   type Therapist,
+  BUSINESS_END_HOUR,
+  BUSINESS_START_HOUR,
   GRID_END_HOUR,
   GRID_START_HOUR,
   GRID_TOTAL_PX,
@@ -123,9 +125,17 @@ export default function CalendarWeek({
     scrollRef.current.scrollTop = top;
   }, [days, today.y, today.m, today.d]);
 
+  // Per-day event totals — surfaced in the header so staff can scan workload
+  // without counting bars.
+  const countsByDay = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [k, arr] of eventsByDay) m.set(k, arr.length);
+    return m;
+  }, [eventsByDay]);
+
   return (
     <div className="overflow-hidden rounded-2xl border border-[#E5E5E5] bg-white shadow-[0_1px_2px_rgba(25,39,53,0.04)]">
-      {/* Header row — sticky day labels */}
+      {/* Header row — day labels with workload count */}
       <div className="grid border-b border-[#EDE6D9]" style={gridTemplate()}>
         <div className="border-r border-[#EDE6D9] bg-cream-alt/40" />
         {days.map((d) => {
@@ -133,45 +143,58 @@ export default function CalendarWeek({
           const isToday = k === todayKey;
           const isSelected = k === selectedKey;
           const weekday = fmtWeekdayShortPT(d.date);
+          const count = countsByDay.get(k) ?? 0;
           return (
             <button
               key={k}
               type="button"
               onClick={() => onSelectDay(k, d.date)}
               aria-pressed={isSelected}
-              className={`flex flex-col items-center gap-0.5 border-r border-[#EDE6D9] py-2.5 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500 ${
-                isSelected ? 'bg-violet-50' : 'hover:bg-cream/60'
+              className={`flex flex-col items-center gap-1 border-r border-[#EDE6D9] py-3 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500 ${
+                isSelected ? 'bg-violet-50' : isToday ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-cream/60'
               }`}
             >
-              <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
+              <span className={`text-[10.5px] font-semibold uppercase tracking-[0.14em] ${
+                isToday ? 'text-violet-700' : 'text-ink-soft'
+              }`}>
                 {weekday}
               </span>
               <span
-                className={`grid h-7 w-7 place-items-center rounded-full text-[13px] tabular-nums ${
+                className={`grid h-8 w-8 place-items-center rounded-full text-[15px] tabular-nums ${
                   isToday
-                    ? 'bg-violet-600 font-semibold text-white'
+                    ? 'bg-violet-600 font-semibold text-white shadow-sm'
                     : isSelected
                     ? 'font-semibold text-violet-700'
-                    : 'font-medium text-ink'
+                    : 'font-semibold text-ink'
                 }`}
               >
                 {d.d}
               </span>
+              {count > 0 ? (
+                <span className="text-[10px] font-medium tabular-nums text-ink-soft">
+                  {count} {count === 1 ? 'event' : 'events'}
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium tabular-nums text-ink-faint">
+                  —
+                </span>
+              )}
             </button>
           );
         })}
       </div>
 
-      <div ref={scrollRef} className="relative max-h-[640px] overflow-y-auto">
+      <div ref={scrollRef} className="relative max-h-[720px] overflow-y-auto">
         <div className="relative grid" style={{ ...gridTemplate(), minHeight: GRID_TOTAL_PX }}>
           {/* Hour gutter */}
-          <div className="relative border-r border-[#EDE6D9] bg-white">
+          <div className="sticky left-0 z-10 border-r border-[#EDE6D9] bg-white">
             {Array.from({ length: GRID_END_HOUR - GRID_START_HOUR }).map((_, i) => {
               const h = GRID_START_HOUR + i;
               return (
                 <div
                   key={h}
-                  className="-mt-2 flex h-[56px] items-start justify-end pr-2 pt-0 text-[10px] font-medium uppercase tracking-[0.08em] text-ink-faint"
+                  className="-mt-2 flex items-start justify-end pr-2 pt-0 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-faint"
+                  style={{ height: HOUR_HEIGHT_PX }}
                 >
                   <span className="bg-white px-1">{fmtHourLabel(h)}</span>
                 </div>
@@ -223,6 +246,9 @@ function DayColumn({
 }) {
   const lanes = useMemo(() => packLanes(events), [events]);
 
+  const businessTop = (BUSINESS_START_HOUR - GRID_START_HOUR) * HOUR_HEIGHT_PX;
+  const businessHeight = (BUSINESS_END_HOUR - BUSINESS_START_HOUR) * HOUR_HEIGHT_PX;
+
   return (
     <button
       type="button"
@@ -233,14 +259,28 @@ function DayColumn({
       } ${isSelected ? 'bg-violet-50/30' : isToday ? 'bg-amber-50/30' : 'bg-white hover:bg-cream/40'}`}
       style={{ minHeight: GRID_TOTAL_PX }}
     >
-      {/* Hour grid lines */}
+      {/* Business-hours band — subtle tint behind 8 AM–6 PM */}
+      <div
+        className="pointer-events-none absolute left-0 right-0 bg-cream-alt/30"
+        style={{ top: businessTop, height: businessHeight }}
+        aria-hidden
+      />
+
+      {/* Hour grid lines + half-hour subdividers */}
       {Array.from({ length: GRID_END_HOUR - GRID_START_HOUR }).map((_, i) => (
         <div
           key={i}
-          className={`absolute left-0 right-0 ${i === 0 ? '' : 'border-t border-[#F1ECE2]'}`}
+          className="pointer-events-none absolute left-0 right-0"
           style={{ top: i * HOUR_HEIGHT_PX, height: HOUR_HEIGHT_PX }}
           aria-hidden
-        />
+        >
+          {i !== 0 && <div className="absolute inset-x-0 top-0 h-px bg-[#EAE2D2]" />}
+          {/* Dashed half-hour line */}
+          <div
+            className="absolute inset-x-0 border-t border-dashed border-[#F1ECE2]"
+            style={{ top: HOUR_HEIGHT_PX / 2 }}
+          />
+        </div>
       ))}
 
       {/* Current-time line — only on today */}
@@ -319,62 +359,189 @@ export function EventBlock({
   const color = therapist?.colorHex ?? '#6B7280';
   const therapistName = therapist?.name ?? `Staff #${event.staffId}`;
   const firstName = therapistName.split(' ')[0] || 'Unknown';
-  const time = `${fmtTimePT(event.startISO)} – ${fmtTimePT(event.endISO)}`;
-  const isOutlined = event.status === 'tentative' || event.status === 'pending' || event.type === 'hold';
+  const startStr = fmtTimePT(event.startISO);
+  const endStr = fmtTimePT(event.endISO);
+  const isOutlined = event.status === 'tentative' || event.status === 'pending';
   const isCancelled = event.status === 'cancelled';
+  const isHold = event.type === 'hold';
+  const isShift = event.type === 'shift';
 
   const widthPct = 100 / lane.lanes;
   const leftPct = lane.lane * widthPct;
-  const isHold = event.type === 'hold';
 
   // Inset right so adjacent lanes don't touch the next column's border.
   const inset = lane.lanes > 1 ? 2 : 1;
   const { before, after } = eventClipping(event.startISO, event.endISO);
 
+  // ─── Visual treatment ──────────────────────────────────────────────
+  // Solid (confirmed appointments) → colored left stripe + tinted white
+  //   body. Readable type, high contrast, color stays as identity hint.
+  // Outlined (tentative / pending) → dashed border, light tint, color text.
+  // Hold → diagonal stripes, dashed border.
+  // Shift → soft tinted body with thicker stripe + "Shift" pill so it
+  //   reads as ambient/background rather than a client appointment.
+  //
+  // This is a much bigger change than just sizing: instead of fully
+  // saturated event bodies (which crushed the white text), confirmed
+  // appointments now read as cards with a colored stripe — like Cal.com
+  // and Linear. Time + therapist sit at 12.5/13px which is the smallest
+  // legible size for tabular text at this density.
+
+  let bodyStyle: React.CSSProperties;
+  let textColor = '#1F2937'; // ink
+  let stripeStyle: React.CSSProperties | null = null;
+
+  if (isHold) {
+    bodyStyle = {
+      background: `repeating-linear-gradient(45deg, ${color}26 0px, ${color}26 5px, ${color}0d 5px, ${color}0d 10px)`,
+      border: `1px dashed ${color}99`,
+    };
+    textColor = color;
+  } else if (isOutlined) {
+    bodyStyle = {
+      background: `linear-gradient(180deg, ${color}12 0%, ${color}08 100%)`,
+      border: `1px dashed ${color}99`,
+    };
+    textColor = color;
+  } else if (isShift) {
+    bodyStyle = {
+      background: `linear-gradient(180deg, ${color}18 0%, ${color}0a 100%)`,
+      border: `1px solid ${color}40`,
+    };
+    textColor = color;
+    stripeStyle = { background: color, width: 3, opacity: 0.85 };
+  } else {
+    // Confirmed appointment — card style with colored stripe + tinted body
+    bodyStyle = {
+      background: `linear-gradient(180deg, ${color}1f 0%, ${color}10 100%)`,
+      border: `1px solid ${color}55`,
+    };
+    textColor = '#1F2937';
+    stripeStyle = { background: color, width: 3 };
+  }
+
+  // For very short events (< 36px) we collapse to a single-line variant.
+  const isShort = height < 36;
+  const isMedium = height >= 36 && height < 64;
+
   return (
     <motion.div
       role="article"
-      title={`${therapistName} · ${event.summary} · ${time} PT`}
+      title={`${therapistName} · ${event.summary} · ${startStr} – ${endStr} PT`}
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-      className={`absolute z-10 overflow-hidden rounded-md px-1.5 py-1 text-[11px] leading-tight shadow-[0_1px_2px_rgba(25,39,53,0.08)] ${
-        isCancelled ? 'opacity-60 line-through' : ''
+      className={`absolute z-10 overflow-hidden rounded-md shadow-[0_1px_2px_rgba(25,39,53,0.06)] backdrop-blur-[1px] ${
+        isCancelled ? 'opacity-60' : ''
       }`}
       style={{
         top,
         height,
         left: `calc(${leftPct}% + ${inset}px)`,
         width: `calc(${widthPct}% - ${inset * 2}px)`,
-        color: isOutlined ? color : '#fff',
-        background: isHold
-          ? `repeating-linear-gradient(45deg, ${color}33 0px, ${color}33 4px, ${color}10 4px, ${color}10 8px)`
-          : isOutlined
-          ? `${color}14`
-          : color,
-        border: isOutlined ? `1px dashed ${color}80` : `1px solid ${color}`,
+        color: textColor,
+        ...bodyStyle,
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center gap-1">
-        {!compact && (
-          <span
-            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ background: isOutlined ? color : 'rgba(255,255,255,0.85)' }}
-            aria-hidden
-          />
+      {/* Colored left stripe — identity at-a-glance */}
+      {stripeStyle && (
+        <span
+          className="absolute inset-y-0 left-0 rounded-l-md"
+          style={stripeStyle}
+          aria-hidden
+        />
+      )}
+
+      <div
+        className={`relative flex h-full flex-col ${
+          stripeStyle ? 'pl-2 pr-1.5' : 'px-1.5'
+        } py-1 leading-tight ${isCancelled ? 'line-through' : ''}`}
+      >
+        {isShort ? (
+          // Single-line — time + first name, tight.
+          <div className="flex items-center gap-1 truncate">
+            <span className="font-semibold tabular-nums" style={{ fontSize: 11 }}>
+              {startStr.replace(' ', '')}
+            </span>
+            <span className="truncate font-medium" style={{ fontSize: 11 }}>
+              {firstName}
+            </span>
+            {isHold && <span className="ml-auto text-[9px] font-semibold uppercase tracking-wider opacity-80">Hold</span>}
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className="truncate font-semibold tabular-nums" style={{ fontSize: 12.5 }}>
+                {startStr}
+                <span className="text-ink-faint" style={{ color: textColor === '#1F2937' ? undefined : `${color}99` }}>
+                  {' – '}
+                </span>
+                {endStr}
+              </span>
+              {before && (
+                <span className="rounded bg-white/70 px-1 text-[9px] font-semibold tabular-nums" style={{ color }}>
+                  ↑
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <span
+                className="inline-block h-2 w-2 shrink-0 rounded-full"
+                style={{ background: color }}
+                aria-hidden
+              />
+              <span className="truncate font-medium" style={{ fontSize: 12 }}>
+                {firstName}
+              </span>
+              {isHold && (
+                <span
+                  className="ml-auto shrink-0 rounded-sm px-1 text-[9.5px] font-semibold uppercase tracking-wider"
+                  style={{ background: `${color}22`, color }}
+                >
+                  Hold
+                </span>
+              )}
+              {isShift && (
+                <span
+                  className="ml-auto shrink-0 rounded-sm px-1 text-[9.5px] font-semibold uppercase tracking-wider"
+                  style={{ background: `${color}22`, color }}
+                >
+                  Shift
+                </span>
+              )}
+            </div>
+            {!isMedium && event.summary && !isHold && (
+              <div
+                className={`mt-0.5 truncate ${isOutlined ? 'opacity-85' : 'opacity-75'}`}
+                style={{ fontSize: 11.5 }}
+              >
+                {event.summary}
+              </div>
+            )}
+            {/* For compact (week) view, surface "tentative" inline at bottom */}
+            {!compact && isOutlined && !isHold && !isShift && height >= 84 && (
+              <div className="mt-auto pt-0.5">
+                <span
+                  className="inline-block rounded-sm px-1 text-[9.5px] font-semibold uppercase tracking-wider"
+                  style={{ background: `${color}22`, color }}
+                >
+                  Tentative
+                </span>
+              </div>
+            )}
+          </>
         )}
-        <span className="truncate font-semibold tabular-nums">{fmtTimePT(event.startISO)}</span>
-        {before && <span className="rounded bg-white/30 px-1 text-[9px] font-semibold tabular-nums">↑</span>}
+        {after && (
+          <span
+            className="absolute bottom-0.5 right-1 rounded bg-white/70 px-1 text-[9px] font-semibold tabular-nums"
+            style={{ color }}
+          >
+            ↓
+          </span>
+        )}
       </div>
-      <div className="truncate font-medium">{firstName}</div>
-      {height >= 56 && event.summary && (
-        <div className={`truncate ${isOutlined ? 'opacity-80' : 'opacity-90'}`}>{event.summary}</div>
-      )}
-      {after && (
-        <span className="absolute bottom-0.5 right-1 rounded bg-white/30 px-1 text-[9px] font-semibold tabular-nums">↓</span>
-      )}
     </motion.div>
   );
 }

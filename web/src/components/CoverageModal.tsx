@@ -194,7 +194,7 @@ export default function CoverageModal({
                 style={{ borderRadius: "24px 0 24px 24px" }}
               >
                 {/* Header */}
-                <div className="px-7 pt-6 pb-5 border-b border-surface-line flex items-start justify-between gap-4">
+                <div className="px-5 sm:px-7 pt-6 pb-5 border-b border-surface-line flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
                     <span
                       className="w-10 h-10 rounded-full grid place-items-center mt-0.5"
@@ -219,7 +219,7 @@ export default function CoverageModal({
                   </div>
                   <button
                     onClick={onClose}
-                    className="w-9 h-9 grid place-items-center rounded-full hover:bg-cream-alt text-ink-soft hover:text-ink transition shrink-0"
+                    className="w-11 h-11 grid place-items-center rounded-full hover:bg-cream-alt text-ink-soft hover:text-ink transition shrink-0"
                     aria-label="Close"
                   >
                     <FiX size={18} />
@@ -227,7 +227,7 @@ export default function CoverageModal({
                 </div>
 
                 {/* Body */}
-                <div className="px-7 py-6">
+                <div className="px-5 sm:px-7 py-6">
                   <AnimatePresence mode="wait" initial={false}>
                     <motion.div
                       key={phase.kind}
@@ -399,7 +399,7 @@ function FillForm({
         Match the details exactly as they appear on your insurance card.
       </p>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field
           label="First name"
           value={form.firstName}

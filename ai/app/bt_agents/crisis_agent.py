@@ -5,7 +5,7 @@ import os
 
 from agents import Agent
 
-from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, STYLE_TEXT
+from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
 
 
 def build_crisis_agent() -> Agent:
@@ -13,6 +13,7 @@ def build_crisis_agent() -> Agent:
         f"{PRACTICE_CONTEXT}\n\n"
         f"{STYLE_TEXT}\n\n"
         f"{CRISIS_RULE}\n\n"
+        f"{SCOPE_RULE}\n\n"
         "Warmly acknowledge the user, direct them immediately to 988 (call or text) "
         "or 911 for immediate danger. State clearly you are not a therapist. "
         "Keep response under 3 sentences."

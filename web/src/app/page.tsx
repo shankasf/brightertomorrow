@@ -9,14 +9,21 @@ import PressMentionSection from "@/components/PressMention";
 import AppointmentSection from "@/components/AppointmentSection";
 import HomeFaqs from "@/components/HomeFaqs";
 import FirstStepCta from "@/components/FirstStepCta";
+import NotSureWhereToStart from "@/components/NotSureWhereToStart";
+import FreeResources from "@/components/FreeResources";
+import PodcastSection from "@/components/PodcastSection";
+import HomeMaps from "@/components/HomeMaps";
 import {
-  getBlogPosts, getFaqs, getLocations, getPressMentions,
-  getServices, getSiteSettings, getStats, getTestimonials,
+  getBlogPosts, getFaqs, getFreeResources, getLocations, getPodcast,
+  getPressMentions, getServices, getSiteSettings, getStats, getTestimonials,
 } from "@/lib/queries";
 import { FiArrowUpRight } from "react-icons/fi";
 
 export default async function HomePage() {
-  const [settings, services, stats, testimonials, posts, locations, press, faqs] = await Promise.all([
+  const [
+    settings, services, stats, testimonials, posts, locations, press, faqs,
+    podcast, resources,
+  ] = await Promise.all([
     getSiteSettings(),
     getServices(),                  // show all 8 in 2x4 like the original
     getStats(),
@@ -25,6 +32,8 @@ export default async function HomePage() {
     getLocations(),
     getPressMentions(),
     getFaqs(),
+    getPodcast(),
+    getFreeResources(),
   ]);
 
   return (
@@ -59,7 +68,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Services / Specialties — wine band matching live (#66202A) */}
+      {/* Services / Specialties — wine band matching live (#66202A) — circle images */}
       <section
         className="section relative overflow-hidden"
         style={{ backgroundColor: "#66202A" }}
@@ -90,19 +99,17 @@ export default async function HomePage() {
             </div>
           </Reveal>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-6">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-8">
             {services.map((s, i) => (
               <Reveal key={s.id} delay={i * 0.04}>
                 <Link
                   href={`/services/${s.slug}`}
-                  className="group relative flex flex-col h-full overflow-hidden hover:-translate-y-1 transition-all duration-500"
-                  style={{
-                    backgroundColor: "#F4F4F4",
-                    borderRadius: "20px 0 20px 20px",
-                  }}
+                  className="group relative flex flex-col h-full items-center text-center px-4 py-6 sm:py-8 hover:-translate-y-1 transition-all duration-500"
                 >
-                  {s.image_url && (
-                    <div className="aspect-[4/3] overflow-hidden">
+                  {s.image_url ? (
+                    <div
+                      className="relative w-40 sm:w-44 md:w-48 aspect-square rounded-full overflow-hidden ring-4 ring-white/20 group-hover:ring-[#E1B878]/70 transition-all duration-500 shadow-card"
+                    >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={s.image_url}
@@ -110,28 +117,38 @@ export default async function HomePage() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                       />
                     </div>
+                  ) : (
+                    <div className="w-40 sm:w-44 md:w-48 aspect-square rounded-full bg-white/10 ring-4 ring-white/20 grid place-items-center">
+                      <span className="font-display text-4xl text-white/70">
+                        {s.title.slice(0, 1)}
+                      </span>
+                    </div>
                   )}
-                  <div className="p-6 flex-1 flex flex-col">
-                    <span
-                      className="text-xs font-semibold uppercase tracking-[0.18em] tabular"
-                      style={{ color: "#E1B878" }}
+
+                  <span
+                    className="mt-6 text-[11px] font-semibold uppercase tracking-[0.18em] tabular"
+                    style={{ color: "#E1B878" }}
+                  >
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <h3 className="mt-2 font-display text-xl sm:text-[1.3rem] text-white leading-snug">
+                    {s.title}
+                  </h3>
+                  {s.short_desc && (
+                    <p
+                      className="text-sm mt-3 leading-relaxed max-w-[20rem]"
+                      style={{ color: "rgba(255,255,255,0.82)" }}
                     >
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <h3 className="mt-2 font-display text-xl sm:text-[1.35rem] text-ink leading-snug">
-                      {s.title}
-                    </h3>
-                    <p className="text-sm text-ink-soft mt-3 flex-1 leading-relaxed">
                       {s.short_desc}
                     </p>
-                    <span
-                      className="mt-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em]"
-                      style={{ color: "#66202A" }}
-                    >
-                      Read more
-                      <FiArrowUpRight className="transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-0.5" />
-                    </span>
-                  </div>
+                  )}
+                  <span
+                    className="mt-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em]"
+                    style={{ color: "#E1B878" }}
+                  >
+                    Read more
+                    <FiArrowUpRight className="transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-0.5" />
+                  </span>
                 </Link>
               </Reveal>
             ))}
@@ -139,10 +156,13 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* Not sure where to start — matching tool CTA */}
+      <NotSureWhereToStart />
+
       {/* Locations */}
       <HomeLocations locations={locations} />
 
-      {/* Press mentions */}
+      {/* Press mentions / Featured In (enlarged editorial layout) */}
       <PressMentionSection mentions={press} />
 
       {/* Testimonials — editorial 2-up */}
@@ -195,6 +215,12 @@ export default async function HomePage() {
 
       {/* Contact / appointment */}
       <AppointmentSection settings={settings} locations={locations} />
+
+      {/* Free resources */}
+      <FreeResources resources={resources} />
+
+      {/* Podcast */}
+      <PodcastSection podcast={podcast} />
 
       {/* Blog preview — wine band matching live */}
       <section
@@ -270,6 +296,9 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Google Maps — both physical offices */}
+      <HomeMaps />
     </>
   );
 }

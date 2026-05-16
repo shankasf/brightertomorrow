@@ -12,15 +12,17 @@ from ...prompts import (
     ANTI_DEFLECTION_RULE,
     CRISIS_RULE,
     PRACTICE_CONTEXT,
+    SCOPE_RULE,
     STYLE_VOICE,
     VOICE_CONFIRMATION_RULE,
+    VOICE_PACING_RULE,
 )
 from ...tools import MATCHING_TOOLS, VOICE_TOOLS
 from ..roster import ELIGIBLE_FOR_BOOKING, THERAPISTS_WITHOUT_FEEDS
 
 
 def _eligible_spoken() -> str:
-    return "; ".join(t["name"] for t in ELIGIBLE_FOR_BOOKING)
+    return "; ".join(t["name"] for t in sorted(ELIGIBLE_FOR_BOOKING, key=lambda t: t["name"]))
 
 
 def _excluded_names() -> str:
@@ -46,8 +48,10 @@ def build_matching_agent(
             f"{PRACTICE_CONTEXT}\n\n"
             f"{STYLE_VOICE}\n\n"
             f"{CRISIS_RULE}\n\n"
+            f"{SCOPE_RULE}\n\n"
             f"{ANTI_DEFLECTION_RULE}\n\n"
             f"{VOICE_CONFIRMATION_RULE}\n\n"
+            f"{VOICE_PACING_RULE}\n\n"
 
             "Help the caller find the right therapist. Call list_team_members first. "
             "Filter to ONLY the following bookable therapists (they have calendar feeds): "
@@ -61,6 +65,8 @@ def build_matching_agent(
             "Then hand off to IntakeAgent — never just say 'we'll connect you'.\n\n"
 
             "Speak naturally — no lists, describe the best match in 2–3 sentences. "
+            "Alphabetize therapist names when reading them aloud. Pause briefly between names. "
+            "NEVER speak a specific appointment time here — TIME selection happens in BookingAgent, in Pacific Time. "
             "Always state the chosen therapist's name clearly so it appears in the "
             "transcript for the Booking Agent to pick up. "
             "When the caller is ready to proceed (says 'let's book', 'sign me up', "

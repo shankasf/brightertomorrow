@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
-import { FiPhone, FiMapPin, FiClock, FiArrowRight, FiCheck } from "react-icons/fi";
+import { FiPhone, FiMail, FiMapPin, FiClock, FiArrowRight, FiCheck } from "react-icons/fi";
 import type { SiteSettings, Location } from "@/lib/queries";
 
 export default function AppointmentSection({
@@ -65,7 +65,7 @@ export default function AppointmentSection({
           <Reveal delay={0.1} className="lg:col-span-7">
             <div className="bg-cream-alt rounded-3xl border border-surface-line p-8 md:p-10">
               <div className="grid sm:grid-cols-2 gap-x-8 gap-y-8">
-                {/* Phone */}
+                {/* Phone + Email */}
                 <div>
                   <div className="flex items-center gap-2.5 text-brand-700">
                     <FiPhone size={14} />
@@ -79,8 +79,17 @@ export default function AppointmentSection({
                       {settings.primary_phone}
                     </a>
                   )}
-                  <p className="text-xs text-ink-muted mt-2 leading-relaxed">
-                    Mon – Fri 9:00 am – 5:00 pm<br />Sat – Sun: Closed
+                  {settings.primary_email && (
+                    <a
+                      href={`mailto:${settings.primary_email}`}
+                      className="mt-2 inline-flex items-center gap-2 text-sm text-ink-muted hover:text-brand transition break-all"
+                    >
+                      <FiMail size={13} className="shrink-0" />
+                      {settings.primary_email}
+                    </a>
+                  )}
+                  <p className="text-xs text-ink-muted mt-3 leading-relaxed">
+                    Mon – Fri 9:00 am – 8:00 pm<br />Sat – Sun 10:00 am – 4:00 pm
                   </p>
                 </div>
 

@@ -6,6 +6,8 @@ import {
   PageHeader, PageWrap, TableCard, THead, TH, TD,
   Pill, Pagination, EmptyState, Input, SkeletonRows, Button, ErrorBanner,
 } from '@/components/admin/ui';
+import { formatPT } from '@/lib/time-pt';
+import { LuShieldCheck } from 'react-icons/lu';
 
 type Check = {
   id: number;
@@ -30,9 +32,7 @@ type ListResponse = { items: Check[]; total: number; page: number; limit: number
 const PAGE_SIZE = 25;
 
 function fmtDateTime(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso;
-  return new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return formatPT(iso);
 }
 
 function statusTone(s: string): 'green' | 'amber' | 'red' | 'slate' {
@@ -197,11 +197,7 @@ export default function AdminInsuranceChecksPage() {
         <EmptyState
           title={from || to || q || source !== 'all' || status !== 'all' ? 'No insurance checks match these filters' : 'No insurance checks yet'}
           description="Eligibility verifications from the chatbot, voice agent, and website intake will appear here."
-          icon={
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6z" /><path d="m9 12 2 2 4-4" />
-            </svg>
-          }
+          icon={<LuShieldCheck width={22} height={22} strokeWidth={1.8} />}
         />
       ) : (
         <>
@@ -209,13 +205,13 @@ export default function AdminInsuranceChecksPage() {
             <THead>
               <tr>
                 <TH>Patient</TH>
-                <TH>DOB</TH>
-                <TH>Phone</TH>
-                <TH>Email</TH>
-                <TH>Insurance</TH>
+                <TH className="bt-col-hide-md">DOB</TH>
+                <TH className="bt-col-hide-sm">Phone</TH>
+                <TH className="bt-col-hide-xl">Email</TH>
+                <TH className="bt-col-hide-lg">Insurance</TH>
                 <TH>Status</TH>
-                <TH>Source</TH>
-                <TH>Checked At</TH>
+                <TH className="bt-col-hide-md">Source</TH>
+                <TH className="bt-col-hide-lg">Checked</TH>
               </tr>
             </THead>
             <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.015 } } }}>
@@ -225,18 +221,15 @@ export default function AdminInsuranceChecksPage() {
                   <motion.tr
                     key={c.id}
                     variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
-                    className="border-t border-slate-100 transition-colors hover:bg-slate-50/70"
                   >
-                    <TD>
-                      <div className="font-medium text-ink">{fullName || <span className="text-slate-400">—</span>}</div>
-                    </TD>
-                    <TD className="text-slate-600 tabular-nums">{c.date_of_birth || '—'}</TD>
-                    <TD className="text-slate-600 tabular-nums">{c.phone || '—'}</TD>
-                    <TD className="text-slate-600">{c.email || '—'}</TD>
-                    <TD>
-                      <div className="font-medium text-ink">{c.payer_name || '—'}</div>
+                    <TD>{fullName || <span className="text-ink-faint">—</span>}</TD>
+                    <TD className="bt-col-hide-md tabular-nums whitespace-nowrap">{c.date_of_birth || '—'}</TD>
+                    <TD className="bt-col-hide-sm tabular-nums whitespace-nowrap">{c.phone || '—'}</TD>
+                    <TD className="bt-col-hide-xl break-all">{c.email || '—'}</TD>
+                    <TD className="bt-col-hide-lg">
+                      <div className="font-semibold text-ink">{c.payer_name || '—'}</div>
                       {c.insurance_member_id && (
-                        <div className="text-[11px] font-mono tabular-nums text-slate-400">
+                        <div className="text-[11px] font-mono tabular-nums text-ink-faint">
                           ID {c.insurance_member_id}
                         </div>
                       )}
@@ -246,10 +239,10 @@ export default function AdminInsuranceChecksPage() {
                         {statusLabel(c.coverage_status)}
                       </Pill>
                     </TD>
-                    <TD>
+                    <TD className="bt-col-hide-md">
                       <Pill tone={sourceTone(c.source)} dot>{c.source_label}</Pill>
                     </TD>
-                    <TD className="text-xs text-slate-500" title={c.created_at}>
+                    <TD className="bt-col-hide-lg whitespace-nowrap text-[12.5px] text-ink-soft" title={c.created_at}>
                       {fmtDateTime(c.created_at)}
                     </TD>
                   </motion.tr>

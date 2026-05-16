@@ -188,7 +188,7 @@ export function MultiAreaChart({
           const step = Math.max(1, Math.floor(n / 5));
           if (i % step !== 0 && i !== n - 1) return null;
           const dt = new Date(d);
-          const label = dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+          const label = dt.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric' });
           return (
             <text
               key={i}
@@ -242,7 +242,8 @@ export function MultiAreaChart({
           }}
         >
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-soft">
-            {new Date(days[hoverIdx]).toLocaleDateString(undefined, {
+            {new Date(days[hoverIdx]).toLocaleDateString('en-US', {
+              timeZone: 'America/Los_Angeles',
               weekday: 'short',
               month: 'short',
               day: 'numeric',
@@ -431,7 +432,7 @@ export function BarChart({
               fill="#858585"
               fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
             >
-              {dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+              {dt.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric' })}
             </text>
           );
         })}

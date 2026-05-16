@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -42,8 +41,8 @@ func (h *AdminContactsHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT id, full_name, email, phone, subject, source,
-		        to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at,
-		        to_char(purged_at,  'YYYY-MM-DD"T"HH24:MI:SSOF') AS purged_at
+		        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+		        to_char(purged_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS purged_at
 		 FROM bt.contact_submissions
 		 ORDER BY created_at DESC
 		 LIMIT $1 OFFSET $2`, limit, offset)
@@ -99,9 +98,9 @@ func (h *AdminContactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var c contactDetail
 	err = h.Pool.QueryRow(r.Context(),
 		`SELECT id, full_name, email, phone, subject, message, source,
-		        to_char(created_at,   'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(retain_until, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
-		        to_char(purged_at,    'YYYY-MM-DD"T"HH24:MI:SSOF')
+		        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(retain_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		        to_char(purged_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.contact_submissions WHERE id = $1`, id,
 	).Scan(&c.ID, &c.FullName, &c.Email, &c.Phone, &c.Subject, &c.Message,
 		&c.Source, &c.CreatedAt, &c.RetainUntil, &c.PurgedAt)

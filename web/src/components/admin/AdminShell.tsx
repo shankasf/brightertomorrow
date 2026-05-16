@@ -1,11 +1,29 @@
 'use client';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAdminAuth } from './useAdminAuth';
 import AdminNav from './AdminNav';
 import { BTSpinner } from './Spinner';
+import { LuMenu } from 'react-icons/lu';
 
 function ChromedShell({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = useAdminAuth();
+  const pathname = usePathname();
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Close mobile drawer on route change.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
+
+  // Lock body scroll while drawer is open on mobile.
+  useEffect(() => {
+    if (!navOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [navOpen]);
 
   if (loading) {
     return (
@@ -19,8 +37,64 @@ function ChromedShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-cream-alt font-sans text-ink antialiased">
-      <AdminNav user={user} onLogout={logout} />
+      {/* Desktop sidebar */}
+      <div className="hidden lg:flex">
+        <AdminNav user={user} onLogout={logout} />
+      </div>
+
+      {/* Mobile drawer */}
+      <AnimatePresence>
+        {navOpen && (
+          <>
+            <motion.div
+              key="scrim"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setNavOpen(false)}
+              className="fixed inset-0 z-40 bg-ink/40 backdrop-blur-sm lg:hidden"
+              aria-hidden
+            />
+            <motion.div
+              key="drawer"
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 26, stiffness: 240 }}
+              className="fixed inset-y-0 left-0 z-50 flex lg:hidden"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Admin navigation"
+            >
+              <AdminNav user={user} onLogout={logout} onClose={() => setNavOpen(false)} />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <main className="relative flex-1 overflow-y-auto">
+        {/* Mobile topbar with hamburger */}
+        <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-[#EDE6D9] bg-cream-alt/85 px-3 py-2.5 backdrop-blur-md lg:hidden">
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open navigation"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white text-ink shadow-sm ring-1 ring-inset ring-[#EDE6D9] transition active:scale-[0.96]"
+          >
+            <LuMenu width={18} height={18} strokeWidth={2} />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-[#cf9e57] text-[11px] font-bold text-ink shadow-[0_4px_12px_rgba(225,184,120,0.4)]">
+              BT
+            </div>
+            <div className="leading-tight">
+              <div className="text-[12.5px] font-semibold tracking-tight text-ink">Brighter Tomorrow</div>
+              <div className="text-[9.5px] font-medium uppercase tracking-[0.18em] text-ink-soft">Admin Console</div>
+            </div>
+          </div>
+        </div>
+
         {/* Warm ambient gradient backdrop */}
         <div className="pointer-events-none absolute inset-x-0 top-0 -z-0 h-72 bg-gradient-to-b from-brand-50/70 via-cream-alt/0 to-transparent" />
         <div className="pointer-events-none absolute -right-40 -top-40 -z-0 h-80 w-80 rounded-full bg-brand-100/50 blur-3xl" />

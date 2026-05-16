@@ -7,6 +7,7 @@ import {
   fmtDayLabelPT,
 } from '@/app/admin/calendar/types';
 import CalendarEventRow from './CalendarEventRow';
+import { LuX, LuCalendar } from 'react-icons/lu';
 
 type Props = {
   open: boolean;
@@ -60,9 +61,7 @@ export default function CalendarDayPanel({ open, selectedDate, events, therapist
               aria-label="Close day panel"
               className="grid h-8 w-8 place-items-center rounded-lg text-ink-soft transition-colors hover:bg-cream hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
+              <LuX width={16} height={16} strokeWidth={2} />
             </button>
           </header>
 
@@ -70,10 +69,7 @@ export default function CalendarDayPanel({ open, selectedDate, events, therapist
             {events.length === 0 ? (
               <div className="mt-10 text-center text-sm text-ink-soft">
                 <div className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-full bg-cream-alt/60 text-ink-soft">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <rect x="3" y="4" width="18" height="17" rx="2" />
-                    <path d="M16 2v4M8 2v4M3 10h18" />
-                  </svg>
+                  <LuCalendar width={18} height={18} strokeWidth={1.7} aria-hidden />
                 </div>
                 No appointments — nice and clear.
               </div>

@@ -10,6 +10,7 @@ import {
   statusLabel,
   statusTone,
 } from '@/app/admin/calendar/types';
+import { LuLock } from 'react-icons/lu';
 
 type Props = {
   ev: CalEvent;
@@ -78,10 +79,7 @@ export default function CalendarEventRow({ ev, therapist }: Props) {
                 aria-expanded={open}
                 className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E5E5] bg-white px-2 py-1 text-[11.5px] font-medium text-ink/80 transition-colors hover:bg-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <rect x="3" y="11" width="18" height="11" rx="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
+                <LuLock width={12} height={12} strokeWidth={2} aria-hidden />
                 {open ? 'Hide details' : 'View details'}
               </button>
               <span className="text-[10.5px] text-ink-soft" title="Every view of patient details is recorded in the PHI access log.">

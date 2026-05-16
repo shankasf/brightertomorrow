@@ -6,6 +6,7 @@ import {
   PageHeader, PageWrap, Card, Button, Input, Textarea, Field,
   Pill, EmptyState, Checkbox,
 } from '@/components/admin/ui';
+import { LuStethoscope } from 'react-icons/lu';
 
 type Service = { id: number; slug: string; title: string; short_desc: string | null; long_desc: string | null; image_url: string | null; icon: string | null; position: number; published: boolean };
 type ServiceForm = Omit<Service, 'id'>;
@@ -101,7 +102,7 @@ export default function ServicesPage() {
             title="No services yet"
             description="Add your first service to populate the services page."
             action={<Button onClick={startNew}>＋ New service</Button>}
-            icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 12 0V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .2.3" /></svg>}
+            icon={<LuStethoscope width={22} height={22} strokeWidth={1.8} />}
           />
         ) : (
           <motion.div initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.025 } } }} className="space-y-2">

@@ -191,7 +191,7 @@ git show <pre-migration-hash>:gateway/internal/handlers/intake.go > gateway/inte
 ```
 make build-gateway && kubectl -n bt rollout restart deploy/bt-gateway
 ```
-(Or trigger a Tilt rebuild if the dev loop is running.)
+(See `ops/build-and-deploy.md` for the rebuild + rollout flow.)
 
 **Step 4.** Verify intake responds:
 ```

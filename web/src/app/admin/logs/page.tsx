@@ -15,13 +15,25 @@ type Status = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
 const MAX_KEEP = 2000;
 
+// Streaming log timestamp — render in Pacific Time so PT-based staff see a
+// consistent wall-clock regardless of their browser timezone. Milliseconds
+// stay browser-local because the source epoch is the same instant.
+const LOG_TS_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
 function fmtTs(epochSec: number): string {
   const d = new Date(epochSec * 1000);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
+  const parts = LOG_TS_FMT.formatToParts(d);
+  const hh = parts.find((p) => p.type === 'hour')?.value ?? '00';
+  const mm = parts.find((p) => p.type === 'minute')?.value ?? '00';
+  const ss = parts.find((p) => p.type === 'second')?.value ?? '00';
   const ms = String(d.getMilliseconds()).padStart(3, '0');
-  return `${hh}:${mm}:${ss}.${ms}`;
+  return `${hh}:${mm}:${ss}.${ms} PT`;
 }
 
 function levelStyle(level: string): string {

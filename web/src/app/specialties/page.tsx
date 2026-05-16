@@ -33,7 +33,7 @@ export default async function SpecialtiesPage() {
             {items.map((sp, i) => (
               <Reveal key={sp.id} delay={i * 0.03}>
                 <Link
-                  href="/contact"
+                  href={`/specialties/${sp.slug}`}
                   id={sp.slug}
                   className="group h-full block bg-cream rounded-3xl border border-surface-line p-7 hover:border-brand-700 hover:-translate-y-1 transition-all duration-500 shadow-soft hover:shadow-card"
                 >
@@ -45,7 +45,7 @@ export default async function SpecialtiesPage() {
                   </h3>
                   <p className="text-sm text-ink-muted mt-3 leading-relaxed">{sp.short_desc}</p>
                   <span className="mt-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-brand-700">
-                    Get matched
+                    Learn more
                     <FiArrowUpRight className="transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-0.5" />
                   </span>
                 </Link>

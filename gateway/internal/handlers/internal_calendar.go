@@ -14,7 +14,6 @@ import (
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -394,7 +393,10 @@ func (h *InternalCalendarHandler) persistAppointment(
 			reusedCheckUUID = reuse.CheckUUID
 			reusedCheckEmailHash = nameDOBHash
 			eligible = reuse.Eligible
-			coverageStatus = reuse.CoverageStatus
+			// reuse.CoverageStatus is canonical ("verified"/"unverified"/"error").
+			// IntakeRecord.CoverageStatus must use the intake bucket so the row
+			// lands in a GSI1 partition that ListIntakePointers queries.
+			coverageStatus = IntakeBucketFromCanonical(reuse.CoverageStatus, reuse.Eligible)
 			slog.Info("calendar confirm: reused in-session insurance verification",
 				"check_uuid", reuse.CheckUUID,
 				"source", source,

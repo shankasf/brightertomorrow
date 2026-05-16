@@ -29,10 +29,10 @@ export default function AboutIntro() {
           </p>
 
           <Link
-            href="/about"
+            href="/our-story"
             className="mt-8 inline-flex items-center gap-2 text-brand-700 hover:text-brand font-semibold border-b border-brand-300 hover:border-brand pb-1 transition-colors"
           >
-            Read more about us <FiArrowRight />
+            Read our story <FiArrowRight />
           </Link>
         </Reveal>
 
@@ -53,8 +53,8 @@ export default function AboutIntro() {
             </svg>
 
             <div className="bg-cream rounded-4xl border border-surface-line shadow-soft overflow-hidden">
-              <div className="px-8 py-9 sm:px-10 sm:py-11">
-                <div className="text-[5rem] sm:text-[6rem] leading-none font-display text-brand-700 tabular">
+              <div className="px-6 py-8 sm:px-10 sm:py-11">
+                <div className="text-[clamp(3.5rem,16vw,6rem)] leading-none font-display text-brand-700 tabular">
                   7
                 </div>
                 <div className="mt-3 font-display text-xl text-ink">Focus areas</div>
@@ -66,8 +66,8 @@ export default function AboutIntro() {
 
               <div className="border-t border-surface-line/80" />
 
-              <div className="px-8 py-9 sm:px-10 sm:py-11">
-                <div className="text-[5rem] sm:text-[6rem] leading-none font-display text-brand-700 tabular">
+              <div className="px-6 py-8 sm:px-10 sm:py-11">
+                <div className="text-[clamp(3.5rem,16vw,6rem)] leading-none font-display text-brand-700 tabular">
                   100<span className="text-brand-400">%</span>
                 </div>
                 <div className="mt-3 font-display text-xl text-ink">Holistic care</div>

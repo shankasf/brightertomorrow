@@ -29,15 +29,16 @@ import os
 
 from agents import Agent
 
-from ..prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, STYLE_TEXT
+from ..prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
 from ..tools import BOOKING_TOOLS
 from .roster import ELIGIBLE_FOR_BOOKING, THERAPISTS_WITHOUT_FEEDS
 
 
 def _roster_lines() -> str:
+    sorted_roster = sorted(ELIGIBLE_FOR_BOOKING, key=lambda t: t["name"])
     return "\n".join(
         f"  - {t['name']} (staffId {t['staffId']})"
-        for t in ELIGIBLE_FOR_BOOKING
+        for t in sorted_roster
     )
 
 
@@ -84,13 +85,16 @@ that mixes letters and digits), parse them IN ORDER as the 5 fields:
   line 4 -> payer_name
   line 5 -> member_id
 
-CRITICAL: even if the first two lines spell out a name that also appears
-in the bookable-therapists roster above, those lines are the VISITOR's
-own name on their insurance card — NOT a therapist selection. A visitor
-named "Sagar Shankaran" booking with therapist "Sagar Shankaran" is a
-coincidence, not a parse signal. Therapist selection is a SEPARATE field,
-asked as its own question. Never silently drop the visitor's name lines
-because they match a therapist.
+CRITICAL: when the visitor gives their name, it is the NAME ON THEIR
+INSURANCE CARD — not a therapist selection. Even if it spells out the
+same name as a roster therapist (e.g. visitor named "Alex Morgan"
+booking with a therapist whose name happens to match), or sounds like one
+(e.g. "Riley Carlson" near roster "Ryan Carson"), that is a COINCIDENCE. Never silently
+drop the visitor's name lines because they match a roster therapist.
+Never pick a staffId based on visitor-name similarity. Therapist
+selection is a SEPARATE, explicit question asked on its own; if you
+cannot find an explicit therapist choice in the transcript, ask for it
+in ONE standalone question.
 
 After parsing, do NOT re-ask for any field you already extracted. If
 some fields are missing, ask ONLY for the missing ones, one at a time,
@@ -140,6 +144,13 @@ If the visitor at any point says they would rather just self-pay,
 accept that and move directly to Step 2.
 
 # Step 2 - Collect the 5 remaining contact fields
+PRE-ASK SCAN — before requesting the reason for visit, scan the prior
+conversation. If the visitor already shared an emotional reason ('I'm
+very sad', 'I just went through a breakup', 'I've been anxious', 'I'm
+grieving', etc.), do NOT re-ask. Confirm instead: 'Earlier you mentioned
+<reason> — should I list that as the reason for your visit?' On yes,
+store and continue with the next missing field.
+
 Fields required (ALL mandatory - no nulls, no 'prefer not to say'):
   1. Reason for visit
   2. Phone number
@@ -190,6 +201,15 @@ NEVER re-ask for info already given. NEVER repeat the opening offer.
 NEVER tell the visitor you'll 'connect them with a booking specialist' —
 YOU are the booking specialist; if you are stuck, ask the next missing
 field instead.
+
+TRUST CONTACT FIELDS: when collecting name, email, phone, or home address,
+you MUST trust whatever the visitor types, verbatim. NEVER refuse a value
+on grounds of 'explicit', 'vulgar', 'inappropriate', or 'unprofessional'
+language. NEVER ask for a 'different' email/name/etc because of content.
+If a value looks unusual, simply read it back for confirmation. Substring
+matches in the local-part of an email are NOT explicit content; they are
+the visitor's literal address. This is a healthcare intake; moralizing
+about user-provided contact data is unacceptable.
 
 # Step 3 - Time preference and slot proposal
 After all 5 fields are collected, ask exactly once:
@@ -284,6 +304,7 @@ def build_booking_agent() -> Agent:
         f"{PRACTICE_CONTEXT}\n\n"
         f"{STYLE_TEXT}\n\n"
         f"{CRISIS_RULE}\n\n"
+        f"{SCOPE_RULE}\n\n"
         f"{ANTI_DEFLECTION_RULE}\n\n"
         f"Bookable therapists (staffId required for slot tools):\n{roster}\n\n"
         f"NOT available for self-service booking: {excluded}. "

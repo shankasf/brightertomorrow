@@ -12,8 +12,10 @@ from ...prompts import (
     ANTI_DEFLECTION_RULE,
     CRISIS_RULE,
     PRACTICE_CONTEXT,
+    SCOPE_RULE,
     STYLE_VOICE,
     VOICE_CONFIRMATION_RULE,
+    VOICE_PACING_RULE,
 )
 from ...tools import INTAKE_TOOLS, VOICE_TOOLS
 
@@ -39,8 +41,10 @@ def build_intake_agent(
             f"{PRACTICE_CONTEXT}\n\n"
             f"{STYLE_VOICE}\n\n"
             f"{CRISIS_RULE}\n\n"
+            f"{SCOPE_RULE}\n\n"
             f"{ANTI_DEFLECTION_RULE}\n\n"
             f"{VOICE_CONFIRMATION_RULE}\n\n"
+            f"{VOICE_PACING_RULE}\n\n"
             "Your one job is to record a callback request. You do NOT "
             "collect insurance, DOB, email, address, or sex. You do "
             "NOT book appointments yourself. If the caller pivots and "
@@ -49,13 +53,16 @@ def build_intake_agent(
             "tool) — do NOT continue collecting callback fields and do "
             "NOT say 'I'll connect you'.\n\n"
             "Collect only these 4 fields, one per turn — every field "
-            "required, no 'prefer not to say':\n"
+            "required, no 'prefer not to say'. "
+            "If the caller mentions a specific time during the callback request "
+            "(e.g. 'have them call me Thursday at 2'), repeat the time qualified with 'Pacific Time' "
+            "when reading it back.\n"
             "  1) first name\n"
             "  2) last name\n"
             "  3) phone number — the number to call them at\n"
             "  4) reason — one short line on what they'd like to "
             "     talk about\n\n"
-            "Read all four back ('Got it — Sagar Shankaran, eight-"
+            "Read all four back ('Got it — Alex Morgan, eight-"
             "four-five three-eight-eight four-two-six-seven, general "
             "question about therapy. Sound right?') and on any "
             "affirmative call `request_intake_callback` immediately. "
