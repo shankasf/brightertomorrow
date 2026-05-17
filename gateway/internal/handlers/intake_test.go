@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
@@ -31,6 +32,18 @@ type stubPHIStore struct {
 
 func (s *stubPHIStore) PutIntake(_ context.Context, _ phi.IntakeRecord) error {
 	return s.putErr
+}
+
+func (s *stubPHIStore) PutInsuranceCheck(_ context.Context, _ phi.InsuranceCheckRecord) error {
+	return nil
+}
+
+func (s *stubPHIStore) FindStandaloneCheckForReuse(_ context.Context, _, _ string, _ time.Duration) (*phi.InsuranceReuse, error) {
+	return nil, phi.ErrNotFound
+}
+
+func (s *stubPHIStore) LinkCheckToSubmission(_ context.Context, _, _, _, _ string) error {
+	return nil
 }
 
 func TestIntakeRequestValidate(t *testing.T) {
@@ -124,20 +137,6 @@ func TestIntakeHandlerInsuranceBooking(t *testing.T) {
 		},
 	}
 
-	// New path: INSERT INTO bt.intake_pointers, RETURNING id.
-	mock.ExpectQuery(`INSERT INTO bt\.intake_pointers`).
-		WithArgs(
-			pgxmock.AnyArg(),       // submission_uuid
-			pgxmock.AnyArg(),       // email_hash
-			"booking",              // flow
-			"insurance",            // payment_method
-			"active",               // status (from coverage response)
-			"website-booking-flow", // source
-			pgxmock.AnyArg(),       // ddb_pk
-			pgxmock.AnyArg(),       // ddb_sk
-		).
-		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(42)))
-
 	body := `{
 		"flow":"booking",
 		"service":"Individual Therapy",
@@ -201,19 +200,6 @@ func TestIntakeHandlerSelfPayBooking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pgxmock.NewPool: %v", err)
 	}
-
-	mock.ExpectQuery(`INSERT INTO bt\.intake_pointers`).
-		WithArgs(
-			pgxmock.AnyArg(),       // submission_uuid
-			pgxmock.AnyArg(),       // email_hash
-			"booking",              // flow
-			"self_pay",             // payment_method
-			"self_pay",             // status
-			"website-booking-flow", // source
-			pgxmock.AnyArg(),       // ddb_pk
-			pgxmock.AnyArg(),       // ddb_sk
-		).
-		WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(43)))
 
 	body := `{
 		"flow":"booking",
