@@ -37,6 +37,28 @@ function FooterLink({ href, label }: { href: string; label: string }) {
   );
 }
 
+function ExternalFooterLink({ href, label }: { href: string; label: string }) {
+  return (
+    <li>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group inline-flex items-start gap-2 text-[14px] text-white/85 hover:text-white transition-colors"
+      >
+        <FiChevronRight
+          size={13}
+          className="mt-1 shrink-0 transition-transform duration-300 group-hover:translate-x-0.5"
+          style={{ color: GOLD }}
+        />
+        <span className="leading-snug">{label}</span>
+      </a>
+    </li>
+  );
+}
+
+const JOTFORM_MATCH_URL = "https://form.jotform.com/253014448330448";
+
 export default function SiteFooter({ settings, nav }: { settings: SiteSettings; nav: NavItem[] }) {
   const year = new Date().getFullYear();
   const navGroups = nav.filter((g) => (g.children ?? []).length > 0);
@@ -144,6 +166,7 @@ export default function SiteFooter({ settings, nav }: { settings: SiteSettings; 
               <div className="mt-8">
                 <ColumnHeading>Important Links</ColumnHeading>
                 <ul className="space-y-2.5">
+                  <ExternalFooterLink href={JOTFORM_MATCH_URL} label="Find My Therapist" />
                   <FooterLink href="/privacy" label="Privacy Policy" />
                   <FooterLink href="/contact" label="Contact" />
                   <FooterLink href="/faqs" label="FAQs" />

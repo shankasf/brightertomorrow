@@ -17,6 +17,7 @@ from agents.realtime import RealtimeAgent
 
 from ...prompts import (
     ANTI_DEFLECTION_RULE,
+    CONTACT_FIELD_RULE,
     CRISIS_RULE,
     PRACTICE_CONTEXT,
     SCOPE_RULE,
@@ -52,6 +53,7 @@ def build_booking_agent() -> RealtimeAgent:
             f"{SOFT_SAFETY_SCREEN_RULE}\n\n"
             f"{SCOPE_RULE}\n\n"
             f"{ANTI_DEFLECTION_RULE}\n\n"
+            f"{CONTACT_FIELD_RULE}\n\n"
             f"{VOICE_CONFIRMATION_RULE}\n\n"
             f"{VOICE_PACING_RULE}\n\n"
 

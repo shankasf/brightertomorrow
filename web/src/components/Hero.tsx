@@ -4,15 +4,15 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { FiCheck, FiShield } from "react-icons/fi";
 import type { SiteSettings } from "@/lib/queries";
-import MatchModal from "./MatchModal";
 import CoverageModal from "./CoverageModal";
 
 const HEADLINE =
   "Las Vegas Therapy Services For Children, Teens and Adults";
 
+const JOTFORM_MATCH_URL = "https://form.jotform.com/253014448330448";
+
 export default function Hero({ settings }: { settings: SiteSettings }) {
   const reduce = useReducedMotion();
-  const [matchOpen, setMatchOpen] = useState(false);
   const [coverageOpen, setCoverageOpen] = useState(false);
 
   // Crossfading slideshow
@@ -85,14 +85,15 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
             transition={{ duration: 0.5 }}
             className="inline-flex items-center"
           >
-            <button
-              type="button"
-              onClick={() => setMatchOpen(true)}
+            <a
+              href={JOTFORM_MATCH_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-white text-[11px] font-semibold uppercase tracking-[0.18em] px-5 py-2.5 hover:opacity-90 transition"
               style={{ backgroundColor: "#66202A", borderRadius: "20px 0 20px 20px" }}
             >
               Find Your Therapist Here
-            </button>
+            </a>
           </motion.div>
 
           {/* Brand script preheader */}
@@ -136,13 +137,14 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
             transition={{ duration: 0.6, delay: 0.75 }}
             className="mt-9 flex flex-wrap items-center justify-center gap-4"
           >
-            <button
-              type="button"
-              onClick={() => setMatchOpen(true)}
+            <a
+              href={JOTFORM_MATCH_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="btn-primary"
             >
               Get Started
-            </button>
+            </a>
             <button
               type="button"
               onClick={() => setCoverageOpen(true)}
@@ -234,9 +236,7 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
       <span id="after-hero" />
     </section>
 
-    {/* Multi-step flows — Talkspace-style. Rendered outside <section> so the
-        modal overlays escape the hero stacking context. */}
-    <MatchModal open={matchOpen} onClose={() => setMatchOpen(false)} />
+    {/* Coverage modal rendered outside <section> so it escapes the hero stacking context. */}
     <CoverageModal open={coverageOpen} onClose={() => setCoverageOpen(false)} />
     </>
   );

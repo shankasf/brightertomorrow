@@ -35,7 +35,8 @@ export type Service = {
 export type Specialty = {
   id: number; slug: string; title: string;
   short_desc: string | null; long_desc: string | null;
-  image_url: string | null; position: number;
+  image_url: string | null; inline_image_url: string | null;
+  subheadline: string | null; position: number;
 };
 
 export type TeamGroup = { id: number; slug: string; title: string; description: string | null; position: number };
@@ -104,13 +105,13 @@ export async function getServiceBySlug(slug: string): Promise<Service | null> {
 
 export async function getSpecialties(): Promise<Specialty[]> {
   const { rows } = await q<Specialty>(
-    `SELECT id, slug, title, short_desc, long_desc, image_url, position
+    `SELECT id, slug, title, short_desc, long_desc, image_url, inline_image_url, subheadline, position
      FROM bt.specialties WHERE published ORDER BY position`);
   return rows;
 }
 export async function getSpecialtyBySlug(slug: string): Promise<Specialty | null> {
   const { rows } = await q<Specialty>(
-    `SELECT id, slug, title, short_desc, long_desc, image_url, position
+    `SELECT id, slug, title, short_desc, long_desc, image_url, inline_image_url, subheadline, position
      FROM bt.specialties WHERE slug = $1 AND published`, [slug]);
   return rows[0] ?? null;
 }

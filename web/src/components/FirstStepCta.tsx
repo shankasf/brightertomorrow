@@ -30,9 +30,14 @@ export default function FirstStepCta() {
               Las Vegas, or virtually anywhere in Nevada.
             </p>
             <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
-              <Link href="/contact" className="btn-primary">
+              <a
+                href="https://form.jotform.com/253014448330448"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-primary"
+              >
                 Find My Therapist
-              </Link>
+              </a>
               <Link
                 href="/contact"
                 className="inline-flex items-center gap-2 text-white border border-white/40 hover:bg-white hover:text-ink px-6 py-4 font-semibold uppercase tracking-[0.12em] text-[0.82rem] transition"

@@ -21,6 +21,7 @@ from agents import Agent, handoff
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 
 from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, SOFT_SAFETY_SCREEN_RULE, STYLE_TEXT
+from ..tools import TRIAGE_TOOLS
 from .booking_agent import build_booking_agent
 from .crisis_agent import build_crisis_agent
 from .guardrails import crisis_guardrail
@@ -107,11 +108,20 @@ def build_triage_agent() -> Agent:
         "   Also route here for any follow-up turn while a booking "
         "   is in progress (see Stickiness above).\n\n"
 
-        "3. **InsuranceCheck** — coverage-only questions, no "
-        "   booking intent yet: 'do you take Aetna?', 'is <plan> "
-        "   in network?', 'check my coverage', 'verify my "
-        "   insurance', 'what's my copay', 'do you accept "
-        "   <insurance>?'.\n\n"
+        "3. **Insurance — direct yes/no FIRST, then maybe verify**. "
+        "   When the visitor asks 'do you take <X>?' / 'do you accept "
+        "   <X>?' / 'is <plan> in network?' for a SPECIFIC named payer "
+        "   (Aetna, Medicaid, BCBS, etc.), call `check_insurance_support` "
+        "   with the named payer and reply with its `note` field as your "
+        "   first sentence — that is a direct yes/no answer the visitor "
+        "   asked for. Do NOT hand off to InsuranceCheck before giving "
+        "   that answer. If the visitor asks 'what insurances do you "
+        "   take?' with no specific name, call `list_payers` and read "
+        "   back the main ones in plain English. AFTER the direct "
+        "   answer, ask in the same reply: 'Want me to verify your "
+        "   specific plan, or get you booked?' Only on a yes to verify, "
+        "   hand off to **InsuranceCheck**. Only on booking intent, "
+        "   hand off to **BookingAgent**.\n\n"
 
         "4. **Therapist Matching** — 'find a therapist', 'match "
         "   me', 'who treats <issue>', 'I need a counselor', 'who "
@@ -119,11 +129,18 @@ def build_triage_agent() -> Agent:
         "   choosing a clinician but hasn't mentioned booking or "
         "   insurance yet.\n\n"
 
-        "5. **Intake Agent** — 'have someone call me back', "
-        "   'reach out to me', 'contact me' — clearly wants to be "
-        "   contacted but does NOT want to schedule or check "
-        "   insurance right now. Rare; most callback intent is "
-        "   actually booking intent.\n\n"
+        "5. **Intake Agent** — visitor wants a HUMAN to contact them. "
+        "   Includes: 'have someone call me back', 'reach out to me', "
+        "   'contact me', 'I need to talk to someone', 'I want to "
+        "   talk to a human / real person / a live agent / a "
+        "   representative / an actual person', 'is there a person I "
+        "   can talk to', 'do you have a human', 'can a person help "
+        "   me'. The practice has no live agent on chat — IntakeAgent "
+        "   is the ONLY way to fulfil these requests. Hand off on "
+        "   the FIRST such cue; do NOT keep offering the "
+        "   book/insurance/match/info menu, and do NOT reply 'I can "
+        "   help directly' — that contradicts what the visitor "
+        "   asked for. Crisis signals still override.\n\n"
 
         "6. **Info Agent** — questions about the practice, "
         "   services, hours, locations, FAQs, philosophy, "
@@ -161,6 +178,7 @@ def build_triage_agent() -> Agent:
     return Agent(
         name="Triage",
         instructions=instructions,
+        tools=TRIAGE_TOOLS,
         handoffs=[
             handoff(
                 crisis,

@@ -199,6 +199,23 @@ _PLACEHOLDER_VALUES = frozenset({
     "skip", "skipped", "no answer", "x",
 })
 
+# The practice's own public phone. If a visitor "gives" this number as their
+# own — usually because they copy-pasted it from the site or read it back —
+# we must NOT accept it as a callback number; the call would loop back to
+# us. Block any reasonable formatting (parens, dashes, spaces, leading +1).
+_PRACTICE_PHONE_DIGITS = "7252386990"
+
+
+def _is_practice_phone(val: str) -> bool:
+    """Return True if `val` is the practice's own phone in any common format."""
+    digits = "".join(c for c in (val or "") if c.isdigit())
+    if not digits:
+        return False
+    # Strip a leading "1" country code if the user prefixed +1 / 1-.
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits == _PRACTICE_PHONE_DIGITS
+
 
 def _is_placeholder(val: str) -> bool:
     """Return True if `val` is empty or exactly a known placeholder phrase."""
@@ -243,6 +260,16 @@ def request_intake_callback(
             "ok": False,
             "missing": missing,
             "error": f"incomplete: still need {missing} — ask the visitor before retrying",
+        }
+
+    if _is_practice_phone(phone):
+        return {
+            "ok": False,
+            "error": (
+                "invalid_phone: that's the practice's own number "
+                f"({_PRACTICE_PHONE_DIGITS}). Ask the visitor for their "
+                "own phone number — the number we should call them back at."
+            ),
         }
 
     body = {
@@ -468,6 +495,76 @@ def list_payers() -> list[dict[str, Any]]:
     ]
 
 
+@function_tool
+def check_insurance_support(payer_name: str) -> dict[str, Any]:
+    """Direct yes/no answer for 'do you take <X>?' insurance questions.
+
+    Call this BEFORE asking the visitor for any verification fields when
+    they just want to know whether their plan is accepted. The tool fuzzy-
+    matches `payer_name` against the canonical payer roster (Aetna, UHC,
+    BCBS, Medicaid, Medicare, Tricare, Kaiser, etc.) and returns:
+
+      {
+        "query":          original input,
+        "supported":      bool — True if the plan is on our roster,
+        "canonical":      "Aetna" — the canonical name we'd verify under
+                          (None if unsupported),
+        "self_pay":       True for the self-pay/out-of-network option,
+        "all_supported":  ["Aetna", "Cigna", ...] — full roster of
+                          payers we can auto-verify, for fallback wording,
+        "note":           short verbatim sentence the agent should speak
+                          before any follow-up question.
+      }
+
+    Use the `note` field as the FIRST sentence of your reply so the
+    visitor gets an immediate yes/no/maybe. Only AFTER speaking the note
+    should you offer to verify their specific plan (which collects the
+    five CLAIM.MD fields). For "what insurances do you take?" with no
+    specific plan named, call `list_payers` instead.
+    """
+    with _log_call("check_insurance_support", query=payer_name[:40]):
+        all_names = [p.name for p in PAYERS if p.id != "SELF"]
+        payer = resolve_payer_id(payer_name)
+        if payer is None:
+            return {
+                "query": payer_name,
+                "supported": False,
+                "canonical": None,
+                "self_pay": False,
+                "all_supported": all_names,
+                "note": (
+                    f"We can't auto-verify **{payer_name.strip()}** with our "
+                    "tool right now. We accept most major plans (UnitedHealthcare, "
+                    "Aetna, Cigna, Blue Cross Blue Shield, Anthem, Kaiser, Medicare, "
+                    "Medicaid, Tricare, and more) — and we offer out-of-network "
+                    "cash rates if your plan isn't on the list."
+                ),
+            }
+        if payer.id == "SELF":
+            return {
+                "query": payer_name,
+                "supported": True,
+                "canonical": payer.name,
+                "self_pay": True,
+                "all_supported": all_names,
+                "note": (
+                    "Yes — we offer **self-pay / out-of-network** rates. "
+                    "No insurance needed."
+                ),
+            }
+        return {
+            "query": payer_name,
+            "supported": True,
+            "canonical": payer.name,
+            "self_pay": False,
+            "all_supported": all_names,
+            "note": (
+                f"Yes — we accept **{payer.name}** and can auto-verify your "
+                "coverage with CLAIM.MD."
+            ),
+        }
+
+
 _ELIGIBLE_STATES = {"active", "approved", "eligible", "in force", "in network"}
 
 
@@ -570,6 +667,16 @@ def book_with_insurance(
     for field_name, val in always_required:
         if _is_placeholder(val):
             return {"ok": False, "error": f"incomplete: {field_name} missing or placeholder — ask the visitor"}
+
+    if _is_practice_phone(phone):
+        return {
+            "ok": False,
+            "error": (
+                "invalid_phone: that's the practice's own number "
+                f"({_PRACTICE_PHONE_DIGITS}). Ask the visitor for their "
+                "own phone number — the number we should call them back at."
+            ),
+        }
 
     # Validate-only: agent must convert to YYYYMMDD before calling. We just
     # confirm it's a real date so we never send garbage to CLAIM.MD.
@@ -1010,6 +1117,16 @@ def book_appointment(
             "error": f"incomplete: {missing} — ask the visitor before retrying",
         }
 
+    if _is_practice_phone(phone):
+        return {
+            "ok": False,
+            "error": (
+                "invalid_phone: that's the practice's own number "
+                f"({_PRACTICE_PHONE_DIGITS}). Ask the visitor for their "
+                "own phone number — the number we should call them back at."
+            ),
+        }
+
     valid_dob = _validate_dob(dob_yyyymmdd)
     if not valid_dob:
         return {
@@ -1101,7 +1218,19 @@ def book_appointment(
     return {"ok": True, "appointment_id": appointment_id, "next_step": next_step}
 
 
-BOOKING_TOOLS = [verify_coverage, get_free_slots, propose_slots, book_appointment, list_payers]
+BOOKING_TOOLS = [
+    verify_coverage,
+    get_free_slots,
+    propose_slots,
+    book_appointment,
+    list_payers,
+    check_insurance_support,
+]
+
+# Triage can answer "do you take X?" directly via check_insurance_support /
+# list_payers without bouncing the visitor through an InsuranceCheck handoff.
+# Triage still uses its handoff tools for verification + booking flows.
+TRIAGE_TOOLS = [check_insurance_support, list_payers]
 
 
 @function_tool

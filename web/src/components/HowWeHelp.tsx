@@ -95,9 +95,14 @@ export default function HowWeHelp() {
                 Tell us a little about what you&rsquo;re looking for and we&rsquo;ll match you with the right therapist.
               </p>
             </div>
-            <Link href="/contact" className="btn-primary mt-6 sm:mt-0 shrink-0">
+            <a
+              href="https://form.jotform.com/253014448330448"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-primary mt-6 sm:mt-0 shrink-0"
+            >
               Find My Therapist <FiArrowRight />
-            </Link>
+            </a>
           </div>
         </Reveal>
       </div>

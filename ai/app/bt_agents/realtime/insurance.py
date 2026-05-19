@@ -13,6 +13,7 @@ from agents.realtime import RealtimeAgent, realtime_handoff
 
 from ...prompts import (
     ANTI_DEFLECTION_RULE,
+    CONTACT_FIELD_RULE,
     CRISIS_RULE,
     PRACTICE_CONTEXT,
     SCOPE_RULE,
@@ -20,7 +21,7 @@ from ...prompts import (
     VOICE_CONFIRMATION_RULE,
     VOICE_PACING_RULE,
 )
-from ...tools import VOICE_TOOLS, list_payers, verify_coverage
+from ...tools import VOICE_TOOLS, check_insurance_support, list_payers, verify_coverage
 
 
 def build_insurance_agent(booking_handoff: RealtimeAgent | None = None) -> RealtimeAgent:
@@ -35,7 +36,7 @@ def build_insurance_agent(booking_handoff: RealtimeAgent | None = None) -> Realt
             "take X?', 'is <plan> in network?', 'what's my copay?'. "
             "Booking intent goes straight to BookingAgent — not here."
         ),
-        tools=[verify_coverage, list_payers] + VOICE_TOOLS,
+        tools=[verify_coverage, list_payers, check_insurance_support] + VOICE_TOOLS,
         handoffs=handoffs_list,
         instructions=(
             f"{PRACTICE_CONTEXT}\n\n"
@@ -43,6 +44,7 @@ def build_insurance_agent(booking_handoff: RealtimeAgent | None = None) -> Realt
             f"{CRISIS_RULE}\n\n"
             f"{SCOPE_RULE}\n\n"
             f"{ANTI_DEFLECTION_RULE}\n\n"
+            f"{CONTACT_FIELD_RULE}\n\n"
             f"{VOICE_CONFIRMATION_RULE}\n\n"
             f"{VOICE_PACING_RULE}\n\n"
             "You verify insurance coverage via CLAIM.MD. Your scope "
@@ -52,6 +54,17 @@ def build_insurance_agent(booking_handoff: RealtimeAgent | None = None) -> Realt
             "directly to BookingAgent and won't land here. You do "
             "NOT ask for phone, email, home address, sex, or reason "
             "for visit yourself.\n\n"
+
+            "DIRECT YES/NO FIRST — if the caller's most recent message "
+            "asks 'do you take <X>?' or 'do you accept <X>?' for a "
+            "specific payer and Triage hasn't already answered, call "
+            "`check_insurance_support` with that payer name and SPEAK "
+            "the `note` field aloud as your first sentence. Then ask: "
+            "'Want me to verify your specific plan?' Only if they say "
+            "yes do you collect the five fields below. If the caller "
+            "only asks 'what insurances do you take?' with no named "
+            "payer, call `list_payers` and read the main options "
+            "aloud first.\n\n"
             "Five fields needed (ALL required):\n"
             "  1) first name\n"
             "  2) last name\n"

@@ -253,11 +253,15 @@ export default function AdminLoginPage() {
                 <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">{stageSub[stage]}</p>
               </div>
 
-              {/* Config warning */}
+              {/* Config warning — shown to non-technical admins. The
+                  reference code lets the developer grep this file to find
+                  the exact failure (Cognito client config missing from the
+                  web build). Don't surface env var names here. */}
               {!configured && (
                 <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  Cognito not configured. Set <code>NEXT_PUBLIC_COGNITO_USER_POOL_ID</code> and{' '}
-                  <code>NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID</code>.
+                  Sign-in is temporarily unavailable. Please contact your
+                  developer and share this reference:{' '}
+                  <code className="font-semibold">ADMIN-AUTH-001</code>.
                 </div>
               )}
 

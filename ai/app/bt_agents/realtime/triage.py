@@ -19,6 +19,7 @@ from ...prompts import (
     STYLE_VOICE,
     VOICE_PACING_RULE,
 )
+from ...tools import TRIAGE_TOOLS
 from .booking import build_booking_agent
 from .crisis import build_crisis_agent
 from .info import build_info_agent
@@ -111,14 +112,33 @@ def build_realtime_triage() -> RealtimeAgent:
             "  • BookingAgent — any intent to book, schedule, start "
             "    therapy, or any follow-up while a booking is in "
             "    progress.\n"
-            "  • InsuranceCheck — coverage-only questions with no "
-            "    booking intent yet ('do you take Aetna?', 'is "
-            "    <plan> in network?', 'what's my copay?').\n"
+            "  • Insurance yes/no — when the caller asks 'do you take "
+            "    <X>?' / 'do you accept <X>?' for a SPECIFIC named "
+            "    payer, call `check_insurance_support` and speak its "
+            "    `note` field aloud first — that is a direct yes/no "
+            "    answer. For 'what insurances do you take?' with no "
+            "    specific payer, call `list_payers` and read back the "
+            "    main ones in plain English. AFTER the direct answer, "
+            "    ask: 'Would you like me to verify your specific plan, "
+            "    or get you booked?' Only on a yes to verify, hand off "
+            "    SILENTLY to InsuranceCheck. Only on booking intent, "
+            "    hand off SILENTLY to BookingAgent.\n"
             "  • Therapist Matching — caller wants help choosing a "
             "    clinician by specialty or location, with no "
             "    booking/insurance language yet.\n"
-            "  • Intake Agent — caller explicitly wants a callback "
-            "    and does NOT mention booking or insurance.\n"
+            "  • Intake Agent — caller wants a HUMAN to reach out to "
+            "    them. Includes: 'have someone call me back', 'I need "
+            "    to talk to someone', 'I want to talk to a human / "
+            "    real person / a live agent / a representative / an "
+            "    actual person', 'is there a person I can talk to', "
+            "    'do you have a human', 'can a person help me', "
+            "    'reach out to me', 'contact me'. The practice has "
+            "    no live receptionist on this line — IntakeAgent is "
+            "    the ONLY way to fulfil these requests. Route SILENTLY "
+            "    on the first such cue; do NOT keep offering the "
+            "    book/insurance/match/info menu, and do NOT say 'I "
+            "    can help here directly' — that contradicts what the "
+            "    caller asked for. Crisis signals still override.\n"
             "  • Info Agent — questions about services, hours, "
             "    locations, FAQs, philosophy.\n\n"
 
@@ -129,6 +149,7 @@ def build_realtime_triage() -> RealtimeAgent:
             "Ask one short clarifying question only when intent is "
             "genuinely ambiguous; otherwise route immediately."
         ),
+        tools=TRIAGE_TOOLS,
         handoffs=[
             realtime_handoff(crisis),
             realtime_handoff(info),

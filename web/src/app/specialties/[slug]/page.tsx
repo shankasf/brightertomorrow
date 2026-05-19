@@ -7,6 +7,8 @@ import MatchTrigger from "./MatchTrigger";
 
 export const dynamic = "force-dynamic";
 
+const JOTFORM_MATCH_URL = "https://form.jotform.com/253014448330448";
+
 export async function generateMetadata(
   { params }: { params: Promise<{ slug: string }> },
 ): Promise<Metadata> {
@@ -15,8 +17,49 @@ export async function generateMetadata(
   if (!sp) return { title: "Specialty — Brighter Tomorrow Therapy" };
   return {
     title: `${sp.title} — Brighter Tomorrow Therapy`,
-    description: sp.short_desc ?? undefined,
+    description: sp.short_desc ?? sp.subheadline ?? undefined,
   };
+}
+
+function renderInline(text: string, keyPrefix: string) {
+  const parts: React.ReactNode[] = [];
+  const re = /\*\*([^*]+)\*\*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let i = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push(<strong key={`${keyPrefix}-b-${i++}`} className="text-ink font-semibold">{m[1]}</strong>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+type Block =
+  | { kind: "h2"; text: string }
+  | { kind: "h3"; text: string }
+  | { kind: "h4"; text: string }
+  | { kind: "p"; text: string }
+  | { kind: "ul"; items: string[] };
+
+function parseBody(longDesc: string): Block[] {
+  const blocks: Block[] = [];
+  const chunks = longDesc.split(/\n\n+/).map((c) => c.trim()).filter(Boolean);
+  for (const c of chunks) {
+    if (c.startsWith("## ")) blocks.push({ kind: "h2", text: c.slice(3).trim() });
+    else if (c.startsWith("### ")) blocks.push({ kind: "h3", text: c.slice(4).trim() });
+    else if (c.startsWith("#### ")) blocks.push({ kind: "h4", text: c.slice(5).trim() });
+    else if (c.split("\n").every((l) => l.trim().startsWith("- "))) {
+      blocks.push({
+        kind: "ul",
+        items: c.split("\n").map((l) => l.trim().replace(/^- /, "")),
+      });
+    } else {
+      blocks.push({ kind: "p", text: c });
+    }
+  }
+  return blocks;
 }
 
 export default async function SpecialtyDetail({ params }: { params: Promise<{ slug: string }> }) {
@@ -24,11 +67,33 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
   const sp = await getSpecialtyBySlug(slug);
   if (!sp) notFound();
 
+  const blocks = sp.long_desc ? parseBody(sp.long_desc) : [];
+
+  // Insert inline image right before the SECOND H2 heading (after intro section).
+  let inlineImageInjected = false;
+  let secondH2Idx = -1;
+  let h2Count = 0;
+  for (let i = 0; i < blocks.length; i++) {
+    if (blocks[i].kind === "h2") {
+      h2Count++;
+      if (h2Count === 2) { secondH2Idx = i; break; }
+    }
+  }
+
   return (
     <article>
-      {/* Page header */}
-      <section className="bg-cream-alt relative overflow-hidden">
-        <div aria-hidden className="absolute inset-0 bg-grid opacity-[0.06]" />
+      {/* ───── Hero band ───── */}
+      <section className="bg-cream-alt relative overflow-hidden border-b border-surface-line">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-24 -right-24 w-[420px] h-[420px] rounded-full opacity-[0.10]"
+          style={{ backgroundColor: "#E1B878" }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-32 -left-32 w-[420px] h-[420px] rounded-full opacity-[0.08]"
+          style={{ backgroundColor: "#66202A" }}
+        />
         <div className="container-x relative py-16 sm:py-20 lg:py-24">
           <Link
             href="/specialties"
@@ -36,23 +101,38 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
           >
             <FiArrowLeft /> All specialties
           </Link>
+
           <div className="grid lg:grid-cols-12 gap-10 lg:gap-14 items-center">
             <div className={sp.image_url ? "lg:col-span-7" : "lg:col-span-12"}>
-              <span className="eyebrow">Specialty</span>
-              <h1 className="mt-5 display text-5xl sm:text-6xl lg:text-7xl text-ink break-words leading-[1.02]">
-                {sp.title}
-              </h1>
+              <span className="eyebrow" style={{ color: "#E1B878" }}>Specialty</span>
+              <h1
+                className="mt-5 display text-4xl sm:text-5xl lg:text-6xl text-ink break-words leading-[1.05]"
+                dangerouslySetInnerHTML={{ __html: sp.title }}
+              />
               <svg aria-hidden viewBox="0 0 200 8" className="mt-6 w-36 h-2 text-brand">
                 <path d="M2 5 Q 50 0 100 4 T 198 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
+              {sp.subheadline && (
+                <p className="mt-6 script text-2xl sm:text-3xl" style={{ color: "#66202A" }}>
+                  {sp.subheadline}
+                </p>
+              )}
               {sp.short_desc && (
-                <p className="mt-6 text-ink-muted text-lg sm:text-xl leading-relaxed">{sp.short_desc}</p>
+                <p className="mt-6 text-ink-muted text-lg leading-relaxed">{sp.short_desc}</p>
               )}
               <div className="mt-8 flex flex-wrap gap-3">
-                <MatchTrigger label="Get matched" className="btn-primary" />
-                <Link href="/specialties" className="btn-ghost">All specialties</Link>
+                <a
+                  href={JOTFORM_MATCH_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-primary"
+                >
+                  Find My Therapist
+                </a>
+                <Link href="/contact" className="btn-ghost">Free Consultation</Link>
               </div>
             </div>
+
             {sp.image_url && (
               <div className="lg:col-span-5">
                 <div className="relative aspect-[5/4] rounded-4xl overflow-hidden shadow-card border border-surface-line">
@@ -65,21 +145,95 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
         </div>
       </section>
 
-      {/* Body — main copy + sidebar */}
+      {/* ───── Body ───── */}
       <section className="section bg-white">
         <div className="container-x grid lg:grid-cols-12 gap-10 lg:gap-16">
-          <div className="lg:col-span-8">
-            {sp.long_desc ? (
-              <div className="text-lg leading-[1.85] text-ink-muted break-words whitespace-pre-line">
-                {sp.long_desc}
-              </div>
-            ) : (
-              <p className="text-lg leading-relaxed text-ink-muted">
-                {sp.short_desc}
-              </p>
+          <div className="lg:col-span-8 space-y-6">
+            {blocks.map((b, i) => {
+              const node = (() => {
+                switch (b.kind) {
+                  case "h2":
+                    return (
+                      <h2 key={i} className="display text-3xl sm:text-4xl text-ink mt-10 first:mt-0 leading-tight">
+                        <span className="italic-accent" style={{ color: "#66202A" }}>
+                          {renderInline(b.text, `h2-${i}`)}
+                        </span>
+                      </h2>
+                    );
+                  case "h3":
+                    return (
+                      <h3 key={i} className="font-display text-2xl text-ink mt-6">
+                        {renderInline(b.text, `h3-${i}`)}
+                      </h3>
+                    );
+                  case "h4":
+                    return (
+                      <h4 key={i} className="font-display text-lg text-brand-700 mt-4 uppercase tracking-wide">
+                        {renderInline(b.text, `h4-${i}`)}
+                      </h4>
+                    );
+                  case "ul":
+                    return (
+                      <ul key={i} className="space-y-2 list-disc pl-6 text-ink-muted text-lg leading-relaxed marker:text-brand">
+                        {b.items.map((it, j) => (
+                          <li key={j}>{renderInline(it, `li-${i}-${j}`)}</li>
+                        ))}
+                      </ul>
+                    );
+                  default:
+                    return (
+                      <p key={i} className="text-lg leading-[1.85] text-ink-muted">
+                        {renderInline(b.text, `p-${i}`)}
+                      </p>
+                    );
+                }
+              })();
+
+              // Inject inline image right before the second H2.
+              if (!inlineImageInjected && i === secondH2Idx && sp.inline_image_url) {
+                inlineImageInjected = true;
+                return (
+                  <div key={`wrap-${i}`} className="contents">
+                    <figure key={`fig-${i}`} className="my-12">
+                      <div className="relative aspect-[16/10] rounded-4xl overflow-hidden shadow-card border border-surface-line">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={sp.inline_image_url}
+                          alt={sp.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    </figure>
+                    {node}
+                  </div>
+                );
+              }
+              return node;
+            })}
+
+            {/* If we never hit a second H2, append inline image at the bottom of the body. */}
+            {!inlineImageInjected && sp.inline_image_url && (
+              <figure className="my-8">
+                <div className="relative aspect-[16/10] rounded-4xl overflow-hidden shadow-card border border-surface-line">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={sp.inline_image_url}
+                    alt={sp.title}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              </figure>
             )}
+
             <div className="mt-12 pt-8 border-t border-surface-line flex flex-wrap gap-3">
-              <MatchTrigger label="Get matched" className="btn-primary" />
+              <a
+                href={JOTFORM_MATCH_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-primary"
+              >
+                Find My Therapist
+              </a>
               <Link href="/team" className="btn-ghost">Meet our therapists</Link>
             </div>
           </div>

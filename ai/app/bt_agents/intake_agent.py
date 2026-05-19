@@ -13,7 +13,14 @@ import os
 
 from agents import Agent
 
-from ..prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
+from ..prompts import (
+    ANTI_DEFLECTION_RULE,
+    CONTACT_FIELD_RULE,
+    CRISIS_RULE,
+    PRACTICE_CONTEXT,
+    SCOPE_RULE,
+    STYLE_TEXT,
+)
 from ..tools import INTAKE_TOOLS
 
 
@@ -24,6 +31,7 @@ def build_intake_agent() -> Agent:
         f"{CRISIS_RULE}\n\n"
         f"{SCOPE_RULE}\n\n"
         f"{ANTI_DEFLECTION_RULE}\n\n"
+        f"{CONTACT_FIELD_RULE}\n\n"
         "Your one job is to record a callback request — someone from the "
         "practice will phone the visitor back. You do NOT collect "
         "insurance details, do NOT collect DOB / email / address / sex, "

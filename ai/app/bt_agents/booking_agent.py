@@ -29,7 +29,14 @@ import os
 
 from agents import Agent
 
-from ..prompts import ANTI_DEFLECTION_RULE, CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
+from ..prompts import (
+    ANTI_DEFLECTION_RULE,
+    CONTACT_FIELD_RULE,
+    CRISIS_RULE,
+    PRACTICE_CONTEXT,
+    SCOPE_RULE,
+    STYLE_TEXT,
+)
 from ..tools import BOOKING_TOOLS
 from .roster import ELIGIBLE_FOR_BOOKING, THERAPISTS_WITHOUT_FEEDS
 
@@ -306,6 +313,7 @@ def build_booking_agent() -> Agent:
         f"{CRISIS_RULE}\n\n"
         f"{SCOPE_RULE}\n\n"
         f"{ANTI_DEFLECTION_RULE}\n\n"
+        f"{CONTACT_FIELD_RULE}\n\n"
         f"Bookable therapists (staffId required for slot tools):\n{roster}\n\n"
         f"NOT available for self-service booking: {excluded}. "
         f"If asked for one of them, say they are not bookable through self-service "

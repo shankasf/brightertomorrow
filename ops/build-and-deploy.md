@@ -11,8 +11,21 @@ SHA=$(git rev-parse --short HEAD)
 TAG="prod-${SHA}-$(date +%s)"
 
 # 1. Build prod Dockerfiles
+#
+# NOTE: bt-web needs the Cognito NEXT_PUBLIC_* values as build args — Next.js
+# inlines `process.env.NEXT_PUBLIC_*` into the client bundle at `npm run build`
+# time, so runtime k8s env vars never reach the browser. Pull them from the
+# `bt-config` secret so the image matches what the cluster expects.
+WEB_BUILD_ARGS=()
+for k in NEXT_PUBLIC_AWS_REGION NEXT_PUBLIC_COGNITO_USER_POOL_ID NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID; do
+  v=$(kubectl -n bt get secret bt-config -o "jsonpath={.data.${k}}" | base64 -d)
+  WEB_BUILD_ARGS+=(--build-arg "${k}=${v}")
+done
+
 for svc in web ai gateway; do
-  docker build -t "bt-${svc}:${TAG}" -t "bt-${svc}:prod" \
+  extra=()
+  [ "$svc" = "web" ] && extra=("${WEB_BUILD_ARGS[@]}")
+  docker build "${extra[@]}" -t "bt-${svc}:${TAG}" -t "bt-${svc}:prod" \
     -f "./${svc}/Dockerfile" "./${svc}"
 done
 
@@ -41,7 +54,12 @@ kubectl -n bt rollout status deploy/bt-web --timeout=180s
 ## Build only one service
 
 ```bash
-docker build -t bt-web:prod -f web/Dockerfile web/
+# bt-web needs Cognito build args (see "Build all three images" above for why).
+docker build \
+  --build-arg NEXT_PUBLIC_AWS_REGION="$(kubectl -n bt get secret bt-config -o jsonpath='{.data.NEXT_PUBLIC_AWS_REGION}' | base64 -d)" \
+  --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_ID="$(kubectl -n bt get secret bt-config -o jsonpath='{.data.NEXT_PUBLIC_COGNITO_USER_POOL_ID}' | base64 -d)" \
+  --build-arg NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID="$(kubectl -n bt get secret bt-config -o jsonpath='{.data.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID}' | base64 -d)" \
+  -t bt-web:prod -f web/Dockerfile web/
 k3d image import --mode=direct bt-web:prod -c bt
 kubectl -n bt rollout restart deploy/bt-web
 ```

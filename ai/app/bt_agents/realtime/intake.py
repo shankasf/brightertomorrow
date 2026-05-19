@@ -10,6 +10,7 @@ from agents.realtime import RealtimeAgent, realtime_handoff
 
 from ...prompts import (
     ANTI_DEFLECTION_RULE,
+    CONTACT_FIELD_RULE,
     CRISIS_RULE,
     PRACTICE_CONTEXT,
     SCOPE_RULE,
@@ -43,6 +44,7 @@ def build_intake_agent(
             f"{CRISIS_RULE}\n\n"
             f"{SCOPE_RULE}\n\n"
             f"{ANTI_DEFLECTION_RULE}\n\n"
+            f"{CONTACT_FIELD_RULE}\n\n"
             f"{VOICE_CONFIRMATION_RULE}\n\n"
             f"{VOICE_PACING_RULE}\n\n"
             "Your one job is to record a callback request. You do NOT "

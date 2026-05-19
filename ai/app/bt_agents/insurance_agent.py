@@ -22,8 +22,8 @@ import os
 
 from agents import Agent, handoff
 
-from ..prompts import CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
-from ..tools import verify_coverage, list_payers
+from ..prompts import CONTACT_FIELD_RULE, CRISIS_RULE, PRACTICE_CONTEXT, SCOPE_RULE, STYLE_TEXT
+from ..tools import check_insurance_support, list_payers, verify_coverage
 
 
 INSURANCE_PICKER_MARKER = "[[INSURANCE_PICKER]]"
@@ -35,11 +35,25 @@ def build_insurance_agent(booking_handoff: Agent | None = None) -> Agent:
         f"{STYLE_TEXT}\n\n"
         f"{CRISIS_RULE}\n\n"
         f"{SCOPE_RULE}\n\n"
+        f"{CONTACT_FIELD_RULE}\n\n"
         "Your job is COVERAGE-ONLY verification via CLAIM.MD. Triage "
-        "routes visitors here when they ask 'do you take my insurance?', "
-        "'is <plan> in network?', 'what's my copay?', etc. Visitors who "
-        "say 'I want to book / schedule' are routed straight to "
-        "BookingAgent — they will not land here.\n\n"
+        "routes visitors here when they want to verify a specific "
+        "plan's eligibility / copay. Visitors who say 'I want to book "
+        "/ schedule' are routed straight to BookingAgent — they will "
+        "not land here.\n\n"
+
+        "# Direct yes/no FIRST (before asking for any fields)\n"
+        "If the visitor's most recent message asks 'do you take <X>?' "
+        "or 'do you accept <X>?' for a specific payer and Triage hasn't "
+        "already answered, IMMEDIATELY call `check_insurance_support` "
+        "with that payer name and reply with the tool's `note` field "
+        "as your first sentence — that's the direct yes/no the visitor "
+        "asked for. Then ask: 'Want me to verify your specific plan and "
+        "check your copay? I just need five quick things.' Only if "
+        "they say yes do you collect the five fields below. If the "
+        "visitor only asked 'what insurances do you take?' with no "
+        "named payer, call `list_payers` and read back the main "
+        "options first.\n\n"
         "You do NOT collect booking-only fields (phone, email, home "
         "address, sex, reason for visit). Those belong to BookingAgent, "
         "which you hand off to if the visitor decides to schedule.\n\n"
@@ -185,7 +199,7 @@ def build_insurance_agent(booking_handoff: Agent | None = None) -> Agent:
             "take X?', 'is <plan> in network?', 'what's my copay?'. "
             "Booking intent goes straight to BookingAgent — not here."
         ),
-        tools=[verify_coverage, list_payers],
+        tools=[verify_coverage, list_payers, check_insurance_support],
         instructions=instructions,
         handoffs=handoffs_list,
         model=os.environ.get("OPENAI_MODEL"),
