@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: ai
-          image: bt-ai:prod-4d7b1a1-1778978147
+          image: bt-ai:prod-4a89d51-1779249583-scenes
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
           env:
@@ -50,6 +50,20 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: TWILIO_API_KEY_SECRET, optional: true } }
             - name: TWILIO_ECHO_GATE_RMS
               value: "1700"
+            # --- LangSmith (agent tracing for the new LangGraph stack) ----
+            - name: LANGSMITH_TRACING
+              valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_TRACING, optional: true } }
+            - name: LANGSMITH_API_KEY
+              valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_API_KEY, optional: true } }
+            - name: LANGSMITH_PROJECT
+              valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_PROJECT, optional: true } }
+            - name: LANGSMITH_ENDPOINT
+              valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_ENDPOINT, optional: true } }
+            # --- Voice pipeline (Deepgram STT + Cartesia TTS) -------------
+            - name: DEEPGRAM_API_KEY
+              valueFrom: { secretKeyRef: { name: bt-config, key: DEEPGRAM_API_KEY, optional: true } }
+            - name: CARTESIA_API_KEY
+              valueFrom: { secretKeyRef: { name: bt-config, key: CARTESIA_API_KEY, optional: true } }
           readinessProbe:
             httpGet: { path: /health, port: 8001 }
             periodSeconds: 5
