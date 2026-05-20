@@ -1,4 +1,4 @@
-"""FastAPI service that fronts the OpenAI Agents SDK chatbot."""
+"""FastAPI service fronting the LangGraph-backed Brighter Tomorrow agent."""
 from __future__ import annotations
 
 import asyncio
@@ -21,16 +21,6 @@ load_dotenv()
 configure_logging()
 install_log_broadcast()
 
-# Disable the OpenAI Agents SDK tracing client. It posts spans to
-# api.openai.com (global), which our US-region-only project rejects with
-# 401 `incorrect_hostname` — non-fatal but pollutes the log stream on
-# every tool call. Production tracing belongs in CloudWatch + slog, not
-# OpenAI's hosted spans. Override with BT_AGENTS_TRACING=1 if needed.
-import os  # noqa: E402
-if os.environ.get("BT_AGENTS_TRACING", "0") != "1":
-    from agents import set_tracing_disabled  # noqa: E402
-    set_tracing_disabled(True)
-
 from .aws_signer import signed_post
 from .data.payers import resolve_payer_id
 from .db import conn
@@ -38,7 +28,6 @@ from .embed_faqs import embed_all_faqs
 from .info_cache import detect_intent, get_cached_reply, cache_stats
 from .tools import _ELIGIBLE_STATES, _validate_dob
 
-# --- NEW: LangGraph runtime is now the primary agent (replaces openai-agents)
 from .graph.graph import get_app as get_langgraph_app
 from .graph.state import initial_state as graph_initial_state
 from .graph.tracing import configure_tracing as configure_langsmith
@@ -58,29 +47,6 @@ app.add_middleware(
 logger.info("startup: compiling LangGraph stack")
 _lg_app = get_langgraph_app()
 logger.info("startup: LangGraph compiled — agent is bt-prod (langsmith project)")
-
-# Stable prompt_cache_key for OpenAI prompt caching. Per docs: "Use the
-# prompt_cache_key parameter consistently across requests that share common
-# prefixes." Our agent instructions + tool schemas are the shared prefix, so a
-# single global key per service version maximizes cache routing affinity while
-# staying well below the 15 RPM/key threshold at our scale. Bump on any change
-# that would invalidate the cached prefix (instruction edits, tool surface).
-_PROMPT_CACHE_KEY = os.environ.get("BT_PROMPT_CACHE_KEY", "bt-chat-v1")
-
-
-def _run_config() -> Any:
-    """Build a RunConfig that maximizes prompt-cache hits and surfaces usage.
-
-    Late-imported so the service still boots if openai-agents is missing.
-    """
-    from agents import ModelSettings, RunConfig
-    return RunConfig(
-        model_settings=ModelSettings(
-            include_usage=True,
-            extra_args={"prompt_cache_key": _PROMPT_CACHE_KEY},
-        ),
-        workflow_name="bt-chat",
-    )
 
 
 class ChatRequest(BaseModel):
@@ -112,33 +78,6 @@ class CoverageCheckResponse(BaseModel):
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok"}
-
-
-def _load_history(session_id: str, limit: int = 20) -> list[dict[str, str]]:
-    """Pull recent turns from the gateway's PHI-backed history endpoint.
-
-    Postgres no longer holds chat content — message bodies live in DynamoDB
-    so Hostinger never sees PHI. The gateway's /internal/chat/history call
-    fans out to DDB on our behalf.
-    """
-    if not session_id:
-        return []
-    import urllib.parse, urllib.request, json as _json
-    base = os.environ.get("BT_GATEWAY_URL", "http://bt-gateway")
-    url = f"{base}/internal/chat/history?" + urllib.parse.urlencode({
-        "session_id": session_id, "limit": str(limit),
-    })
-    try:
-        with urllib.request.urlopen(url, timeout=5) as r:
-            data = _json.loads(r.read().decode("utf-8"))
-    except Exception:
-        logger.exception("load_history_failed session=%s", session_id)
-        return []
-    return [
-        {"role": m["role"], "content": m["content"]}
-        for m in data.get("messages", [])
-        if m.get("role") in ("user", "assistant")
-    ]
 
 
 async def _invoke_langgraph(session_id: str, user_text: str, channel: str = "chat") -> dict:
@@ -209,17 +148,6 @@ def _sse_event(event: str, data: dict[str, Any]) -> bytes:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode("utf-8")
 
 
-# Greet prompt is the same content the non-streaming /chat endpoint uses.
-_GREET_TURN = (
-    "[Visitor just opened the chat widget; they haven't said anything yet. "
-    "This is a system prompt — do NOT echo it back.] Greet the visitor "
-    "warmly and naturally in 1-2 short sentences. Vary the wording every "
-    "time — do not reuse the same opener. Briefly invite them to ask about "
-    "booking, getting matched with a therapist, checking insurance, or "
-    "practice questions. No bullet lists, no bold markdown, no emojis."
-)
-
-
 async def _stream_cached(
     session_id: str, intent: str, reply: str, cache_meta: dict[str, Any], t0: float,
 ) -> AsyncIterator[bytes]:
@@ -242,163 +170,6 @@ async def _stream_cached(
         "version=%s total_ms=%.1f chars=%d",
         session_id or "anon", intent, cache_meta["hit"],
         cache_meta["version_key"], total_ms, len(reply),
-    )
-
-
-async def _stream_llm(session_id: str, history: list[dict[str, str]], t0: float) -> AsyncIterator[bytes]:
-    """Emit the LLM SSE flow: session → many deltas → done.
-
-    Uses the canonical Agents SDK streaming pattern:
-        result = Runner.run_streamed(agent, input)
-        async for event in result.stream_events():
-            if event.type == "raw_response_event" and isinstance(event.data, ResponseTextDeltaEvent):
-                yield event.data.delta
-
-    `RunItemStreamEvent`s (tool_called, tool_output, handoff_occured) are logged
-    for observability but not forwarded to the client — the widget only renders
-    the final assistant text.
-    """
-    # Late imports so the service can boot if openai-agents isn't installed yet.
-    from agents import Runner
-    from openai.types.responses import ResponseCompletedEvent, ResponseTextDeltaEvent
-
-    yield _sse_event("session", {"session_id": session_id})
-
-    first_token_ms: float | None = None
-    delta_count = 0
-    full_text_parts: list[str] = []
-    last_agent_name: str | None = None
-    tool_calls: list[str] = []
-    # Aggregated across all model calls in the run (one call per agent hop).
-    prompt_tokens = 0
-    cached_tokens = 0
-    completion_tokens = 0
-    response_count = 0
-
-    try:
-        result = Runner.run_streamed(_agent, history, run_config=_run_config())
-    except Exception as exc:
-        total_ms = (time.perf_counter() - t0) * 1000
-        logger.exception(
-            "chat_stream_error session=%s stage=run_start total_ms=%.1f",
-            session_id or "anon", total_ms,
-        )
-        yield _sse_event("error", {"message": "ai service unavailable"})
-        yield _sse_event("done", {
-            "session_id": session_id, "reply": "", "cached": False,
-            "error": str(exc), "total_ms": round(total_ms, 1), "chars": 0,
-        })
-        return
-
-    try:
-        async for event in result.stream_events():
-            if event.type == "raw_response_event":
-                if isinstance(event.data, ResponseTextDeltaEvent):
-                    delta = event.data.delta
-                    if not delta:
-                        continue
-                    if first_token_ms is None:
-                        first_token_ms = (time.perf_counter() - t0) * 1000
-                        logger.info(
-                            "chat_stream_first_token session=%s ttft_ms=%.1f agent=%s",
-                            session_id or "anon", first_token_ms, last_agent_name or "?",
-                        )
-                    delta_count += 1
-                    full_text_parts.append(delta)
-                    yield _sse_event("delta", {"text": delta})
-                    continue
-                if isinstance(event.data, ResponseCompletedEvent):
-                    # One ResponseCompleted per LLM call in the run (triage,
-                    # handoff target, etc.). Aggregate usage and log per-hop
-                    # cache hit-rate so we can verify OpenAI prompt caching is
-                    # working as expected.
-                    usage = getattr(event.data.response, "usage", None)
-                    if usage is not None:
-                        response_count += 1
-                        ip = int(getattr(usage, "input_tokens", 0) or 0)
-                        op = int(getattr(usage, "output_tokens", 0) or 0)
-                        details = getattr(usage, "input_tokens_details", None)
-                        ct = int(getattr(details, "cached_tokens", 0) or 0) if details else 0
-                        prompt_tokens += ip
-                        completion_tokens += op
-                        cached_tokens += ct
-                        hit_pct = (ct / ip * 100) if ip > 0 else 0.0
-                        logger.info(
-                            "chat_stream_response_done session=%s hop=%d agent=%s "
-                            "input_tok=%d cached_tok=%d cache_hit_pct=%.1f output_tok=%d",
-                            session_id or "anon", response_count,
-                            last_agent_name or "?", ip, ct, hit_pct, op,
-                        )
-                    continue
-                continue
-
-            if event.type == "agent_updated_stream_event":
-                last_agent_name = getattr(event.new_agent, "name", None)
-                logger.info(
-                    "chat_stream_agent session=%s agent=%s",
-                    session_id or "anon", last_agent_name,
-                )
-                continue
-
-            if event.type == "run_item_stream_event":
-                if event.name == "tool_called":
-                    tool_name = getattr(getattr(event.item, "raw_item", None), "name", None) or "?"
-                    tool_calls.append(tool_name)
-                    logger.info(
-                        "chat_stream_tool_call session=%s tool=%s agent=%s",
-                        session_id or "anon", tool_name, last_agent_name or "?",
-                    )
-                elif event.name == "handoff_occured":
-                    logger.info("chat_stream_handoff session=%s", session_id or "anon")
-
-    except Exception as exc:
-        total_ms = (time.perf_counter() - t0) * 1000
-        partial = "".join(full_text_parts)
-        logger.exception(
-            "chat_stream_error session=%s stage=stream total_ms=%.1f partial_chars=%d",
-            session_id or "anon", total_ms, len(partial),
-        )
-        yield _sse_event("error", {"message": "stream interrupted"})
-        yield _sse_event("done", {
-            "session_id": session_id, "reply": partial, "cached": False,
-            "error": str(exc), "total_ms": round(total_ms, 1), "chars": len(partial),
-        })
-        return
-
-    full_reply = ("".join(full_text_parts)).strip() or "I'm here — could you tell me a bit more?"
-    total_ms = (time.perf_counter() - t0) * 1000
-    overall_hit_pct = (cached_tokens / prompt_tokens * 100) if prompt_tokens > 0 else 0.0
-
-    yield _sse_event("done", {
-        "session_id": session_id,
-        "reply": full_reply,
-        "cached": False,
-        "agent": last_agent_name,
-        "tool_calls": tool_calls,
-        "deltas": delta_count,
-        "ttft_ms": round(first_token_ms, 1) if first_token_ms is not None else None,
-        "total_ms": round(total_ms, 1),
-        "chars": len(full_reply),
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "cached_tokens": cached_tokens,
-            "completion_tokens": completion_tokens,
-            "cache_hit_pct": round(overall_hit_pct, 1),
-            "responses": response_count,
-        },
-    })
-
-    logger.info(
-        "chat_stream_done session=%s path=llm agent=%s tools=%s deltas=%d "
-        "ttft_ms=%s total_ms=%.1f chars=%d "
-        "prompt_tok=%d cached_tok=%d cache_hit_pct=%.1f completion_tok=%d hops=%d "
-        "cache_key=%s",
-        session_id or "anon", last_agent_name or "?", ",".join(tool_calls) or "-",
-        delta_count,
-        f"{first_token_ms:.1f}" if first_token_ms is not None else "n/a",
-        total_ms, len(full_reply),
-        prompt_tokens, cached_tokens, overall_hit_pct, completion_tokens, response_count,
-        _PROMPT_CACHE_KEY,
     )
 
 
