@@ -64,11 +64,73 @@ const QUICK_REPLIES: { label: string; prompt: string }[] = [
 // first message generated live (not a hardcoded string).
 const GREET_MARKER = "__BT_GREET__";
 
+// --- Session persistence ---------------------------------------------------
+// Why localStorage with a hard staleness cap:
+//   * Visitor refreshes → same thread_id → LangGraph resumes from DDB,
+//     so mid-booking field collection picks up where it left off.
+//   * Past the cap, we ignore the saved id and mint a fresh session →
+//     defends against shared-device PHI leak.
+//   * Voice gets a separate (shorter) cap because spoken audio carries
+//     more PHI density per second than typed chat.
+const CHAT_SID_KEY = "bt_chat_session";
+const VOICE_SID_KEY = "bt_voice_session";
+const CHAT_SID_MAX_AGE_MS = 24 * 60 * 60 * 1000;   // 24h
+const VOICE_SID_MAX_AGE_MS = 30 * 60 * 1000;       // 30min
+
+type StoredSession = { id: string; ts: number };
+
+function loadSession(key: string, maxAgeMs: number): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredSession>;
+    if (!parsed || typeof parsed.id !== "string" || typeof parsed.ts !== "number") return null;
+    if (Date.now() - parsed.ts > maxAgeMs) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return parsed.id;
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(key: string, id: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ id, ts: Date.now() } satisfies StoredSession));
+  } catch {
+    // localStorage may be unavailable (private mode, quota) — silently skip
+    // so the widget still works for the current tab even if resume won't.
+  }
+}
+
+function clearSession(key: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+function mintUuid(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // Hydrate sessionId from localStorage on first render so a refresh
+  // resumes the conversation. Entries past CHAT_SID_MAX_AGE_MS are
+  // auto-discarded; see loadSession() above.
+  const [sessionId, setSessionId] = useState<string | null>(() =>
+    loadSession(CHAT_SID_KEY, CHAT_SID_MAX_AGE_MS),
+  );
   const [loading, setLoading] = useState(false);
   const greetedRef = useRef(false);
   const [muted, setMuted] = useState(false);
@@ -198,6 +260,8 @@ export default function ChatWidget() {
 
         if (eventName === "session" && typeof payload.session_id === "string" && payload.session_id) {
           setSessionId(payload.session_id);
+          // Persist so a refresh resumes (within 24h staleness cap).
+          saveSession(CHAT_SID_KEY, payload.session_id);
           return;
         }
 
@@ -342,18 +406,18 @@ export default function ChatWidget() {
     }
     setVoiceStatus("connecting");
     try {
-      // Voice-first: if no chat session yet, mint a UUID client-side. The
-      // gateway's /v1/voice handler creates the bt.chat_sessions row on
-      // demand (source='voice'), so no fake "Hello" round-trip is needed
-      // and the patient UI starts clean.
-      let sid = sessionId;
+      // Voice gets its own session id with a 30-min staleness cap (stricter
+      // than chat's 24h because spoken audio carries more PHI per second).
+      // If a non-stale voice id exists in localStorage we reuse it so a
+      // refresh / reconnect resumes the prior call's state from DDB.
+      let sid = loadSession(VOICE_SID_KEY, VOICE_SID_MAX_AGE_MS) ?? sessionId;
       if (!sid) {
-        sid =
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        sid = mintUuid();
         setSessionId(sid);
       }
+      saveSession(VOICE_SID_KEY, sid);
+      // Also seed the chat key so a later text turn picks up the same thread.
+      saveSession(CHAT_SID_KEY, sid);
 
       const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsURL = `${wsProto}//${window.location.host}/v1/voice?session_id=${sid}`;
@@ -673,6 +737,32 @@ export default function ChatWidget() {
                 <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Enter</kbd> to send · <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Shift</kbd>
                 {" + "}
                 <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Enter</kbd> for new line
+              </div>
+              {/*
+                HIPAA-required reasonable safeguard: tell the visitor this
+                chat carries PHI and they shouldn't continue on a shared
+                device. Paired with the localStorage 24h staleness cap so
+                the technical and procedural safeguards reinforce each
+                other.
+              */}
+              <div className="mt-1 px-3 flex items-center justify-between gap-2 text-[10.5px] text-ink-soft">
+                <span>🔒 Private &amp; HIPAA-protected. Don&apos;t continue on a shared device.</span>
+                {sessionId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearSession(CHAT_SID_KEY);
+                      clearSession(VOICE_SID_KEY);
+                      setSessionId(null);
+                      setMsgs([]);
+                      greetedRef.current = false;
+                    }}
+                    className="underline underline-offset-2 hover:text-ink"
+                    aria-label="Start a new conversation"
+                  >
+                    Start fresh
+                  </button>
+                )}
               </div>
             </form>
           </motion.div>
