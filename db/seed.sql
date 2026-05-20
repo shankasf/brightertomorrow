@@ -52,8 +52,8 @@ WITH parents AS (
 INSERT INTO nav_items (parent_id, label, href, position, location)
 SELECT p.id, c.label, c.href, c.position, 'header' FROM parents p
 JOIN (VALUES
-  ('About Us','Story','/about/story',1),
-  ('About Us','Approach','/about/approach',2),
+  ('About Us','Story','/our-story',1),
+  ('About Us','Approach','/our-approach',2),
   ('Our Team','Telehealth Team','/team/telehealth',1),
   ('Our Team','E Russell Team','/team/e-russell',2),
   ('Our Team','N Durango Team','/team/n-durango',3),
@@ -75,8 +75,7 @@ JOIN (VALUES
   ('Specialties','Trauma & PTSD Therapy','/specialties/trauma-ptsd',10),
   ('Specialties','Relationship Counseling','/specialties/relationship',11),
   ('Rates','Affordable Therapy','/rates',1),
-  ('Contact','Contact Us','/contact',1),
-  ('Contact','Careers','/contact/careers',2)
+  ('Contact','Contact Us','/contact',1)
 ) AS c(parent_label, label, href, position) ON c.parent_label = p.label;
 
 -- Footer nav (grouped to match the live site: Services / Specialties / Important Links / Information)
