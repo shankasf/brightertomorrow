@@ -1,0 +1,351 @@
+"""respond — the patient-facing text generator.
+
+ONE LLM call per turn. Picks a scene based on state + last_action,
+formats the matching prompt with a tiny context block, and returns the
+generated assistant message.
+
+Side-effects:
+  * Appends the assistant turn to ``messages`` (via ``add_messages``).
+  * Sets ``last_reply_text``.
+  * Flips ``booking_status`` / ``callback_status`` to the corresponding
+    ``*_pending_confirm`` where relevant.
+  * Persists the user/assistant turn to DynamoDB via the gateway's
+    ``/internal/chat/turn`` endpoint so the admin /admin/chat dashboard
+    keeps showing the full conversation. PHI never lands on Postgres.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import threading
+import urllib.request
+from typing import Any
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+
+from ..config import gateway_base_url, respond_model_name
+from ..prompts.persona import persona_block
+from ..prompts.scenes import FIELD_PROMPTS, SCENE_INSTRUCTIONS
+from ..state import (
+    State,
+    booking_fields_complete,
+    callback_complete,
+    first_missing_booking,
+    first_missing_callback,
+    first_missing_insurance,
+    insurance_complete,
+)
+from ..tracing import traced
+
+logger = logging.getLogger(__name__)
+
+_responder = None
+
+
+def _get_responder():
+    global _responder
+    if _responder is None:
+        _responder = ChatOpenAI(model=respond_model_name(), temperature=0.4)
+    return _responder
+
+
+# ---------------------------------------------------------------------------
+# Scene selection — pure function of state
+# ---------------------------------------------------------------------------
+
+def _pick_scene(state: State) -> str:
+    """Choose the scene name based on state and last_action.
+
+    The planner already routed us to ``respond``; this just picks which
+    scene template to use. Kept side-effect-free for testability.
+    """
+    if state.get("safety_signal") or state.get("intent") == "crisis":
+        return "crisis"
+    if state.get("_low_confidence"):
+        return "clarify"
+    if state.get("intent") == "out_of_scope":
+        return "out_of_scope"
+
+    la = state.get("last_action") or ""
+    bs = state.get("booking_status", "none")
+    cs = state.get("callback_status", "none")
+    intent = state.get("intent", "unknown")
+
+    if la == "book_appointment_success":
+        return "post_booking"
+    if la == "cancel_appointment_success":
+        return "post_cancel"
+    if la == "submit_callback":
+        return "post_callback"
+    if la == "verify_insurance":
+        # Insurance-only flow stops here; booking flow continues.
+        if intent == "insurance_check":
+            return "post_verify_offer_booking"
+        # Booking flow continues — fall through to next missing field.
+    if la == "search_kb":
+        return "info_answer"
+    if la == "propose_slots":
+        return "present_slots"
+    if la == "rollback":
+        # If booking is still booked, just acknowledge.
+        if bs == "booked":
+            return "open_question"
+        if cs == "none":
+            return "open_question"
+
+    # Cancel intent on a booked appointment: ask confirmation.
+    if intent == "cancel" and bs == "booked":
+        return "confirm_cancel"
+
+    # Info path: respond after kb search or before.
+    if intent == "info":
+        if state.get("kb_snippets"):
+            return "info_answer"
+        return "open_question"
+
+    # Callback path.
+    if intent == "callback":
+        if callback_complete(state) and cs == "none":
+            return "confirm_callback"
+        if not callback_complete(state):
+            return "ask_callback_field"
+
+    # Insurance / booking field collection.
+    if intent in ("booking", "insurance_check"):
+        # Insurance fields first (unless self_pay).
+        if state.get("payment_path") != "self_pay" and not insurance_complete(state):
+            return "ask_insurance_field"
+        # After verify, insurance_check ends with the offer.
+        if intent == "insurance_check" and state.get("verify_result"):
+            return "post_verify_offer_booking"
+        # Booking fields next.
+        if not booking_fields_complete(state):
+            return "ask_booking_field"
+        if not state.get("staff_id"):
+            return "ask_therapist"
+        if not state.get("proposed_slots"):
+            # planner should have routed to propose_slots; if we end up
+            # here it means propose returned nothing — offer a callback.
+            return "open_question"
+        if not state.get("selected_slot"):
+            return "present_slots"
+        return "confirm_booking"
+
+    if intent in ("greeting", "unknown") and not state.get("messages"):
+        return "greeting"
+
+    return "open_question"
+
+
+# ---------------------------------------------------------------------------
+# Context block — what the scene LLM sees on top of the prompt
+# ---------------------------------------------------------------------------
+
+def _context_for_scene(scene: str, state: State) -> str:
+    ins = state.get("insurance_fields") or {}
+    bk = state.get("booking_fields") or {}
+    cb = state.get("callback_fields") or {}
+
+    bits: list[str] = [
+        f"channel: {state.get('channel', 'chat')}",
+        f"intent: {state.get('intent', 'unknown')}",
+        f"booking_status: {state.get('booking_status', 'none')}",
+        f"callback_status: {state.get('callback_status', 'none')}",
+        f"safety_signal: {bool(state.get('safety_signal'))}",
+        f"payment_path: {state.get('payment_path', 'unknown')}",
+        # Always include the latest user turn so the responder can write
+        # a reply that actually addresses what was said — without this
+        # the LLM was generating generic greetings for crisis/handoff
+        # scenes since it only saw the structured intent.
+        f"user_just_said: {(state.get('last_user_text') or '')!r}",
+    ]
+
+    if scene == "ask_insurance_field":
+        field = first_missing_insurance(state)
+        bits.append(f"field_to_ask: {field}")
+        bits.append(f"field_label: {FIELD_PROMPTS.get(field or '', field or '')}")
+        present = [k for k, v in ins.items() if v]
+        if present:
+            bits.append(f"already_collected: {present}")
+    elif scene == "ask_booking_field":
+        field = first_missing_booking(state)
+        bits.append(f"field_to_ask: {field}")
+        bits.append(f"field_label: {FIELD_PROMPTS.get(field or '', field or '')}")
+    elif scene == "ask_callback_field":
+        field = first_missing_callback(state)
+        bits.append(f"field_to_ask: {field}")
+        bits.append(f"field_label: {FIELD_PROMPTS.get(field or '', field or '')}")
+        # First-turn flag: on the opening callback ask the responder
+        # should acknowledge the handoff before asking for the first
+        # field. Compute by checking whether ANY callback field exists.
+        has_any = any((cb or {}).get(k) for k in ("first_name", "last_name", "phone", "reason"))
+        bits.append(f"is_first_callback_turn: {not has_any}")
+    elif scene == "ask_therapist":
+        from ...bt_agents.roster import ELIGIBLE_FOR_BOOKING
+        roster = ", ".join(t["name"] for t in ELIGIBLE_FOR_BOOKING)
+        bits.append(f"available_therapists: {roster}")
+    elif scene == "present_slots":
+        slots = state.get("proposed_slots") or []
+        bits.append("slots:")
+        for i, s in enumerate(slots, 1):
+            bits.append(f"  {i}. {s.get('displayPT')}")
+    elif scene == "confirm_booking":
+        slot = state.get("selected_slot") or {}
+        bits.append(
+            "recap:\n"
+            f"  name: {ins.get('first_name')} {ins.get('last_name')}\n"
+            f"  dob: {ins.get('dob_yyyymmdd')}\n"
+            f"  phone: {bk.get('phone')}\n"
+            f"  email: {bk.get('email')}\n"
+            f"  address: {bk.get('home_address')}\n"
+            f"  sex: {bk.get('sex')}\n"
+            f"  insurance: {ins.get('payer_name')} (member {ins.get('member_id')})\n"
+            f"  reason: {bk.get('reason')}\n"
+            f"  slot: {slot.get('displayPT')}\n"
+            f"  therapist: {state.get('staff_name')}"
+        )
+    elif scene == "post_booking":
+        slot = state.get("selected_slot") or {}
+        bits.append(f"booked_slot: {slot.get('displayPT')}")
+        bits.append(f"therapist: {state.get('staff_name')}")
+        bits.append(f"appointment_id: {state.get('appointment_id')}")
+        vr = state.get("verify_result") or {}
+        if vr.get("coverage", {}).get("copay"):
+            bits.append(f"copay: ${vr['coverage']['copay']}")
+    elif scene == "confirm_cancel":
+        slot = state.get("selected_slot") or {}
+        bits.append(f"appointment_slot: {slot.get('displayPT')}")
+        bits.append(f"therapist: {state.get('staff_name')}")
+    elif scene == "post_verify_offer_booking":
+        vr = state.get("verify_result") or {}
+        bits.append(f"display_text: {vr.get('display_text')}")
+    elif scene == "confirm_callback":
+        bits.append(
+            "callback_recap:\n"
+            f"  name: {cb.get('first_name')} {cb.get('last_name')}\n"
+            f"  phone: {cb.get('phone')}\n"
+            f"  reason: {cb.get('reason')}"
+        )
+    elif scene == "info_answer":
+        snippets = state.get("kb_snippets") or []
+        bits.append("kb_snippets:")
+        for s in snippets[:5]:
+            bits.append(f"  - {s.get('title')} ({s.get('url')}): {str(s.get('content', ''))[:300]}")
+    return "\n".join(bits)
+
+
+# ---------------------------------------------------------------------------
+# Side-effects — flip pending_confirm where the scene implies it
+# ---------------------------------------------------------------------------
+
+def _apply_scene_side_effects(scene: str, state: State) -> dict[str, Any]:
+    if scene == "confirm_booking":
+        return {"booking_status": "pending_confirm"}
+    if scene == "confirm_cancel":
+        return {"booking_status": "cancel_pending_confirm"}
+    if scene == "confirm_callback":
+        return {"callback_status": "pending_confirm"}
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Public entry — the node function
+# ---------------------------------------------------------------------------
+
+@traced(run_type="chain", name="respond")
+def respond(state: State) -> dict[str, Any]:
+    scene = _pick_scene(state)
+    channel = state.get("channel", "chat")
+    persona = persona_block(channel, scene=scene)
+    scene_instr = SCENE_INSTRUCTIONS[scene]
+    context = _context_for_scene(scene, state)
+
+    # Field-template scenes need the field_label substituted in.
+    if scene in {"ask_insurance_field", "ask_booking_field", "ask_callback_field"}:
+        if scene == "ask_insurance_field":
+            field = first_missing_insurance(state) or ""
+        elif scene == "ask_booking_field":
+            field = first_missing_booking(state) or ""
+        else:
+            field = first_missing_callback(state) or ""
+        scene_instr = scene_instr.format(field_label=FIELD_PROMPTS.get(field, field))
+
+    system = SystemMessage(content=f"{persona}\n\n# Scene: {scene}\n{scene_instr}")
+    context_msg = HumanMessage(content=f"# Context\n{context}")
+
+    try:
+        reply = _get_responder().invoke([system, context_msg])
+        text = (reply.content or "").strip() if hasattr(reply, "content") else str(reply)
+    except Exception:
+        logger.exception("respond_failed session=%s scene=%s", state.get("session_id", "?"), scene)
+        text = (
+            "I'm having trouble on my end — could you give me one moment, "
+            "or call us directly at 725-238-6990?"
+        )
+
+    side_effects = _apply_scene_side_effects(scene, state)
+
+    logger.info(
+        "respond session=%s scene=%s chars=%d",
+        state.get("session_id", "?"), scene, len(text),
+    )
+
+    # Persist the user turn + assistant turn to the gateway (DynamoDB,
+    # HIPAA-safe). Fire-and-forget on a background thread so the request
+    # latency stays on the LLM, not on the DB round-trip.
+    _persist_turn_async(state, text)
+
+    return {
+        "messages": [AIMessage(content=text)],
+        "last_reply_text": text,
+        "_scene": scene,
+        **side_effects,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Gateway persistence helpers — keep PHI off Postgres, on DynamoDB only.
+# ---------------------------------------------------------------------------
+
+def _post_turn(session_id: str, role: str, content: str) -> None:
+    if not session_id or not content:
+        return
+    base = gateway_base_url()
+    payload = json.dumps({
+        "session_id": session_id, "role": role, "content": content,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/internal/chat/turn",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            if r.status >= 400:
+                logger.warning("persist_turn_status session=%s role=%s status=%s",
+                               session_id, role, r.status)
+    except Exception:
+        logger.exception("persist_turn_failed session=%s role=%s", session_id, role)
+
+
+def _persist_turn_async(state, assistant_text: str) -> None:
+    """Fire-and-forget: persist the last user turn + this assistant turn.
+
+    We push BOTH per call because the legacy gateway expected the AI
+    service to PUT each turn; the graph runs once per user message, so
+    grouping the pair into one bg thread keeps things simple and durable.
+    """
+    session_id = state.get("session_id") or ""
+    if not session_id or session_id == "anon":
+        return
+    user_text = state.get("last_user_text") or ""
+
+    def _bg():
+        if user_text:
+            _post_turn(session_id, "user", user_text)
+        _post_turn(session_id, "assistant", assistant_text)
+
+    threading.Thread(target=_bg, daemon=True).start()

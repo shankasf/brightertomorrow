@@ -1,0 +1,313 @@
+"""Single source of truth: the typed conversation State.
+
+Design notes
+------------
+
+Why one big TypedDict instead of many small ones:
+
+  * Every node receives the entire state and returns a partial dict that
+    LangGraph merges back in. Splitting state across multiple classes
+    adds plumbing without adding safety — TypedDict is already structural.
+  * Booking flow is sequential and stateful (we need to know what's
+    collected, what's verified, what's confirmed). One dict makes the
+    sequence trivially auditable.
+  * The planner reads many fields at once to decide the next node; one
+    dict avoids cross-table lookups inside the planner.
+
+What belongs in state vs. derived per-turn:
+
+  * In state: anything that must survive across turns (the entire
+    conversation transcript, all collected fields, all tool results,
+    flags that gate destructive actions).
+  * Derived per-turn: any prompt text, any formatted slot list, any
+    "is field X missing" predicate. The Thinking-in-LangGraph guidance
+    is explicit: store raw, format on demand.
+
+Coordination contract (read this before adding fields):
+
+  * `extract`  — WRITES: intent_delta_applied? no — extract APPLIES the
+                          delta to `intent`, plus writes `field_deltas`
+                          into `fields`, plus writes `affirmation` and
+                          `safety_signal`.
+                 READS:  messages (last user turn), intent.
+  * `planner`  — READS only; returns a next-node name. Never writes.
+  * action nodes — WRITE: their tool result into the corresponding state
+                    field (verify_result, proposed_slots, appointment_id,
+                    callback_id). They also bump `last_action`.
+  * `respond`  — WRITES: appended assistant turn into `messages`, plus
+                          `last_reply_text` for runtime layers to read.
+                 READS:  everything except `safety_signal` (already
+                          handled by safety_screen / planner).
+"""
+from __future__ import annotations
+
+from typing import Annotated, Literal, TypedDict
+
+from langgraph.graph.message import add_messages
+
+
+# ---------------------------------------------------------------------------
+# Vocabularies — small enums kept inline for greppability
+# ---------------------------------------------------------------------------
+
+Channel = Literal["chat", "voice-browser", "voice-twilio"]
+"""Where the patient came in from. Drives respond tone (text vs. speech)."""
+
+Intent = Literal[
+    "unknown",
+    "greeting",
+    "info",
+    "insurance_check",
+    "booking",
+    "callback",
+    "cancel",
+    "keep",
+    "crisis",
+    "out_of_scope",
+    "idle",
+]
+"""Sticky high-level patient intent. Set by `extract`, read by `planner`."""
+
+PaymentPath = Literal["unknown", "insurance", "self_pay"]
+"""Whether the booking will go through CLAIM.MD or skip verification."""
+
+BookingStatus = Literal[
+    "none",                     # no booking attempt yet
+    "collecting",               # gathering fields
+    "ready_for_slots",          # all fields in, no slot picked yet
+    "slot_selected",            # slot picked, awaiting confirmation
+    "pending_confirm",          # confirmation question asked, awaiting yes/no
+    "booked",                   # book_appointment succeeded
+    "cancel_pending_confirm",   # caller asked to cancel, awaiting confirmation
+    "cancelled",                # cancel_appointment succeeded
+]
+
+CallbackStatus = Literal["none", "pending_confirm", "submitted"]
+
+Affirmation = Literal["yes", "no", "unclear", "none"]
+
+
+# ---------------------------------------------------------------------------
+# Collected fields — kept as nested TypedDicts so the planner can check
+# completeness without rummaging through the top-level state.
+# ---------------------------------------------------------------------------
+
+class InsuranceFields(TypedDict, total=False):
+    """The 5 fields CLAIM.MD needs (verify_coverage)."""
+    first_name: str | None
+    last_name: str | None
+    dob_yyyymmdd: str | None     # 8 digits, validated before storing
+    payer_name: str | None       # canonical payer name from PAYERS list
+    member_id: str | None
+
+
+class BookingFields(TypedDict, total=False):
+    """The 5 additional fields needed to call book_appointment."""
+    reason: str | None
+    phone: str | None
+    email: str | None
+    home_address: str | None
+    sex: str | None
+
+
+class CallbackFields(TypedDict, total=False):
+    """The 4 fields needed for request_intake_callback."""
+    first_name: str | None
+    last_name: str | None
+    phone: str | None
+    reason: str | None
+
+
+class Slot(TypedDict):
+    """One free slot, shape mirrors `_fetch_free_slots` in tools.py."""
+    startISO: str
+    endISO: str
+    displayPT: str
+
+
+class VerifyResult(TypedDict, total=False):
+    """Cached result from a single `verify_coverage` call."""
+    ok: bool
+    eligible: bool
+    payer: str | None
+    coverage: dict
+    display_text: str | None
+    error: str | None
+
+
+# ---------------------------------------------------------------------------
+# The State — one TypedDict to rule them all
+# ---------------------------------------------------------------------------
+
+class State(TypedDict, total=False):
+    """Everything the assistant remembers about this patient session.
+
+    `total=False` so partial updates from nodes are type-safe. Defaults are
+    set explicitly via `initial_state()` below.
+    """
+
+    # ----- Conversation transcript ---------------------------------------
+    # Using LangGraph's `add_messages` reducer: each node returns a list of
+    # NEW messages; the framework appends them. This matches the framework's
+    # canonical pattern and lets us swap in any LangChain message type.
+    messages: Annotated[list, add_messages]
+
+    # ----- Channel + session identity ------------------------------------
+    channel: Channel
+    session_id: str
+    caller_phone: str | None         # populated by Twilio runtime only
+    agent_source: str                # "chat-agent" | "voice-agent" | "voice-phone"
+
+    # ----- Per-turn ephemeral fields (overwritten by extract every turn) -
+    # These describe ONLY what the last user turn carried; the planner
+    # combines them with sticky state to decide next node.
+    affirmation: Affirmation         # explicit yes/no on the last turn
+    safety_signal: bool              # crisis keywords or extract said so
+    last_user_text: str              # the raw user message extract saw
+
+    # ----- Sticky high-level state ---------------------------------------
+    intent: Intent                   # last known intent; sticky across turns
+    payment_path: PaymentPath        # set when caller declares self-pay
+    booking_status: BookingStatus
+    callback_status: CallbackStatus
+
+    # ----- Collected data ------------------------------------------------
+    insurance_fields: InsuranceFields
+    booking_fields: BookingFields
+    callback_fields: CallbackFields
+    staff_id: int | None             # therapist chosen by caller
+    staff_name: str | None           # for read-back
+
+    # ----- Tool results --------------------------------------------------
+    verify_result: VerifyResult | None
+    proposed_slots: list[Slot]       # last propose_slots() result
+    selected_slot: Slot | None       # caller-chosen slot
+    appointment_id: str | None       # set after book_appointment success
+    callback_id: str | None          # set after request_intake_callback success
+    kb_snippets: list[dict]          # last kb_search / search_faqs result
+    info_topic: str | None           # what info was last asked about
+
+    # ----- Planner / respond plumbing ------------------------------------
+    # The action that just ran (set by every action node). respond uses it
+    # to pick the right scene prompt.
+    last_action: str | None
+
+    # The next field to ask, if the planner picked `ask_field` /
+    # `ask_confirmation`. respond reads this to render the question.
+    pending_question: str | None     # e.g. "first_name", "confirm_booking"
+
+    # The text respond ultimately produced this turn. The runtime layer
+    # (chat / voice) reads this to send to the patient.
+    last_reply_text: str | None
+
+    # ----- Soft-safety screen idempotency -------------------------------
+    # We run the gentle "are you safe?" screen at most once per session.
+    soft_safety_asked: bool
+
+    # ----- Transient / debugging keys (set per-turn, read by respond) ---
+    # Declared so LangGraph keeps them in checkpoints; values are written
+    # by extract / actions / respond and consumed downstream the same turn.
+    _scene: str | None                # which scene respond picked this turn
+    _low_confidence: bool             # extract said it wasn't sure
+    _info_query: str | None           # info question to search the KB for
+    _time_of_day: str | None          # caller's slot pref: morning/afternoon/evening/any
+    _earliest_day_offset: int | None  # caller's earliest day offset
+    _payer_check: dict | None         # last check_insurance_support result
+    _booking_error: str | None        # last book_appointment error code
+    _callback_error: str | None       # last submit_callback error
+    _cancel_error: str | None         # last cancel_appointment error
+    verify_result_next_step: str | None  # post-booking message from Jane
+
+
+def initial_state(channel: Channel, session_id: str, agent_source: str) -> State:
+    """Construct a brand-new conversation state with sane defaults.
+
+    Used by every runtime when LangGraph's checkpointer reports no prior
+    thread for this session_id.
+    """
+    return State(
+        messages=[],
+        channel=channel,
+        session_id=session_id,
+        caller_phone=None,
+        agent_source=agent_source,
+        affirmation="none",
+        safety_signal=False,
+        last_user_text="",
+        intent="unknown",
+        payment_path="unknown",
+        booking_status="none",
+        callback_status="none",
+        insurance_fields=InsuranceFields(),
+        booking_fields=BookingFields(),
+        callback_fields=CallbackFields(),
+        staff_id=None,
+        staff_name=None,
+        verify_result=None,
+        proposed_slots=[],
+        selected_slot=None,
+        appointment_id=None,
+        callback_id=None,
+        kb_snippets=[],
+        info_topic=None,
+        last_action=None,
+        pending_question=None,
+        last_reply_text=None,
+        soft_safety_asked=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Field-completeness helpers — used by the planner. Pure functions, no I/O.
+# ---------------------------------------------------------------------------
+
+# Order matters: the planner asks for the first missing field in this order.
+INSURANCE_FIELD_ORDER: tuple[str, ...] = (
+    "first_name", "last_name", "dob_yyyymmdd", "payer_name", "member_id",
+)
+BOOKING_FIELD_ORDER: tuple[str, ...] = (
+    "reason", "phone", "email", "home_address", "sex",
+)
+CALLBACK_FIELD_ORDER: tuple[str, ...] = (
+    "first_name", "last_name", "phone", "reason",
+)
+
+
+def _missing(d: dict, order: tuple[str, ...]) -> str | None:
+    """Return the first key in `order` whose value is missing/empty."""
+    for key in order:
+        v = d.get(key)
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return key
+    return None
+
+
+def first_missing_insurance(state: State) -> str | None:
+    return _missing(state.get("insurance_fields") or {}, INSURANCE_FIELD_ORDER)
+
+
+def first_missing_booking(state: State) -> str | None:
+    return _missing(state.get("booking_fields") or {}, BOOKING_FIELD_ORDER)
+
+
+def first_missing_callback(state: State) -> str | None:
+    return _missing(state.get("callback_fields") or {}, CALLBACK_FIELD_ORDER)
+
+
+def insurance_complete(state: State) -> bool:
+    return first_missing_insurance(state) is None
+
+
+def booking_fields_complete(state: State) -> bool:
+    return first_missing_booking(state) is None
+
+
+def callback_complete(state: State) -> bool:
+    return first_missing_callback(state) is None
+
+
+def needs_verification(state: State) -> bool:
+    """True if we're on the insurance payment path and haven't verified yet."""
+    if state.get("payment_path") == "self_pay":
+        return False
+    return state.get("verify_result") is None

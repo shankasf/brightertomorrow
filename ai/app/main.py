@@ -31,15 +31,19 @@ if os.environ.get("BT_AGENTS_TRACING", "0") != "1":
     from agents import set_tracing_disabled  # noqa: E402
     set_tracing_disabled(True)
 
-from .agent import build_agent  # noqa: E402 — must come after configure_logging
 from .aws_signer import signed_post
 from .data.payers import resolve_payer_id
 from .db import conn
 from .embed_faqs import embed_all_faqs
 from .info_cache import detect_intent, get_cached_reply, cache_stats
 from .tools import _ELIGIBLE_STATES, _validate_dob
-from .twilio_voice import run_twilio_session
-from .voice import run_voice_session
+
+# --- NEW: LangGraph runtime is now the primary agent (replaces openai-agents)
+from .graph.graph import get_app as get_langgraph_app
+from .graph.state import initial_state as graph_initial_state
+from .graph.tracing import configure_tracing as configure_langsmith
+from langchain_core.messages import HumanMessage as _LCHumanMessage
+configure_langsmith()
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +55,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-logger.info("startup: building agent graph")
-_agent = build_agent()
-logger.info("startup: agent graph ready")
+logger.info("startup: compiling LangGraph stack")
+_lg_app = get_langgraph_app()
+logger.info("startup: LangGraph compiled — agent is bt-prod (langsmith project)")
 
 # Stable prompt_cache_key for OpenAI prompt caching. Per docs: "Use the
 # prompt_cache_key parameter consistently across requests that share common
@@ -137,17 +141,33 @@ def _load_history(session_id: str, limit: int = 20) -> list[dict[str, str]]:
     ]
 
 
+async def _invoke_langgraph(session_id: str, user_text: str, channel: str = "chat") -> dict:
+    """Run one turn through the compiled LangGraph for `session_id`."""
+    cfg = {"configurable": {"thread_id": session_id or "anon"}}
+    # If this thread already has state in the checkpointer, only append the
+    # new user message; otherwise seed a fresh state.
+    snapshot = await _lg_app.aget_state(cfg)
+    has_prior = bool(snapshot and getattr(snapshot, "values", None))
+    if has_prior:
+        return await _lg_app.ainvoke(
+            {"messages": [_LCHumanMessage(content=user_text)]},
+            config=cfg,
+        )
+    seed = graph_initial_state(channel, session_id or "anon", "chat-agent")
+    seed["messages"] = [_LCHumanMessage(content=user_text)]
+    return await _lg_app.ainvoke(seed, config=cfg)
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
+    """Single-shot chat endpoint backed by the LangGraph agent.
+
+    Wire protocol unchanged from the legacy openai-agents handler so the
+    Go gateway's ChatHandler keeps working as-is.
+    """
     session_id = req.session_id or ""
-    # Mark this request as text-chat so any tools called downstream (e.g.
-    # book_with_insurance) stamp source=chat-agent on the intake payload.
     from .tools import agent_source
     agent_source.set("chat-agent")
-    logger.info(
-        "chat_request session=%s history_limit=20 msg_len=%d",
-        session_id or "anon", len(req.message),
-    )
 
     if not os.environ.get("OPENAI_API_KEY"):
         logger.warning("chat_abort reason=missing_OPENAI_API_KEY session=%s", session_id or "anon")
@@ -161,44 +181,24 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
     GREET_MARKER = "__BT_GREET__"
     is_greet = req.message.strip() == GREET_MARKER
-
-    history = (
-        await asyncio.to_thread(_load_history, session_id)
-        if session_id and not is_greet
-        else []
+    user_text = (
+        "Hi"  # synthetic kickoff; respond's greeting scene fires when state is fresh
+        if is_greet
+        else req.message
     )
-    logger.debug("chat_history session=%s loaded=%d", session_id or "anon", len(history))
-
-    turn_content = (
-        "[Visitor just opened the chat widget; they haven't said anything yet. "
-        "This is a system prompt — do NOT echo it back.] Greet the visitor "
-        "warmly and naturally in 1-2 short sentences. Vary the wording every "
-        "time — do not reuse the same opener. Briefly invite them to ask about "
-        "booking, getting matched with a therapist, checking insurance, or "
-        "practice questions. No bullet lists, no bold markdown, no emojis."
-    ) if is_greet else req.message
-    if is_greet:
-        logger.info("chat_greet session=%s", session_id or "anon")
-    history.append({"role": "user", "content": turn_content})
-
-    # Late import so the service still boots if openai-agents is not installed
-    from agents import Runner
 
     t0 = time.perf_counter()
     try:
-        result = await Runner.run(_agent, history, run_config=_run_config())
+        result = await _invoke_langgraph(session_id, user_text, channel="chat")
+        reply = (result.get("last_reply_text") or "").strip() or "I'm here — could you tell me a bit more?"
         latency_ms = (time.perf_counter() - t0) * 1000
-        reply = (result.final_output or "").strip() or "I'm here — could you tell me a bit more?"
         logger.info(
-            "chat_ok session=%s latency_ms=%.1f reply_len=%d cache_key=%s",
-            session_id or "anon", latency_ms, len(reply), _PROMPT_CACHE_KEY,
+            "chat_ok session=%s scene=%s latency_ms=%.1f reply_len=%d",
+            session_id or "anon", result.get("_scene"), latency_ms, len(reply),
         )
     except Exception:
         latency_ms = (time.perf_counter() - t0) * 1000
-        logger.exception(
-            "chat_error session=%s latency_ms=%.1f",
-            session_id or "anon", latency_ms,
-        )
+        logger.exception("chat_error session=%s latency_ms=%.1f", session_id or "anon", latency_ms)
         raise
 
     return ChatResponse(session_id=session_id, reply=reply)
@@ -404,32 +404,23 @@ async def _stream_llm(session_id: str, history: list[dict[str, str]], t0: float)
 
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
-    """SSE streaming variant of /chat.
+    """SSE streaming variant of /chat — now backed by LangGraph.
 
-    Flow:
-        1. Cache pre-check via info_cache.detect_intent — if a canned intent
-           matches AND the cached version is fresh, serve immediately (no LLM).
-        2. Otherwise stream tokens from Runner.run_streamed.
+    Wire protocol preserved for the gateway and the React widget:
+        `session` -> `delta` (one) -> `done`
 
-    Emits SSE events: `session` → `delta` (one-or-many) → `done` (terminal).
-    `error` may precede a terminal `done` if the upstream LLM fails.
+    We don't stream tokens here — the LangGraph respond node is a single
+    LLM call that returns a complete reply. Sending it as one `delta`
+    keeps the frontend code unchanged while we move to the new agent.
+    A real token-streaming responder is a follow-up.
     """
     session_id = req.session_id or ""
     msg = req.message or ""
     t0 = time.perf_counter()
-    # Tag this request as text-chat (vs. voice) so tools called inside the
-    # agent stream stamp source=chat-agent on any intake/coverage submissions.
     from .tools import agent_source
     agent_source.set("chat-agent")
 
-    logger.info(
-        "chat_stream_request session=%s msg_len=%d client=%s",
-        session_id or "anon", len(msg), request.client.host if request.client else "?",
-    )
-
     if not os.environ.get("OPENAI_API_KEY"):
-        logger.warning("chat_stream_abort reason=missing_OPENAI_API_KEY session=%s", session_id or "anon")
-
         async def _missing_key_stream() -> AsyncIterator[bytes]:
             reply = (
                 "The AI assistant is not configured yet (missing OPENAI_API_KEY). "
@@ -441,28 +432,23 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
                 "session_id": session_id, "reply": reply, "cached": False,
                 "error": "missing_OPENAI_API_KEY", "total_ms": 0, "chars": len(reply),
             })
-
         return StreamingResponse(_missing_key_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
     is_greet = msg.strip() == "__BT_GREET__"
+    user_text = "Hi" if is_greet else msg
 
-    # Cache check — only for real user messages, never for the synthetic greeting.
+    # Canned-reply cache — still useful for common questions. Bypassed
+    # for the greeting (always render fresh) and obviously when no
+    # intent matches.
     if not is_greet:
         intent = detect_intent(msg)
         if intent is not None:
-            logger.info(
-                "chat_stream_intent session=%s intent=%s msg_preview=%r",
-                session_id or "anon", intent, msg[:80],
-            )
             cached = get_cached_reply(intent)
             if cached is not None:
-                # Cache hit OR fresh render — both bypass the LLM.
                 meta = {"version_key": cached.version_key, "hit": cached.hit}
                 logger.info(
-                    "chat_stream_cached_path session=%s intent=%s cache_hit=%s "
-                    "lookup_ms=%.1f chars=%d",
-                    session_id or "anon", intent, cached.hit,
-                    cached.latency_ms, cached.chars,
+                    "chat_stream_cached_path session=%s intent=%s cache_hit=%s chars=%d",
+                    session_id or "anon", intent, cached.hit, cached.chars,
                 )
                 return StreamingResponse(
                     _stream_cached(session_id, intent, cached.reply, meta, t0),
@@ -470,21 +456,38 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
                 )
 
-    history = (
-        await asyncio.to_thread(_load_history, session_id)
-        if session_id and not is_greet
-        else []
-    )
-    logger.debug("chat_stream_history session=%s loaded=%d", session_id or "anon", len(history))
-
-    if is_greet:
-        logger.info("chat_stream_greet session=%s", session_id or "anon")
-        history.append({"role": "user", "content": _GREET_TURN})
-    else:
-        history.append({"role": "user", "content": msg})
+    async def _stream_graph() -> AsyncIterator[bytes]:
+        yield _sse_event("session", {"session_id": session_id})
+        try:
+            result = await _invoke_langgraph(session_id, user_text, channel="chat")
+            reply = (result.get("last_reply_text") or "").strip()
+            if not reply:
+                reply = "I'm here — could you tell me a bit more?"
+            yield _sse_event("delta", {"text": reply})
+            total_ms = (time.perf_counter() - t0) * 1000
+            yield _sse_event("done", {
+                "session_id": session_id,
+                "reply": reply,
+                "cached": False,
+                "scene": result.get("_scene"),
+                "agent": "langgraph",
+                "total_ms": round(total_ms, 1),
+                "chars": len(reply),
+            })
+            logger.info(
+                "chat_stream_ok session=%s scene=%s latency_ms=%.1f chars=%d",
+                session_id or "anon", result.get("_scene"), total_ms, len(reply),
+            )
+        except Exception as exc:
+            logger.exception("chat_stream_error session=%s", session_id or "anon")
+            yield _sse_event("error", {"message": str(exc)})
+            yield _sse_event("done", {
+                "session_id": session_id, "reply": "", "cached": False,
+                "error": str(exc), "total_ms": (time.perf_counter() - t0) * 1000, "chars": 0,
+            })
 
     return StreamingResponse(
-        _stream_llm(session_id, history, t0),
+        _stream_graph(),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
@@ -617,19 +620,18 @@ async def voice_ws(ws: WebSocket, session_id: str = "") -> None:
     # (e.g. book_with_insurance) record source=voice-agent on the intake.
     from .tools import agent_source
     agent_source.set("voice-agent")
+    # New: route to the LangGraph-backed voice bridge (Deepgram STT,
+    # LangGraph brain, Cartesia TTS). Same wire protocol as the legacy
+    # bridge so the React widget needs no changes.
+    from .graph.runtime.voice_browser import voice_ws as _graph_voice_ws
     try:
-        await run_voice_session(ws, session_id)
+        # The router decorator's accept() is skipped because we already
+        # accepted above — call the inner function directly.
+        await _graph_voice_ws.__wrapped__(ws, session_id) if hasattr(_graph_voice_ws, "__wrapped__") else await _graph_voice_ws(ws, session_id)
     except WebSocketDisconnect:
-        logger.info(
-            "voice_ws_disconnect session=%s duration_s=%.1f",
-            session_id or "anon", time.perf_counter() - t0,
-        )
+        logger.info("voice_ws_disconnect session=%s duration_s=%.1f", session_id or "anon", time.perf_counter() - t0)
     except Exception:
-        logger.warning(
-            "voice_ws_error session=%s duration_s=%.1f",
-            session_id or "anon", time.perf_counter() - t0,
-            exc_info=True,
-        )
+        logger.warning("voice_ws_error session=%s duration_s=%.1f", session_id or "anon", time.perf_counter() - t0, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -674,26 +676,32 @@ async def twilio_voice() -> Any:
 
 @app.websocket("/twilio/media")
 async def twilio_media_ws(ws: WebSocket) -> None:
-    """Bridge a Twilio Media Stream to the realtime triage agent graph."""
+    """Twilio Media Stream → LangGraph (μ-law 8 kHz ↔ PCM16 16 kHz)."""
     logger.info("twilio_ws_connect")
-    await ws.accept(subprotocol="audio.twilio.com")
-    t0 = time.perf_counter()
     from .tools import agent_source
-    # "voice-phone" — PSTN call via Twilio. Distinct from "voice-agent" which
-    # is the browser WebRTC widget. HIPAA audit cares about the difference
-    # (PSTN audio crossed a carrier network we don't control).
     agent_source.set("voice-phone")
+    t0 = time.perf_counter()
+    # Delegate to the new LangGraph-backed Twilio bridge. It owns the
+    # WS accept() (with audio.twilio.com subprotocol) so we don't
+    # double-accept here.
+    from .graph.runtime.voice_twilio import twilio_media as _graph_twilio_media
     try:
-        await run_twilio_session(ws)
+        await _graph_twilio_media.__wrapped__(ws) if hasattr(_graph_twilio_media, "__wrapped__") else await _graph_twilio_media(ws)
     except WebSocketDisconnect:
-        logger.info(
-            "twilio_ws_disconnect duration_s=%.1f", time.perf_counter() - t0,
-        )
+        logger.info("twilio_ws_disconnect duration_s=%.1f", time.perf_counter() - t0)
     except Exception:
-        logger.warning(
-            "twilio_ws_error duration_s=%.1f",
-            time.perf_counter() - t0, exc_info=True,
-        )
+        logger.warning("twilio_ws_error duration_s=%.1f", time.perf_counter() - t0, exc_info=True)
+
+
+# The /v2/* aliases stay mounted for ad-hoc testing, but the canonical
+# /chat, /chat/stream, /ws/voice, /twilio/* routes above are now the
+# LangGraph stack — no toggle, no feature flag.
+try:
+    from .graph.runtime.chat import router as _v2_chat_router
+    app.include_router(_v2_chat_router)
+    logger.info("v2 alias routes mounted at /v2/chat")
+except Exception:
+    logger.exception("v2 alias mount failed (non-fatal)")
 
 
 if __name__ == "__main__":

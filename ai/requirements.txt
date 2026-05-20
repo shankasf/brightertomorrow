@@ -12,3 +12,17 @@ tiktoken>=0.8.0
 pgvector==0.3.6
 websockets>=13.0
 boto3>=1.35.0
+
+# --- LangGraph stack (new agent runtime) -----------------------------------
+langgraph>=0.6.0
+langchain-core>=0.3.0
+langchain-openai>=0.3.0
+langsmith>=0.2.0
+
+# --- LiveKit Agents (voice pipeline: STT/LLM/TTS plumbing) -----------------
+# Plugins are used standalone — no LiveKit Room required. Audio I/O
+# rides the existing FastAPI WebSocket bridges (browser PCM16, Twilio mulaw).
+livekit-agents[langchain,deepgram,cartesia,silero]>=1.5.0
+
+# audioop is removed in Python 3.13 — provide a shim for the Twilio bridge.
+audioop-lts; python_version >= "3.13"
