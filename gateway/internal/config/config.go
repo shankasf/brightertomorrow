@@ -25,6 +25,11 @@ type Config struct {
 	// Calendar DDB tables (created by infra agent).
 	JaneEventsTable string
 	SoftHoldsTable  string
+	// Clinical-intake gate / handoff tables.
+	PendingRequestsTable string // bt-pending-requests — returning-patient lookup
+	AdminQueueTable      string // bt-admin-queue — routine handoff notifications
+	SafetyQueueTable     string // bt-safety-queue — urgent safety escalations
+	SNSAlertTopicARN     string // ARN of bt-alerts SNS topic; safety_queue publishes here
 	// Shared secret for /internal/calendar/* endpoints. When empty the check
 	// is skipped (dev mode); in production this must be set.
 	InternalAPISecret string
@@ -79,6 +84,10 @@ func Load() (*Config, error) {
 		CognitoClientID:      os.Getenv("COGNITO_USER_POOL_CLIENT_ID"),
 		JaneEventsTable:      envOr("BT_JANE_EVENTS_TABLE", "bt-jane-events"),
 		SoftHoldsTable:       envOr("BT_SOFT_HOLDS_TABLE", "bt-soft-holds"),
+		PendingRequestsTable: envOr("BT_PENDING_REQUESTS_TABLE", "bt-pending-requests"),
+		AdminQueueTable:      envOr("BT_ADMIN_QUEUE_TABLE", "bt-admin-queue"),
+		SafetyQueueTable:     envOr("BT_SAFETY_QUEUE_TABLE", "bt-safety-queue"),
+		SNSAlertTopicARN:     os.Getenv("SNS_ALERT_TOPIC_ARN"),
 		InternalAPISecret:    os.Getenv("INTERNAL_API_SECRET"),
 		TwilioAuthToken:      os.Getenv("TWILIO_AUTH_TOKEN"),
 		TwilioPublicHost:     envOr("TWILIO_PUBLIC_HOST", "brightertomorrowtherapy.cloud"),

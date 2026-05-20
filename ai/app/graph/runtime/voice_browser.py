@@ -40,6 +40,43 @@ async def _audio_in_queue_to_stream(q: asyncio.Queue[bytes | None]):
         yield item
 
 
+async def _speak_first_turn(ws: WebSocket, pipeline: VoicePipeline) -> None:
+    """Emit the HIPAA disclosure (or resume opener) as the first AI turn.
+
+    Runs once per WebSocket connection BEFORE we start listening for
+    audio. The reply text is both:
+      * transcribed back to the client (so the chat-style transcript
+        widget shows the words), and
+      * synthesised to PCM audio and streamed as response.audio.delta
+        frames (so the user actually hears the disclosure).
+
+    Reconnect: pipeline.emit_first_turn() handles the gates check itself
+    and returns the short "welcome back" line if the disclosure has
+    already been delivered earlier in this thread. No duplicate audit.
+    """
+    try:
+        reply = await pipeline.emit_first_turn()
+    except Exception:
+        logger.exception("voice_browser_first_turn_failed session=%s",
+                         pipeline.session_id)
+        return
+    if not reply:
+        return
+    await ws.send_text(json.dumps({
+        "type": "response.audio_transcript.done",
+        "transcript": reply,
+    }))
+    try:
+        async for chunk in pipeline.synthesize(reply):
+            await ws.send_text(json.dumps({
+                "type": "response.audio.delta",
+                "delta": base64.b64encode(chunk).decode(),
+            }))
+    except Exception:
+        logger.exception("voice_browser_first_turn_synth_failed session=%s",
+                         pipeline.session_id)
+
+
 @router.websocket("/ws/voice")
 async def voice_ws(ws: WebSocket, session_id: str = "") -> None:
     sid = session_id or "anon"
@@ -48,6 +85,11 @@ async def voice_ws(ws: WebSocket, session_id: str = "") -> None:
 
     audio_q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=512)
     pipeline = VoicePipeline(sid, channel="voice-browser", agent_source="voice-agent")
+
+    # HIPAA: the caller must hear the disclosure as the first audio they
+    # receive. We do this BEFORE the reader/speech_loop gather so the
+    # disclosure can't race with an early audio buffer.
+    await _speak_first_turn(ws, pipeline)
 
     async def reader():
         try:

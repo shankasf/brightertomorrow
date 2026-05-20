@@ -11,6 +11,29 @@ export const DDB_GSI1 = "GSI1";
 export const DDB_JANE_EVENTS_TABLE = "bt-jane-events";
 export const DDB_SOFT_HOLDS_TABLE = "bt-soft-holds";
 
+// Notifications outbox — stores pending/retry/sent/dead delivery rows.
+// Action nodes write rows here inside the booking TransactWriteItems.
+export const DDB_NOTIFICATIONS_OUTBOX_TABLE = "bt-notifications-outbox";
+
+// Pending intake requests — indexed for returning-patient lookup and admin queue.
+export const DDB_PENDING_REQUESTS_TABLE = "bt-pending-requests";
+
+// Admin handoff queue — routine clinical-intake handoff notifications.
+// Written by bt-ai handoff terminal nodes (out_of_state, roi_required,
+// admin_with_note, admin_verification, admin_callback).
+export const DDB_ADMIN_QUEUE_TABLE = "bt-admin-queue";
+
+// Safety queue — urgent clinical-safety escalations requiring immediate triage.
+// Written by bt-ai handoff_mandatory_report and handoff_crisis nodes.
+// Separate table from admin queue so IAM and alarms can be scoped differently.
+export const DDB_SAFETY_QUEUE_TABLE = "bt-safety-queue";
+
+// Twilio secret path in Secrets Manager (auth_token inside JSON blob).
+export const SECRET_TWILIO = "bt/twilio/credentials";
+
+// S3 bucket for PHI logs written by the s3_phi channel.
+export const PHI_LOGS_BUCKET = "bt-phi-logs";
+
 export const JANE_STAFF_IDS = [71, 47, 24, 21, 34, 53] as const;
 
 export const SECRET_NAMES = {

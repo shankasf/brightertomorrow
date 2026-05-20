@@ -29,9 +29,20 @@ from dataclasses import dataclass
 from langchain_core.messages import HumanMessage
 
 from ..graph import get_app
+from ..prompts._constants import (
+    HIPAA_DISCLOSURE_VOICE,
+    HIPAA_RESUME_VOICE,
+)
 from ..state import initial_state
 
 logger = logging.getLogger(__name__)
+
+
+# Sentinel user message that triggers the first-turn HIPAA disclosure
+# inside the graph. The disclosure gate (in nodes/) recognises this and
+# routes to the disclosure_prompt scene; respond emits the disclosure as
+# a normal assistant turn — same persistence path as any other turn.
+SESSION_OPEN_TOKEN = "__session_open__"
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +132,75 @@ class VoicePipeline:
         logger.info(
             "voice_pipeline session=%s scene=%s chars=%d",
             self.session_id, result.get("_scene"), len(reply),
+        )
+        return reply
+
+    # ---- First-turn HIPAA disclosure -------------------------------
+
+    async def is_disclosure_done(self) -> bool:
+        """True if this thread has already delivered the HIPAA disclosure.
+
+        Used by reconnect-resume logic in Twilio and browser voice
+        transports — we don't replay the disclosure on reconnects (that
+        would be annoying and erode trust). The disclosure gate sets
+        ``gates.disclosure_done=True`` after respond runs the
+        ``disclosure_prompt`` scene; we read that flag from the
+        checkpointer snapshot.
+        """
+        try:
+            snapshot = await self._app.aget_state(self._cfg)
+        except Exception:
+            logger.exception("voice_pipeline_snapshot_failed session=%s",
+                             self.session_id)
+            return False
+        if snapshot is None or not snapshot.values:
+            return False
+        gates = (snapshot.values.get("gates") or {})
+        return bool(gates.get("disclosure_done"))
+
+    async def emit_first_turn(self) -> str:
+        """Deliver the HIPAA disclosure as the first AI turn of this call.
+
+        Drives the graph with the ``__session_open__`` sentinel so the
+        disclosure_gate routes to the disclosure_prompt scene and respond
+        emits ``HIPAA_DISCLOSURE_VOICE`` via the LLM. The persistence
+        side-effect (DDB audit row) runs as it would for any other turn.
+
+        Reconnect: if the disclosure was already delivered earlier in
+        this thread, returns the short resume opener instead (no graph
+        invocation, no duplicate audit row).
+
+        Returns the text to speak — caller is responsible for synthesis.
+        """
+        if await self.is_disclosure_done():
+            logger.info("voice_pipeline_resume session=%s", self.session_id)
+            return HIPAA_RESUME_VOICE
+
+        self._seeded = True
+        seed = initial_state(self.channel, self.session_id, self.agent_source)
+        seed["messages"] = [HumanMessage(content=SESSION_OPEN_TOKEN)]
+        try:
+            result = await self._app.ainvoke(seed, config=self._cfg)
+        except Exception:
+            logger.exception("voice_pipeline_first_turn_failed session=%s",
+                             self.session_id)
+            result = {}
+
+        reply = (result.get("last_reply_text") or "").strip()
+        scene = result.get("_scene")
+        if not reply or scene != "disclosure_prompt":
+            # Disclosure gate didn't fire yet — fall back to the
+            # constant so the caller never hears dead air on connect.
+            # This is a SAFETY NET; once gates lands this branch is
+            # effectively dead code.
+            logger.warning(
+                "voice_pipeline_disclosure_fallback session=%s scene=%s",
+                self.session_id, scene,
+            )
+            reply = HIPAA_DISCLOSURE_VOICE
+        logger.info(
+            "voice_pipeline_first_turn session=%s scene=%s chars=%d",
+            self.session_id, scene, len(reply),
         )
         return reply
 

@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: bt-gateway:sess-4a89d51-1779179127
+          image: bt-gateway:prod-69f85e6-1779258581
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -84,6 +84,11 @@ spec:
                 secretKeyRef:
                   name: bt-config
                   key: COGNITO_USER_POOL_CLIENT_ID
+            # SNS topic ARN for urgent safety-queue escalations (crisis +
+            # mandatory-report handoffs publish here). Non-secret; topic
+            # ARN is stable and provisioned by BtObservability CDK stack.
+            - name: SNS_ALERT_TOPIC_ARN
+              value: "arn:aws:sns:us-east-1:689517798275:bt-alerts"
             # Twilio Voice webhook signature verification + future outbound.
             - name: TWILIO_AUTH_TOKEN
               valueFrom:

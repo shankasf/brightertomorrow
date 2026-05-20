@@ -12,6 +12,56 @@ PRACTICE_CONTEXT = (
 )
 
 
+# ---------------------------------------------------------------------------
+# HIPAA welcome / disclosure copy — load-bearing legal text.
+# ---------------------------------------------------------------------------
+#
+# WHY a fixed string instead of letting the LLM phrase the disclosure:
+#   * HIPAA "Notice of Privacy Practices" notification requires the patient
+#     be told the channel is private. The exact words don't have to be
+#     boilerplate, but the SUBSTANCE — "HIPAA-compliant" — must be stated.
+#     Letting the LLM rephrase it on every session risks a turn where the
+#     disclosure is dropped or softened.
+#   * The Realtime voice channel needs to SPEAK this verbatim as the first
+#     line of every call before any user audio is processed; that's the
+#     2-event greeting pattern (session.update with instructions ->
+#     response.create) the GA OpenAI Realtime API expects.
+#   * Voice copy is intentionally < 90 spoken words: callers in distress
+#     drop calls when the opener drones on. Recording disclosure is its
+#     own separate legal requirement (Nevada is one-party consent, but we
+#     announce anyway so we can store the audio).
+#   * Chat copy is slightly longer because the widget UI cannot speak —
+#     the patient needs to SEE the words "HIPAA-compliant" written.
+#
+# We say "HIPAA-compliant" verbatim — that exact phrase is what auditors
+# look for in transcript spot-checks.
+HIPAA_DISCLOSURE_VOICE = (
+    "Hi, you've reached Brighter Tomorrow Therapy. I'm an AI assistant here "
+    "to help with scheduling, insurance questions, and finding a therapist. "
+    "This call is HIPAA-compliant and is being recorded so it stays on your "
+    "record. How can I help you today?"
+)
+
+HIPAA_DISCLOSURE_CHAT = (
+    "Welcome to Brighter Tomorrow Therapy. I'm an AI assistant that can "
+    "help you schedule an appointment, check your insurance, find a "
+    "therapist, or answer questions about the practice. "
+    "**This chat is HIPAA-compliant and saved to your patient record.** "
+    "How can I help you today?"
+)
+
+# Reconnect / resume opener — used when a session reconnects mid-call and
+# the disclosure has already been delivered earlier in the thread. We do
+# NOT replay the full disclosure (annoying + erodes trust), but we do
+# acknowledge we're picking up where we left off.
+HIPAA_RESUME_VOICE = (
+    "Welcome back. Picking up right where we left off."
+)
+HIPAA_RESUME_CHAT = (
+    "Welcome back — picking up where we left off."
+)
+
+
 NO_SLASH_COMMANDS_RULE = (
     "NEVER write slash-style commands or internal URL paths in your reply "
     "(no /check-coverage, /get-started, /insurance, /book, /match, etc.). "

@@ -8,6 +8,7 @@ import { GatewayIamStack } from "../lib/gateway-iam-stack";
 import { AuthStack } from "../lib/auth-stack";
 import { ApiStack } from "../lib/api-stack";
 import { ObservabilityStack } from "../lib/observability-stack";
+import { NotificationsRetryStack } from "../lib/notifications-retry-stack";
 import { ACCOUNT, REGION, BOOTSTRAP_ADMIN_EMAIL, DDB_GSI1 } from "../lib/constants";
 
 const app = new cdk.App();
@@ -35,6 +36,14 @@ const gatewayIam = new GatewayIamStack(app, "BtGatewayIam", {
   janeEventsTableArn: data.janeEventsTable.tableArn,
   softHoldsTableArn: data.softHoldsTable.tableArn,
   janeIcalSyncFnArn: data.janeIcalSyncFn.functionArn,
+  // New intake-flow resources (LangGraph rewrite — May 2026)
+  pendingRequestsTableArn: data.pendingRequestsTable.tableArn,
+  adminQueueTableArn: data.adminQueueTable.tableArn,
+  safetyQueueTableArn: data.safetyQueueTable.tableArn,
+  notificationsOutboxTableArn: data.notificationsOutboxTable.tableArn,
+  // bt-alerts SNS topic is owned by BtObservability. Import its ARN
+  // directly to avoid a cross-stack resource-policy cycle.
+  alertTopicArn: `arn:aws:sns:${REGION}:${ACCOUNT}:bt-alerts`,
 });
 gatewayIam.addDependency(security);
 gatewayIam.addDependency(data);
@@ -64,7 +73,28 @@ new ApiStack(app, "BtApi", {
   userPoolId: auth.userPool.userPoolId,
 });
 
-// Phase 4 — Admin SPA: removed. admin.brightertomorrowtherapy.cloud now points
+// Phase 4 — Notifications retry worker.
+// bt-phi-logs S3 bucket and the SES identity ARN are managed out-of-band
+// (security team); pass their ARNs as CDK context keys:
+//   cdk deploy BtNotificationsRetry \
+//     --context phiLogsBucketArn=arn:aws:s3:::bt-phi-logs \
+//     --context sesFromIdentityArn=arn:aws:ses:us-east-1:689517798275:identity/brightertomorrowtherapy.cloud
+const phiLogsBucketArn = app.node.tryGetContext("phiLogsBucketArn")
+  || `arn:aws:s3:::bt-phi-logs`;
+const sesFromIdentityArn = app.node.tryGetContext("sesFromIdentityArn")
+  || `arn:aws:ses:us-east-1:${ACCOUNT}:identity/brightertomorrowtherapy.cloud`;
+
+const notificationsRetry = new NotificationsRetryStack(app, "BtNotificationsRetry", {
+  env,
+  phiKeyArn: security.phiKey.keyArn,
+  outboxTableArn: data.notificationsOutboxTable.tableArn,
+  phiLogsBucketArn,
+  sesFromIdentityArn,
+});
+notificationsRetry.addDependency(security);
+notificationsRetry.addDependency(data);
+
+// Phase 5 — Admin SPA: removed. admin.brightertomorrowtherapy.cloud now points
 // directly at the Hostinger VM (k3s/Traefik), serving the full Next.js admin
 // from web/src/app/admin/* with cert-manager/LE TLS. No CloudFront.
 

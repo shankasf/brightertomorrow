@@ -80,6 +80,94 @@ def health() -> dict[str, Any]:
     return {"status": "ok"}
 
 
+async def _stream_langgraph_respond_tokens(
+    session_id: str, user_text: str, channel: str = "chat"
+) -> AsyncIterator[dict]:
+    """Stream the graph for one turn; yield respond-node token chunks.
+
+    Yields:
+      * {"type": "token", "text": <chunk>}  — partial respond text. Multiple
+        chunks per turn. ONLY from the respond node — extract's structured
+        output is not streamed (it would pollute the user-facing reply).
+      * {"type": "final", "result": <dict>} — once at the end, with the
+        complete state dict so callers can read last_reply_text, _scene, etc.
+
+    Mirrors the resume-offer flag injection in _invoke_langgraph so the
+    streaming path stays behaviourally identical to the non-streaming one.
+    """
+    cfg = {"configurable": {"thread_id": session_id or "anon"}}
+    snapshot = await _lg_app.aget_state(cfg)
+    has_prior = bool(snapshot and getattr(snapshot, "values", None))
+
+    if has_prior:
+        if user_text.strip() == "Hi" and channel == "chat":
+            values = snapshot.values
+            has_phi = bool(
+                (values.get("insurance_fields") or {}).get("first_name")
+                or (values.get("booking_fields") or {}).get("phone")
+                or (values.get("booking_fields") or {}).get("email")
+            )
+            if has_phi and not values.get("_resume_offer_pending"):
+                await _lg_app.aupdate_state(cfg, {"_resume_offer_pending": True})
+        graph_input: Any = {"messages": [_LCHumanMessage(content=user_text)]}
+    else:
+        seed = graph_initial_state(channel, session_id or "anon", "chat-agent")
+        seed["messages"] = [_LCHumanMessage(content=user_text)]
+        graph_input = seed
+
+    final_state: dict | None = None
+    async for event in _lg_app.astream_events(graph_input, config=cfg, version="v2"):
+        kind = event.get("event")
+        if kind == "on_chat_model_stream":
+            metadata = event.get("metadata") or {}
+            # Only stream tokens from the respond node — extract's structured
+            # output would otherwise show up as JSON in the user-facing reply.
+            if metadata.get("langgraph_node") != "respond":
+                continue
+            data = event.get("data") or {}
+            chunk = data.get("chunk")
+            text = getattr(chunk, "content", "") if chunk is not None else ""
+            if isinstance(text, list):
+                # Some LC versions emit list-of-blocks for content; flatten.
+                text = "".join(
+                    (b.get("text", "") if isinstance(b, dict) else str(b))
+                    for b in text
+                )
+            if text:
+                yield {"type": "token", "text": text}
+        elif kind == "on_chain_end":
+            # Capture the top-level graph output (the only on_chain_end with
+            # no parent_run_ids points at the graph root).
+            name = event.get("name")
+            if name == "LangGraph":
+                data = event.get("data") or {}
+                output = data.get("output")
+                if isinstance(output, dict):
+                    final_state = output
+
+    yield {"type": "final", "result": final_state or {}}
+
+
+def _strip_picker_marker_streaming(buf: str) -> tuple[str, str]:
+    """Pull emittable text out of a token buffer while keeping [[...]] markers intact.
+
+    Returns (emit, remaining_buffer). The remaining buffer holds back any
+    open "[[" sequence until we know whether it closes with "]]" (marker
+    to swallow) or is a false-positive (emit literally on flush).
+    """
+    if "[[" not in buf:
+        return buf, ""
+    pre, _, rest = buf.partition("[[")
+    if "]]" in rest:
+        # Complete marker found — swallow it.
+        _marker, _, after = rest.partition("]]")
+        # Continue scanning `after` for further markers.
+        sub_emit, sub_rest = _strip_picker_marker_streaming(after)
+        return pre + sub_emit, sub_rest
+    # Incomplete marker — hold the buffer until more tokens arrive.
+    return pre, "[[" + rest
+
+
 async def _invoke_langgraph(session_id: str, user_text: str, channel: str = "chat") -> dict:
     """Run one turn through the compiled LangGraph for `session_id`."""
     cfg = {"configurable": {"thread_id": session_id or "anon"}}
@@ -88,6 +176,23 @@ async def _invoke_langgraph(session_id: str, user_text: str, channel: str = "cha
     snapshot = await _lg_app.aget_state(cfg)
     has_prior = bool(snapshot and getattr(snapshot, "values", None))
     if has_prior:
+        # Greet-with-prior-state → flip the resume-offer flag so the graph
+        # greets by name and offers a continue-vs-fresh choice instead of
+        # silently picking up where we left off. The frontend already
+        # bounds this to the 30-min reconnect window via localStorage TTL.
+        # Must use aupdate_state (not ainvoke input) because LangGraph's
+        # ainvoke applies the input AFTER the graph starts running, which
+        # is too late — by then extract has already read state and the
+        # planner has routed on a stale flag value.
+        if user_text.strip() == "Hi" and channel == "chat":
+            values = snapshot.values
+            has_phi = bool(
+                (values.get("insurance_fields") or {}).get("first_name")
+                or (values.get("booking_fields") or {}).get("phone")
+                or (values.get("booking_fields") or {}).get("email")
+            )
+            if has_phi and not values.get("_resume_offer_pending"):
+                await _lg_app.aupdate_state(cfg, {"_resume_offer_pending": True})
         return await _lg_app.ainvoke(
             {"messages": [_LCHumanMessage(content=user_text)]},
             config=cfg,
@@ -229,25 +334,55 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
 
     async def _stream_graph() -> AsyncIterator[bytes]:
         yield _sse_event("session", {"session_id": session_id})
+        accumulated = ""
+        result: dict[str, Any] = {}
+        marker_buf = ""
+        first_token_ms: float | None = None
         try:
-            result = await _invoke_langgraph(session_id, user_text, channel="chat")
-            reply = (result.get("last_reply_text") or "").strip()
+            async for ev in _stream_langgraph_respond_tokens(
+                session_id, user_text, channel="chat"
+            ):
+                if ev["type"] == "token":
+                    marker_buf += ev["text"]
+                    accumulated += ev["text"]
+                    emit, marker_buf = _strip_picker_marker_streaming(marker_buf)
+                    if emit:
+                        if first_token_ms is None:
+                            first_token_ms = (time.perf_counter() - t0) * 1000
+                        yield _sse_event("delta", {"text": emit})
+                elif ev["type"] == "final":
+                    result = ev["result"] or {}
+            # Flush any leftover buffer (e.g. a stray "[[" that never closed).
+            if marker_buf:
+                yield _sse_event("delta", {"text": marker_buf})
+                marker_buf = ""
+            reply = (result.get("last_reply_text") or accumulated).strip()
             if not reply:
                 reply = "I'm here — could you tell me a bit more?"
-            yield _sse_event("delta", {"text": reply})
+                yield _sse_event("delta", {"text": reply})
+            # Strip any markers from the final reply we report back to the
+            # client / persistence layer so the widget never sees them.
+            clean_reply = reply
+            while "[[" in clean_reply and "]]" in clean_reply:
+                pre, _, rest = clean_reply.partition("[[")
+                _marker, _, after = rest.partition("]]")
+                clean_reply = pre + after
             total_ms = (time.perf_counter() - t0) * 1000
             yield _sse_event("done", {
                 "session_id": session_id,
-                "reply": reply,
+                "reply": reply,  # raw, including marker, so widget can render picker
                 "cached": False,
                 "scene": result.get("_scene"),
                 "agent": "langgraph",
                 "total_ms": round(total_ms, 1),
-                "chars": len(reply),
+                "first_token_ms": round(first_token_ms, 1) if first_token_ms else None,
+                "chars": len(clean_reply),
             })
             logger.info(
-                "chat_stream_ok session=%s scene=%s latency_ms=%.1f chars=%d",
-                session_id or "anon", result.get("_scene"), total_ms, len(reply),
+                "chat_stream_ok session=%s scene=%s latency_ms=%.1f first_token_ms=%s chars=%d",
+                session_id or "anon", result.get("_scene"), total_ms,
+                f"{first_token_ms:.1f}" if first_token_ms else "-",
+                len(clean_reply),
             )
         except Exception as exc:
             logger.exception("chat_stream_error session=%s", session_id or "anon")

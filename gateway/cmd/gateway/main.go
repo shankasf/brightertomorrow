@@ -13,6 +13,7 @@ import (
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/calendar"
@@ -78,6 +79,44 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Clinical-intake gate / handoff stores.
+	pendingStore, err := phi.NewPendingRequestsStore(phi.PendingRequestsConfig{
+		DDB:       ddbClient,
+		TableName: cfg.PendingRequestsTable,
+		Timeout:   3 * time.Second,
+	})
+	if err != nil {
+		slog.Error("pending requests store init failed", "err", err)
+		os.Exit(1)
+	}
+
+	adminQueueStore, err := phi.NewAdminQueueStore(phi.AdminQueueStoreConfig{
+		DDB:       ddbClient,
+		TableName: cfg.AdminQueueTable,
+		Timeout:   3 * time.Second,
+	})
+	if err != nil {
+		slog.Error("admin queue store init failed", "err", err)
+		os.Exit(1)
+	}
+
+	safetyQueueStore, err := phi.NewAdminQueueStore(phi.AdminQueueStoreConfig{
+		DDB:       ddbClient,
+		TableName: cfg.SafetyQueueTable,
+		Timeout:   3 * time.Second,
+	})
+	if err != nil {
+		slog.Error("safety queue store init failed", "err", err)
+		os.Exit(1)
+	}
+
+	// SNS client for safety-queue alert publishing. Nil publisher is safe —
+	// the handler logs a warning and skips the publish if unconfigured.
+	snsClient := sns.NewFromConfig(awsCfg)
+	if cfg.SNSAlertTopicARN == "" {
+		slog.Warn("safety queue SNS alerts disabled — SNS_ALERT_TOPIC_ARN not set")
+	}
+
 	// Bootstrap initial superadmin if no admin users exist yet.
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	admin.Bootstrap(bootstrapCtx, pool, cfg.AdminInitialEmail, cfg.AdminInitialPassword)
@@ -117,6 +156,17 @@ func main() {
 	callbackInternalH := &handlers.CallbackInternalHandler{PHI: phiStore}
 	coverageInternalH := &handlers.CoverageInternalHandler{PHI: phiStore}
 	chatInternalH := &handlers.ChatInternalHandler{Pool: pool, PHI: phiStore}
+
+	// Clinical-intake gate / handoff handlers — wired to /internal/phi/* and /internal/admin/*.
+	returningLookupH := &handlers.ReturningLookupHandler{PHI: phiStore, Pending: pendingStore}
+	sessionTurnsH := &handlers.SessionTurnsHandler{PHI: phiStore}
+	adminHandoffH := &handlers.AdminHandoffHandler{PHI: phiStore, AdminQueue: adminQueueStore}
+	adminSafetyH := &handlers.AdminSafetyHandler{
+		PHI:         phiStore,
+		SafetyQueue: safetyQueueStore,
+		SNS:         snsClient,
+		SNSTopicARN: cfg.SNSAlertTopicARN,
+	}
 
 	twilioH := &handlers.TwilioHandler{
 		Pool:         pool,
@@ -196,6 +246,16 @@ func main() {
 		r.Post("/calendar/free-slots", internalCalendarH.FreeSlots)
 		r.Post("/calendar/book", internalCalendarH.Book)
 		r.Post("/calendar/confirm", internalCalendarH.Confirm)
+
+		// Clinical-intake gate endpoints — called by LangGraph gate nodes.
+		// Rate-limited to 5 req/s burst (300/min per source) — gates fire at most
+		// once per call session; anything faster is a bug or a runaway loop.
+		r.With(httprate.LimitByIP(300, time.Minute)).Post("/phi/returning_patient_lookup", returningLookupH.ServeHTTP)
+		r.With(httprate.LimitByIP(300, time.Minute)).Post("/phi/session_turns", sessionTurnsH.ServeHTTP)
+
+		// Clinical-intake handoff endpoints — called by LangGraph terminal nodes.
+		r.With(httprate.LimitByIP(300, time.Minute)).Post("/admin/handoff_queue", adminHandoffH.ServeHTTP)
+		r.With(httprate.LimitByIP(300, time.Minute)).Post("/admin/safety_queue", adminSafetyH.ServeHTTP)
 	})
 
 	// Admin API — /admin/api/* routes to gateway (see k8s/40-ingress.yaml).

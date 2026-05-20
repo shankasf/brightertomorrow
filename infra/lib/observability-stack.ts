@@ -61,6 +61,30 @@ export class ObservabilityStack extends Stack {
       alarmDescription: "API Gateway 5xx spike",
     }).addAlarmAction(new cwactions.SnsAction(this.alertTopic));
 
+    // ── Notifications retry Lambda — error spike ──────────────────────────────
+    // Threshold = 2 (lower than other Lambdas) because this worker runs every
+    // minute; even 2 errors in 5 min is worth waking someone up.
+    lambdaErrorAlarm("NotificationsRetryErrors", "bt-notifications-retry");
+
+    // ── Dead outbox rows — custom metric emitted by handler.py ───────────────
+    // handler.py calls cw.put_metric_data(Namespace="bt/Notifications",
+    // MetricName="DeadRows") each time a row transitions to dead.
+    // More than 10 dead rows in a 5-min window indicates a systemic sender
+    // failure (Twilio down, SES bounce, KMS policy change).
+    new cw.Alarm(this, "NotificationsOutboxDeadRowsHigh", {
+      alarmName: "bt-notifications-outbox-dead-rows-high",
+      metric: new cw.Metric({
+        namespace: "bt/Notifications",
+        metricName: "DeadRows",
+        statistic: "Sum",
+        period: Duration.minutes(5),
+      }),
+      threshold: 10,
+      evaluationPeriods: 1,
+      treatMissingData: cw.TreatMissingData.NOT_BREACHING,
+      alarmDescription: "bt-notifications-outbox has >10 dead rows in 5 min — systemic delivery failure",
+    }).addAlarmAction(new cwactions.SnsAction(this.alertTopic));
+
     // DynamoDB throttles.
     new cw.Alarm(this, "DdbThrottles", {
       metric: new cw.Metric({

@@ -1,14 +1,8 @@
-"""Action nodes — every tool call the assistant can make, in one file.
+"""Legacy action nodes: propose_slots, book_appointment, cancel_appointment,
+submit_callback, search_kb, check_payer.
 
-These are clean, direct wrappers around the gateway / DB calls. They
-deliberately DO NOT go through the legacy ``@function_tool`` decorator
-in ``tools.py`` (that decorator is for the openai-agents SDK, not for
-LangGraph nodes — calling it requires a SDK context object).
-
-Instead each action calls the same underlying ``gateway_post`` /
-``signed_post`` / ``_fetch_free_slots`` helpers the legacy decorator
-wraps, plus the same payer resolution / DOB validation, but without
-the decorator overhead. The wire format is byte-identical.
+verify_insurance has been superseded by actions/insurance.py which returns a
+discriminated outcome string. Do NOT import verify_insurance from here.
 """
 from __future__ import annotations
 
@@ -16,107 +10,17 @@ import logging
 import time
 from typing import Any
 
-from ...integrations.aws_signer import gateway_post, signed_post
-from ...data.payers import resolve_payer_id
-from ...integrations.tools import _fetch_free_slots, _validate_dob, _format_slot_display
-from ..state import BookingStatus, CallbackStatus, State
-from ..tracing import traced
+from ....integrations.aws_signer import gateway_post, signed_post
+from ....data.payers import resolve_payer_id
+from ....integrations.tools import _fetch_free_slots, _validate_dob, _format_slot_display
+from ...state import BookingStatus, CallbackStatus, State
+from ...tracing import traced
 
 logger = logging.getLogger(__name__)
 
-_ELIGIBLE_STATES = {"active", "approved", "eligible", "in force", "in network"}
-
 
 # ---------------------------------------------------------------------------
-# 1. verify_insurance — CLAIM.MD eligibility probe
-# ---------------------------------------------------------------------------
-
-@traced(run_type="tool", name="verify_insurance")
-def verify_insurance(state: State) -> dict[str, Any]:
-    ins = state.get("insurance_fields") or {}
-    first_name = (ins.get("first_name") or "").strip()
-    last_name = (ins.get("last_name") or "").strip()
-    dob = (ins.get("dob_yyyymmdd") or "").strip()
-    payer_name = (ins.get("payer_name") or "").strip()
-    member_id = (ins.get("member_id") or "").strip()
-
-    valid_dob = _validate_dob(dob)
-    payer = resolve_payer_id(payer_name)
-
-    if not valid_dob:
-        return {"verify_result": {"ok": False, "error": f"invalid_dob: {dob}"},
-                "last_action": "verify_insurance"}
-    if payer is None:
-        return {"verify_result": {"ok": False, "error": f"unknown_payer: {payer_name}"},
-                "last_action": "verify_insurance"}
-
-    if payer.id == "SELF":
-        result = {
-            "ok": True, "eligible": False, "payer": payer.name,
-            "coverage": {"status": "self_pay", "plan": "Self-pay / Out-of-network"},
-            "display_text": "You're set up as self-pay. We offer competitive cash rates.",
-        }
-        return {"verify_result": result, "last_action": "verify_insurance",
-                "payment_path": "self_pay"}
-
-    try:
-        resp = signed_post("/internal/insurance/verify", {
-            "patient_id": f"{first_name.lower()}-{last_name.lower()}-{valid_dob}",
-            "first_name": first_name, "last_name": last_name,
-            "dob": valid_dob, "payer_id": payer.id, "member_id": member_id,
-        })
-    except Exception as exc:
-        logger.exception("verify_insurance_error")
-        return {"verify_result": {"ok": False, "error": f"verify_failed: {exc}"},
-                "last_action": "verify_insurance"}
-
-    raw_status = str(resp.get("status") or "").strip().lower()
-    eligible = raw_status in _ELIGIBLE_STATES
-    copay = resp.get("copay")
-    plan = resp.get("plan") or ""
-    coverage: dict[str, str] = {}
-    if raw_status: coverage["status"] = raw_status
-    if plan: coverage["plan"] = str(plan)
-    if copay not in (None, ""): coverage["copay"] = str(copay)
-
-    if eligible:
-        bits = [f"Great news — you're covered through {payer.name}."]
-        if copay: bits.append(f"Your expected copay is ${copay}.")
-        display_text = " ".join(bits)
-    else:
-        display_text = (
-            f"I couldn't auto-verify your plan with {payer.name}, but don't worry — "
-            "we offer out-of-network cash rates and our care team can still help."
-        )
-
-    # Best-effort audit row.
-    try:
-        gateway_post("/internal/coverage/record", {
-            "first_name": first_name, "last_name": last_name,
-            "date_of_birth": f"{valid_dob[:4]}-{valid_dob[4:6]}-{valid_dob[6:8]}",
-            "payer_name": payer.name, "payer_id": payer.id,
-            "eligible": eligible,
-            "coverage_status": raw_status or ("eligible" if eligible else "needs_review"),
-            "source": state.get("agent_source", "chat-agent"),
-        })
-    except Exception:
-        logger.warning("coverage_record_audit failed", exc_info=True)
-
-    logger.info(
-        "action verify_insurance session=%s eligible=%s payer=%s copay=%s",
-        state.get("session_id", "?"), eligible, payer.name, copay,
-    )
-    return {
-        "verify_result": {
-            "ok": True, "eligible": eligible, "payer": payer.name,
-            "coverage": coverage, "display_text": display_text,
-        },
-        "last_action": "verify_insurance",
-    }
-
-
-# ---------------------------------------------------------------------------
-# 2. propose_slots — Jane calendar slot suggestions
+# propose_slots — Jane calendar slot suggestions
 # ---------------------------------------------------------------------------
 
 @traced(run_type="tool", name="propose_slots")

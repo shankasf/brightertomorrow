@@ -11,13 +11,16 @@ Why structured output:
     node owns that).
   * It is trivially unit-testable against fixed inputs.
 
-The schema is intentionally tiny — every field below maps directly to
+The schema is intentionally small — every field below maps directly to
 a state mutation the planner relies on. Adding fields here without
 also updating the planner is a bug.
+
+All new NL signals must be added as fields here, NOT as keyword lists
+in downstream nodes (feedback_extract_node_is_only_nl_boundary).
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -148,6 +151,89 @@ class TurnExtraction(BaseModel):
         description="Self-rated confidence in the extraction. Use 'low' for garbled audio, ambiguous one-word answers, or when you guessed at a value.",
     )
 
+    # -----------------------------------------------------------------------
+    # Gate / session-presence signals
+    # These fields are the ONLY place NL signals for gates live.
+    # Downstream nodes and the planner NEVER parse raw user text.
+    # -----------------------------------------------------------------------
+
+    recording_consent: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Set to true ONLY when the caller explicitly acknowledges the "
+            "HIPAA notice or recording disclosure in THIS turn. Covers: "
+            "'yes', 'I understand', 'that's fine', 'ok', 'I agree', "
+            "'sure', 'sounds good', 'go ahead'. Set to false if they "
+            "object ('no', 'I don't consent', 'I don't agree'). "
+            "Leave null if the caller said nothing about consent this turn."
+        ),
+    )
+
+    physical_presence_state: Optional[str] = Field(
+        default=None,
+        description=(
+            "2-letter US state code inferred from the caller's location "
+            "statements. Examples: 'I'm in Reno' -> 'NV'; 'Las Vegas' -> "
+            "'NV'; 'I'm calling from California' -> 'CA'; 'I live in "
+            "Seattle' -> 'WA'. Use 'non_us' if they are clearly outside "
+            "the US. Leave null if no location was mentioned or if you "
+            "cannot confidently infer the state — never guess."
+        ),
+    )
+
+    caller_relationship: Optional[Literal[
+        "self",
+        "parent_of_minor",
+        "guardian_with_roi",
+        "third_party_for_adult",
+        "unknown",
+    ]] = Field(
+        default=None,
+        description=(
+            "Who the caller is relative to the patient. "
+            "'self' — calling for themselves. "
+            "'parent_of_minor' — parent/guardian of a child under 18. "
+            "'guardian_with_roi' — legal guardian or has a signed ROI "
+            "for an adult patient. "
+            "'third_party_for_adult' — calling on behalf of an adult "
+            "without verified ROI (e.g. 'I'm calling for my friend'). "
+            "'unknown' — they gave a confusing answer. "
+            "Leave null if caller relationship was not mentioned this turn."
+        ),
+    )
+
+    resume_decision: Optional[Literal["continue", "fresh"]] = Field(
+        default=None,
+        description=(
+            "Set when, after being told about a prior intake session, the "
+            "caller explicitly chooses to continue it or start fresh. "
+            "'continue' — 'yes continue', 'pick up where we left off', "
+            "'same session'. "
+            "'fresh' — 'start over', 'new session', 'fresh start', 'no'. "
+            "Leave null if no such decision was stated this turn."
+        ),
+    )
+
+    language_switch_to: Optional[str] = Field(
+        default=None,
+        description=(
+            "BCP-47 language tag if the caller requests a language change "
+            "or starts speaking a different language. Examples: 'es-US' "
+            "for Spanish, 'fr-US' for French, 'zh-US' for Chinese. "
+            "Leave null if no language switch occurred."
+        ),
+    )
+
+    modality_preference: Optional[Literal["in_person", "telehealth"]] = Field(
+        default=None,
+        description=(
+            "Set when the caller states a preference for how they want to "
+            "be seen. 'in_person' — 'in person', 'come to the office', "
+            "'face to face'. 'telehealth' — 'video', 'online', 'virtual', "
+            "'zoom', 'telehealth', 'remote'. Leave null if not stated."
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # System prompt — short and surgical
@@ -169,20 +255,55 @@ Rules:
    want (e.g., "actually I just want a callback" -> "callback";
    "actually cancel that" -> "cancel"; "no wait keep it" -> "keep").
 
-2. `affirmation` is ONLY set when the previous assistant turn asked
-   a yes/no question. "Yes", "yeah", "yep", "correct", "right", "mhm",
-   "sounds right" -> "yes". "No", "nope", "wait" -> "no". Ambiguous ->
-   "unclear". Otherwise "none".
+2. `affirmation` — set when the previous assistant turn asked a yes/no
+   or a confirmation question ("sound right?", "is that correct?",
+   "did you mean...?"). Be GENEROUS with typos / short forms / emoji;
+   do NOT mark these as "unclear":
+     YES — yes, yeah, yea, yep, yup, ye, ya, ys, yh, yp, y, yass,
+       yess, yesss, mhm, mhmm, mm, mmm, uh-huh, uhhuh,
+       ok, okay, k, kk, okie, kay,
+       sure, surely, correct, right, that's right, that is right,
+       affirmative, roger, ofc, def, definitely, absolutely, totally,
+       100%, "100", "1", "+1", aye, indeed, confirmed, true,
+       alright, fine, sounds good, sounds right, go ahead, do it,
+       please do, pls, plz, thumbs up, 👍, ✅, ✔.
+     NO — no, nope, nah, naw, nay, negative, wrong, incorrect,
+       n, "0", "-1", nuh-uh, nuhuh, neg, negatory, nada, false,
+       thumbs down, 👎, ❌.
+   Repeated letters are still the same word: "yyy", "yesss", "nooo",
+   "nahhh", "mhmmm" all classify normally.
+   "unclear" is reserved for replies that genuinely could be either
+   ("i think so", "maybe", "kinda", "not sure", "i guess"). A
+   two-letter slip like "ys" or "nh" is NOT ambiguous — classify it.
 
 3. `field_deltas` — only fill fields the user EXPLICITLY stated in this
    turn. Multi-field pastes are common ("Sarah Patel, 8/19/98, BCBS,
    ABC123") — extract all of them. Never invent or guess.
 
 4. DOB normalisation: convert any date the caller gives to 8-digit
-   YYYYMMDD. "August 19, 1998" -> "19980819". "8/19/98" -> "19980819"
-   (US month/day convention; 2-digit years 00-29 -> 2000s, 30-99 ->
-   1900s). If you cannot parse it confidently, return null and let the
-   planner re-ask.
+   YYYYMMDD. Walk these formats in order and pick the FIRST that
+   yields a valid calendar date (year 1900-current, month 01-12,
+   day 01-31):
+     a) Verbal — "August 19, 1998", "Aug 19 1998", "19 August 1998",
+        "19th of August, 1998", "19 Aug 98".
+     b) ISO    — "1998-08-19", "1998/08/19", "19980819".
+     c) US     — "M/D/YYYY", "MM/DD/YYYY", "M-D-YY" ("8/19/98",
+        "08/19/1998").
+     d) Intl   — "D/M/YYYY", "DD/MM/YYYY", "D.M.YYYY"
+        ("19/08/1998", "19.8.98").
+   Rules:
+     • 2-digit years: 00-29 -> 2000s, 30-99 -> 1900s.
+     • If the FIRST number of a slash/dash/dot date is >12, it
+       MUST be a day — skip US ordering and use D/M directly.
+       "19/08/1998" -> month=19 invalid -> day=19, month=08
+       -> 19980819. NEVER return null for this case.
+     • For genuinely ambiguous slash dates where both interpretations
+       are valid calendar dates ("03/04/1998"), use US ordering
+       (MM/DD); the planner echoes the date back in plain English
+       for the caller to confirm.
+     • Strip ordinal suffixes ("st", "nd", "rd", "th") and stray
+       words ("of", "on") before parsing.
+   Only return null if NO ordering yields a valid calendar date.
 
 5. Insurance fields: do NOT confuse the caller's OWN name (on their
    insurance card) with a therapist they want to book with. If they're
@@ -220,6 +341,36 @@ Rules:
 10. `confidence`: "low" if the user's message is garbled / one-word /
     ambiguous and you had to guess at field values. The planner uses
     "low" to ask a clarifying question instead of acting.
+
+11. `recording_consent`: set true ONLY when the caller explicitly
+    acknowledges the HIPAA/recording notice in THIS turn ("yes",
+    "I understand", "ok", "I agree", "sure", "that's fine"). Set false
+    if they object. Leave null otherwise — never assume consent from
+    silence or from answering an unrelated question.
+
+12. `physical_presence_state`: infer a 2-letter US state code from ANY
+    location mention this turn (city, metro area, landmark). "Reno",
+    "Las Vegas", "Henderson" -> "NV". "LA", "San Francisco" -> "CA".
+    Use "non_us" only when the caller clearly states they are outside
+    the US. Leave null if no location was mentioned OR if you are not
+    confident — never guess a state.
+
+13. `caller_relationship`: only populate when the caller EXPLICITLY
+    states who they are relative to the patient (calling for themselves,
+    for their child, for a friend, etc.). Leave null if not stated.
+
+14. `resume_decision`: only set when the caller explicitly chooses to
+    continue a prior session or start fresh in DIRECT response to being
+    offered that choice.
+
+15. `modality_preference`: only set when the caller explicitly states
+    a preference for in-person or telehealth care this turn.
+
+16. `language_switch_to`: only set if the caller asks to switch language
+    or begins speaking a different language in this turn.
+
+CRITICAL — null discipline: when in doubt, return null. The planner
+will ask again. Never guess at a field value to avoid a null.
 
 Return ONLY the JSON. No prose, no explanation.
 """

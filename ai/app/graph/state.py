@@ -28,7 +28,8 @@ Coordination contract (read this before adding fields):
   * `extract`  — WRITES: intent_delta_applied? no — extract APPLIES the
                           delta to `intent`, plus writes `field_deltas`
                           into `fields`, plus writes `affirmation` and
-                          `safety_signal`.
+                          `safety_signal`. Also writes gate flags, new
+                          session-presence fields, and `turn_count`.
                  READS:  messages (last user turn), intent.
   * `planner`  — READS only; returns a next-node name. Never writes.
   * action nodes — WRITE: their tool result into the corresponding state
@@ -41,7 +42,7 @@ Coordination contract (read this before adding fields):
 """
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, Optional, TypedDict
 
 from langgraph.graph.message import add_messages
 
@@ -93,12 +94,22 @@ Affirmation = Literal["yes", "no", "unclear", "none"]
 # ---------------------------------------------------------------------------
 
 class InsuranceFields(TypedDict, total=False):
-    """The 5 fields CLAIM.MD needs (verify_coverage)."""
+    """The 5 fields CLAIM.MD needs (verify_coverage), plus the routing outcome."""
     first_name: str | None
     last_name: str | None
     dob_yyyymmdd: str | None     # 8 digits, validated before storing
     payer_name: str | None       # canonical payer name from PAYERS list
     member_id: str | None
+    # Set by verify_insurance action; drives post-verify planner branch.
+    outcome: Optional[Literal[
+        "eligible",
+        "ineligible",
+        "needs_manual_review",
+        "secondary_required",
+        "wc_auto_eap",
+        "no_insurance",
+        "self_pay",
+    ]]
 
 
 class BookingFields(TypedDict, total=False):
@@ -133,6 +144,34 @@ class VerifyResult(TypedDict, total=False):
     coverage: dict
     display_text: str | None
     error: str | None
+
+
+# ---------------------------------------------------------------------------
+# Gate flags — track 4-step pre-classification gates.
+# All flags are monotonically True once set; never cleared by any node.
+# ---------------------------------------------------------------------------
+
+class Gates(TypedDict, total=False):
+    """Progress flags for the 4 mandatory pre-classify gates.
+
+    Once a flag becomes True it must stay True — the planner will loop
+    forever if a gate can be re-raised after it has been cleared.
+    """
+    disclosure_done: bool      # welcome + HIPAA disclosure acknowledged by caller
+    nv_presence_ok: bool       # caller confirmed physical presence in NV
+    relationship_ok: bool      # caller relationship verified (self / parent / etc.)
+    returning_verified: bool   # DOB matched a returning-patient record in DDB
+    resume_decided: bool       # user picked continue-vs-fresh OR not a returning caller
+
+
+# ---------------------------------------------------------------------------
+# Returning-caller resume offer — carries prior-session context across turns
+# ---------------------------------------------------------------------------
+
+class ResumeOffer(TypedDict, total=False):
+    prior_session_id: str | None
+    summary: str | None        # one-sentence NON-PHI summary shown to caller
+    decision: Literal["continue", "fresh"] | None
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +210,29 @@ class State(TypedDict, total=False):
     booking_status: BookingStatus
     callback_status: CallbackStatus
 
+    # ----- Pre-classify gates -------------------------------------------
+    # Monotonically True; the planner checks these before classify_intent.
+    gates: Gates
+
+    # ----- Session-presence / caller-context fields ----------------------
+    # Written by extract from NL signals; read by gates + planner.
+    caller_relationship: Optional[Literal[
+        "self",
+        "parent_of_minor",
+        "guardian_with_roi",
+        "third_party_for_adult",
+        "unknown",
+    ]]
+    physical_presence_state: Optional[str]   # 2-letter US state, "non_us", or None
+    modality: Optional[Literal["in_person", "telehealth"]]
+
+    # ----- Returning-caller resume offer --------------------------------
+    resume: ResumeOffer
+
+    # ----- Turn counter (anti-loop) ------------------------------------
+    # Incremented by extract every turn; planner hard-exits at > 60.
+    turn_count: int
+
     # ----- Collected data ------------------------------------------------
     insurance_fields: InsuranceFields
     booking_fields: BookingFields
@@ -192,6 +254,10 @@ class State(TypedDict, total=False):
     # to pick the right scene prompt.
     last_action: str | None
 
+    # The last node that ran — used by planner to detect call-site
+    # (post-extract vs. post-verify_insurance).
+    last_node: str | None
+
     # The next field to ask, if the planner picked `ask_field` /
     # `ask_confirmation`. respond reads this to render the question.
     pending_question: str | None     # e.g. "first_name", "confirm_booking"
@@ -204,11 +270,22 @@ class State(TypedDict, total=False):
     # We run the gentle "are you safe?" screen at most once per session.
     soft_safety_asked: bool
 
+    # The explicit scene a gate / handoff / action node wants respond to
+    # use this turn. Read by respond._pick_scene (takes precedence over
+    # state-derived scenes). Cleared by respond at the end of each turn
+    # UNLESS gates.terminal is set — terminal handoffs keep their scene
+    # so subsequent turns continue to deliver the same closing message
+    # without re-firing the handoff node (and re-emitting admin alerts).
+    # MUST be declared here — LangGraph 1.x drops keys not in the schema.
+    scene: str | None
+
     # ----- Transient / debugging keys (set per-turn, read by respond) ---
     # Declared so LangGraph keeps them in checkpoints; values are written
     # by extract / actions / respond and consumed downstream the same turn.
     _scene: str | None                # which scene respond picked this turn
     _low_confidence: bool             # extract said it wasn't sure
+    _reuse_insurance_pending: bool    # caller said "check coverage" but full insurance fields are already on file — planner asks to confirm before re-verifying stale PHI
+    _resume_offer_pending: bool       # widget reopened within the 30-min window with prior state on file — bot greets by name and offers continue-vs-fresh choice before reading anything else back
     _info_query: str | None           # info question to search the KB for
     _time_of_day: str | None          # caller's slot pref: morning/afternoon/evening/any
     _earliest_day_offset: int | None  # caller's earliest day offset
@@ -238,6 +315,18 @@ def initial_state(channel: Channel, session_id: str, agent_source: str) -> State
         payment_path="unknown",
         booking_status="none",
         callback_status="none",
+        # Chat shows a persistent HIPAA-compliant badge under the input — the
+        # verbal disclosure is intentionally skipped per scenes.py greeting
+        # comment, so we mark the gate done at session start. Voice channels
+        # still need to speak the disclosure verbally; their gate flips when
+        # the caller acknowledges the spoken HIPAA notice (extract picks it
+        # up via TurnExtraction.recording_consent).
+        gates=Gates(disclosure_done=True) if channel == "chat" else Gates(),
+        caller_relationship=None,
+        physical_presence_state=None,
+        modality=None,
+        resume=ResumeOffer(),
+        turn_count=0,
         insurance_fields=InsuranceFields(),
         booking_fields=BookingFields(),
         callback_fields=CallbackFields(),
@@ -251,9 +340,11 @@ def initial_state(channel: Channel, session_id: str, agent_source: str) -> State
         kb_snippets=[],
         info_topic=None,
         last_action=None,
+        last_node=None,
         pending_question=None,
         last_reply_text=None,
         soft_safety_asked=False,
+        scene=None,
     )
 
 

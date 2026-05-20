@@ -11,17 +11,28 @@ export interface GatewayIamStackProps extends StackProps {
   janeEventsTableArn: string;
   softHoldsTableArn: string;
   janeIcalSyncFnArn: string;
+  // New intake-flow tables and SNS topic (added when LangGraph rewrite
+  // introduced returning-patient + admin/safety handoffs).
+  pendingRequestsTableArn: string;
+  adminQueueTableArn: string;
+  safetyQueueTableArn: string;
+  notificationsOutboxTableArn: string;
+  alertTopicArn: string;
 }
 
 /**
  * Off-AWS gateway (k3s on Hostinger VM) needs DynamoDB credentials.
- * IRSA isn't an option, so we provision an IAM user with a static
- * access key, scoped to PutItem/GetItem/Query/UpdateItem on bt-main
- * and its GSI1 index — nothing else.
+ * IRSA isn't an option, so we provision an IAM user with a static access
+ * key, scoped narrowly to the resources the gateway actually touches.
  *
- * The access key lands in a CMK-encrypted Secrets Manager secret;
- * pull it into k8s with `aws secretsmanager get-secret-value` at
- * deploy time. Rotation = re-deploy this stack and re-sync the k8s secret.
+ * Permissions are attached via a customer-managed policy (not inline)
+ * because the IAM-user inline limit of 2048 bytes was exceeded once the
+ * 12-step intake flow added 4 new tables + SNS publish. Managed policies
+ * allow 6144 bytes and up to 10 attachments per user.
+ *
+ * The access key lands in a CMK-encrypted Secrets Manager secret; pull
+ * it into k8s with `aws secretsmanager get-secret-value` at deploy time.
+ * Rotation = re-deploy this stack and re-sync the k8s secret.
  */
 export class GatewayIamStack extends Stack {
   public readonly accessKeySecret: sm.Secret;
@@ -35,82 +46,122 @@ export class GatewayIamStack extends Stack {
 
     const tableGsiArn = `${props.tableArn}/index/${DDB_GSI1}`;
 
-    user.addToPolicy(new iam.PolicyStatement({
-      sid: "DynamoDbIntakeAccess",
-      effect: iam.Effect.ALLOW,
-      actions: [
-        "dynamodb:PutItem",
-        "dynamodb:GetItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:Query",
-        "dynamodb:BatchWriteItem",
-        "dynamodb:BatchGetItem",
-        "dynamodb:DescribeTable",
-      ],
-      resources: [props.tableArn, tableGsiArn],
-    }));
+    // All policy statements collected here, then attached via a single
+    // ManagedPolicy below. SIDs are stable so policy diffs stay readable.
+    const statements: iam.PolicyStatement[] = [
+      // bt-main intake table — full CRUD + GSI1 query.
+      new iam.PolicyStatement({
+        sid: "DynamoDbIntakeAccess",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:BatchWriteItem",
+          "dynamodb:BatchGetItem",
+          "dynamodb:DescribeTable",
+        ],
+        resources: [props.tableArn, tableGsiArn],
+      }),
 
-    // Jane iCal events table — gateway needs GetItem/PutItem/Query/DeleteItem
-    // for serving availability and managing soft holds.
-    user.addToPolicy(new iam.PolicyStatement({
-      sid: "DynamoDbJaneEventsAccess",
-      effect: iam.Effect.ALLOW,
-      actions: [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:Query",
-        "dynamodb:DeleteItem",
-        "dynamodb:DescribeTable",
-      ],
-      resources: [
-        props.janeEventsTableArn,
-        `${props.janeEventsTableArn}/index/*`,
-      ],
-    }));
+      // Jane iCal events + soft holds — availability + holds for booking.
+      new iam.PolicyStatement({
+        sid: "DynamoDbJaneEventsAndHolds",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:Query",
+          "dynamodb:DeleteItem",
+          "dynamodb:DescribeTable",
+        ],
+        resources: [
+          props.janeEventsTableArn,
+          `${props.janeEventsTableArn}/index/*`,
+          props.softHoldsTableArn,
+        ],
+      }),
 
-    // Soft holds table — same access pattern
-    user.addToPolicy(new iam.PolicyStatement({
-      sid: "DynamoDbSoftHoldsAccess",
-      effect: iam.Effect.ALLOW,
-      actions: [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:Query",
-        "dynamodb:DeleteItem",
-        "dynamodb:DescribeTable",
-      ],
-      resources: [props.softHoldsTableArn],
-    }));
+      // Lambda invoke on jane_ical_sync — for on-demand availability refetch.
+      new iam.PolicyStatement({
+        sid: "InvokeJaneIcalSync",
+        effect: iam.Effect.ALLOW,
+        actions: ["lambda:InvokeFunction"],
+        resources: [props.janeIcalSyncFnArn],
+      }),
 
-    // Lambda invoke on jane_ical_sync — for live on-demand refetch
-    // (gateway code may invoke this directly in future to refresh before
-    // returning availability windows).
-    user.addToPolicy(new iam.PolicyStatement({
-      sid: "InvokeJaneIcalSync",
-      effect: iam.Effect.ALLOW,
-      actions: ["lambda:InvokeFunction"],
-      resources: [props.janeIcalSyncFnArn],
-    }));
+      // Intake-flow tables (LangGraph rewrite). Merged into one statement
+      // by action-set to save inline-policy bytes; resources cover all 4
+      // tables and their GSIs. Returning-patient lookup needs Query on
+      // bt-pending-requests GSIs; admin/safety queues + outbox need writes.
+      new iam.PolicyStatement({
+        sid: "DynamoDbIntakeFlowTables",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:Query",
+          "dynamodb:UpdateItem",
+          "dynamodb:DescribeTable",
+        ],
+        resources: [
+          props.pendingRequestsTableArn,
+          `${props.pendingRequestsTableArn}/index/*`,
+          props.adminQueueTableArn,
+          `${props.adminQueueTableArn}/index/*`,
+          props.safetyQueueTableArn,
+          `${props.safetyQueueTableArn}/index/*`,
+          props.notificationsOutboxTableArn,
+          `${props.notificationsOutboxTableArn}/index/*`,
+        ],
+      }),
 
-    // CMK is needed to encrypt/decrypt items at rest. Without this the
-    // gateway would get AccessDenied on every read/write.
-    user.addToPolicy(new iam.PolicyStatement({
-      sid: "CmkUseForDynamo",
-      effect: iam.Effect.ALLOW,
-      actions: [
-        "kms:Encrypt",
-        "kms:Decrypt",
-        "kms:ReEncrypt*",
-        "kms:GenerateDataKey*",
-        "kms:DescribeKey",
-      ],
-      resources: [props.phiKey.keyArn],
-      conditions: {
-        StringEquals: {
-          "kms:ViaService": `dynamodb.${this.region}.amazonaws.com`,
+      // SNS publish on bt-alerts — only safety_queue publishes (urgent
+      // crisis / mandatory-report handoffs). Payloads are non-PHI.
+      new iam.PolicyStatement({
+        sid: "SnsPublishAlerts",
+        effect: iam.Effect.ALLOW,
+        actions: ["sns:Publish"],
+        resources: [props.alertTopicArn],
+      }),
+
+      // CMK use for the gateway's encrypted services. Without this, every
+      // DDB read/write fails with AccessDenied, and SNS publish on the
+      // CMK-encrypted bt-alerts topic fails with KMSAccessDenied. The
+      // ViaService condition list keeps the grant scoped to only the
+      // services that legitimately consume the CMK on the gateway's behalf.
+      new iam.PolicyStatement({
+        sid: "CmkUseForGatewayServices",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ],
+        resources: [props.phiKey.keyArn],
+        conditions: {
+          StringEquals: {
+            "kms:ViaService": [
+              `dynamodb.${this.region}.amazonaws.com`,
+              `sns.${this.region}.amazonaws.com`,
+            ],
+          },
         },
-      },
-    }));
+      }),
+    ];
+
+    // Attach as a customer-managed policy — 6144 byte cap, well above the
+    // 2048-byte inline-policy cap we hit when the intake-flow tables and
+    // SNS publish statements were added.
+    const policy = new iam.ManagedPolicy(this, "GatewayPolicy", {
+      managedPolicyName: "bt-gateway-vm-policy",
+      description: "Resources the bt-gateway pod accesses from the off-AWS k3s cluster.",
+      statements,
+    });
+    user.addManagedPolicy(policy);
 
     const accessKey = new iam.AccessKey(this, "GatewayAccessKey", { user });
 

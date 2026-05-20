@@ -74,7 +74,12 @@ const GREET_MARKER = "__BT_GREET__";
 //     more PHI density per second than typed chat.
 const CHAT_SID_KEY = "bt_chat_session";
 const VOICE_SID_KEY = "bt_voice_session";
-const CHAT_SID_MAX_AGE_MS = 24 * 60 * 60 * 1000;   // 24h
+// 30-min reconnect window for chat — long enough to cover a tab refresh
+// or accidental close, short enough that PHI (already on file) isn't
+// re-surfaced to a different person sharing the device hours later.
+// Past the window, mintSession() returns a brand-new UUID so the
+// backend sees an unrelated session with no prior state.
+const CHAT_SID_MAX_AGE_MS = 30 * 60 * 1000;        // 30min
 const VOICE_SID_MAX_AGE_MS = 30 * 60 * 1000;       // 30min
 
 type StoredSession = { id: string; ts: number };
@@ -610,7 +615,7 @@ export default function ChatWidget() {
               />
               <div className="min-w-0">
                 <div className="font-display font-semibold truncate">Brighter Tomorrow</div>
-                <div className="text-xs opacity-80 truncate">Quick questions, real answers</div>
+                <div className="text-xs opacity-80 truncate">Las Vegas therapy for kids, teens &amp; adults</div>
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 <button

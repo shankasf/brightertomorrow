@@ -154,10 +154,47 @@ async def twilio_media(ws: WebSocket) -> None:
         finally:
             await audio_q.put(None)
 
+    async def _emit_first_turn() -> None:
+        """Speak the HIPAA disclosure (or resume opener) on call-connect.
+
+        Runs immediately after the Twilio ``start`` event mints the
+        pipeline and BEFORE the STT loop begins yielding transcripts, so
+        the caller hears the disclosure as the first thing on the line.
+        On a reconnected thread (pipeline.is_disclosure_done() == True)
+        we speak the short "welcome back" opener instead — no duplicate
+        disclosure and no duplicate audit row.
+        """
+        if pipeline is None or not stream_sid:
+            return
+        try:
+            reply = await pipeline.emit_first_turn()
+        except Exception:
+            logger.exception("twilio_first_turn_failed stream=%s", stream_sid)
+            return
+        if not reply:
+            return
+        try:
+            async for chunk in pipeline.synthesize(reply):
+                mulaw = _pcm16k_to_mulaw8k(chunk)
+                if not mulaw:
+                    continue
+                await ws.send_text(json.dumps({
+                    "event": "media",
+                    "streamSid": stream_sid,
+                    "media": {"payload": base64.b64encode(mulaw).decode()},
+                }))
+        except Exception:
+            logger.exception("twilio_first_turn_synth_failed stream=%s",
+                             stream_sid)
+
     async def speech_loop():
         # Wait for the start event to mint the pipeline.
         while pipeline is None:
             await asyncio.sleep(0.05)
+        # HIPAA: greet with the disclosure as the very first audio
+        # frames going down the line. Done here (inside speech_loop)
+        # so we already have stream_sid + pipeline.
+        await _emit_first_turn()
         try:
             async for transcript in pipeline.transcribe_stream(audio_stream()):
                 logger.info("twilio_transcript stream=%s text=%r", stream_sid, transcript[:80])

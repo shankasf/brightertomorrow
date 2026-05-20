@@ -63,6 +63,17 @@ def _pick_scene(state: State) -> str:
     """
     if state.get("safety_signal") or state.get("intent") == "crisis":
         return "crisis"
+    # If a prior action node explicitly set a scene (handoffs, gates,
+    # self-pay offer, etc.), honor it. This is required so a routing
+    # like `handoff_out_of_state` doesn't fall through to the booking
+    # scene picker and ask another irrelevant field after handoff.
+    explicit_scene = state.get("scene")
+    if explicit_scene and explicit_scene in SCENE_INSTRUCTIONS:
+        return explicit_scene
+    if state.get("_resume_offer_pending"):
+        return "resume_offer"
+    if state.get("_reuse_insurance_pending"):
+        return "confirm_reuse_insurance"
     if state.get("_low_confidence"):
         return "clarify"
     if state.get("intent") == "out_of_scope":
@@ -169,6 +180,12 @@ def _context_for_scene(scene: str, state: State) -> str:
         present = [k for k, v in ins.items() if v]
         if present:
             bits.append(f"already_collected: {present}")
+        # First-turn flag — used by the scene prompt to choose between a
+        # booking-acknowledgement opener ("Happy to help...") and the
+        # bare coverage opener. Without this the LLM frames every booking
+        # as a coverage check, which confuses callers who just asked to
+        # book an appointment.
+        bits.append(f"is_first_insurance_turn: {not present}")
     elif scene == "ask_booking_field":
         field = first_missing_booking(state)
         bits.append(f"field_to_ask: {field}")
@@ -221,6 +238,42 @@ def _context_for_scene(scene: str, state: State) -> str:
     elif scene == "post_verify_offer_booking":
         vr = state.get("verify_result") or {}
         bits.append(f"display_text: {vr.get('display_text')}")
+    elif scene == "resume_offer":
+        bk = state.get("booking_fields") or {}
+        first_name = (ins.get("first_name") or "").strip() or "there"
+        payer = (ins.get("payer_name") or "").strip()
+        bs = state.get("booking_status") or "none"
+        # Non-PHI stage hint — no DOB, member ID, phone, email, address.
+        if bs == "booked":
+            stage = "You already have an appointment booked with us"
+        elif bs in ("pending_confirm", "cancel_pending_confirm"):
+            stage = "We were just confirming your appointment"
+        elif state.get("selected_slot"):
+            stage = "We were picking a time slot for your appointment"
+        elif bk.get("phone") or bk.get("email") or bk.get("reason"):
+            stage = "We were partway through your booking details"
+        elif payer:
+            stage = f"We have your {payer} info on file"
+        elif ins.get("first_name"):
+            stage = "We had a few details from earlier"
+        else:
+            stage = "We were chatting earlier"
+        bits.append(f"saved_first_name: {first_name}")
+        bits.append(f"saved_stage: {stage}")
+    elif scene == "confirm_reuse_insurance":
+        dob = (ins.get("dob_yyyymmdd") or "").strip()
+        dob_pretty = ""
+        if len(dob) == 8 and dob.isdigit():
+            from datetime import date
+            try:
+                d = date(int(dob[:4]), int(dob[4:6]), int(dob[6:8]))
+                dob_pretty = d.strftime("%B %-d, %Y")
+            except ValueError:
+                dob_pretty = ""
+        bits.append(f"saved_first_name: {ins.get('first_name') or ''}")
+        bits.append(f"saved_last_name: {ins.get('last_name') or ''}")
+        bits.append(f"saved_dob_pretty: {dob_pretty}")
+        bits.append(f"saved_payer_name: {ins.get('payer_name') or ''}")
     elif scene == "confirm_callback":
         bits.append(
             "callback_recap:\n"
@@ -295,11 +348,26 @@ def respond(state: State) -> dict[str, Any]:
     # Persist the user turn + assistant turn to the gateway (DynamoDB,
     # HIPAA-safe). Fire-and-forget on a background thread so the request
     # latency stays on the LLM, not on the DB round-trip.
-    _persist_turn_async(state, text)
+    # CHAT channel: the gateway's chat_stream handler already calls
+    # recordTurn for the user message AND persistReply for the assistant
+    # reply, so this would be a duplicate (admin transcript showed each
+    # turn twice). VOICE channels don't go through the gateway streamer,
+    # so we still need to persist from here.
+    if state.get("channel") != "chat":
+        _persist_turn_async(state, text)
+
+    # Clear `scene` so the next turn re-derives from state — UNLESS this
+    # session is terminal (a handoff already fired and locked the closing
+    # scene). Terminal sessions intentionally keep the scene so the
+    # planner's terminal_replay short-circuit can re-deliver the same
+    # closing message without re-running the handoff node.
+    is_terminal = bool((state.get("gates") or {}).get("terminal"))
+    next_scene = scene if is_terminal else None
 
     return {
         "messages": [AIMessage(content=text)],
         "last_reply_text": text,
+        "scene": next_scene,
         "_scene": scene,
         **side_effects,
     }
