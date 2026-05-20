@@ -101,7 +101,7 @@ def _match_roster(name: str) -> dict | None:
       1) exact match on first name, full name, or last name
       2) any whitespace-token of the input equals a first name
     """
-    from ...bt_agents.roster import ELIGIBLE_FOR_BOOKING
+    from ...data.roster import ELIGIBLE_FOR_BOOKING
 
     n = (name or "").strip().lower()
     if not n:
@@ -133,7 +133,7 @@ def _resolve_staff(state: State, deltas) -> dict[str, Any]:
       3) Otherwise: do nothing; let the LLM ask again. Don't overwrite
          a valid prior choice.
     """
-    from ...bt_agents.roster import ELIGIBLE_FOR_BOOKING
+    from ...data.roster import ELIGIBLE_FOR_BOOKING
 
     out: dict[str, Any] = {}
     name = (getattr(deltas, "staff_name", None) or "").strip()

@@ -183,7 +183,7 @@ def _context_for_scene(scene: str, state: State) -> str:
         has_any = any((cb or {}).get(k) for k in ("first_name", "last_name", "phone", "reason"))
         bits.append(f"is_first_callback_turn: {not has_any}")
     elif scene == "ask_therapist":
-        from ...bt_agents.roster import ELIGIBLE_FOR_BOOKING
+        from ...data.roster import ELIGIBLE_FOR_BOOKING
         roster = ", ".join(t["name"] for t in ELIGIBLE_FOR_BOOKING)
         bits.append(f"available_therapists: {roster}")
     elif scene == "present_slots":

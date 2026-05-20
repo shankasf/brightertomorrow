@@ -16,9 +16,9 @@ import logging
 import time
 from typing import Any
 
-from ...aws_signer import gateway_post, signed_post
+from ...integrations.aws_signer import gateway_post, signed_post
 from ...data.payers import resolve_payer_id
-from ...tools import _fetch_free_slots, _validate_dob, _format_slot_display
+from ...integrations.tools import _fetch_free_slots, _validate_dob, _format_slot_display
 from ..state import BookingStatus, CallbackStatus, State
 from ..tracing import traced
 
@@ -268,7 +268,7 @@ def cancel_appointment(state: State) -> dict[str, Any]:
     if not appointment_id:
         return {"last_action": "cancel_appointment_blocked_no_appt"}
     try:
-        from ...aws_signer import gateway_post
+        from ...integrations.aws_signer import gateway_post
         resp = gateway_post(
             "/internal/calendar/cancel",
             {"appointmentId": appointment_id},
@@ -333,7 +333,7 @@ def search_kb(state: State) -> dict[str, Any]:
     if not query:
         return {"last_action": "search_kb_blocked_empty"}
     from openai import OpenAI
-    from ...db import conn
+    from ...core.db import conn
     import os
     embed_model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
     try:

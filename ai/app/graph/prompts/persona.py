@@ -1,20 +1,9 @@
-"""Reusable persona / scope / safety guardrails.
-
-We deliberately import the warm-tone copy from the legacy ``prompts.py``
-instead of re-typing it. The legacy stack is still live in production
-during the migration window; sharing this copy guarantees both stacks
-speak with the same voice.
-
-The legacy file holds dozens of agent-handoff-specific rules
-(stickiness, silent-handoff, "look at the transcript for prior
-verify_coverage") that we DO NOT import — the new graph's state and
-planner make all of those rules structurally unnecessary.
-"""
+"""Reusable persona / scope / safety guardrails."""
 from __future__ import annotations
 
-from ...prompts import (
+from ._constants import (
     CRISIS_RULE,
-    NO_SLASH_COMMANDS_RULE,
+    NO_SLASH_COMMANDS_RULE,  # noqa: F401 — re-exported for callers
     PRACTICE_CONTEXT,
     SCOPE_RULE,
     STYLE_TEXT,

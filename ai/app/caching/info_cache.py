@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from .db import conn
+from ..core.db import conn
 
 logger = logging.getLogger(__name__)
 

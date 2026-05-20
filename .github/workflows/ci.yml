@@ -48,7 +48,9 @@ jobs:
 
       - name: Python syntax check
         working-directory: ai
-        run: python -m py_compile app/main.py app/db.py app/tools.py
+        run: |
+          python -m compileall -q app
+          python -c "import ast, pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('app').rglob('*.py')]"
 
   build-gateway:
     runs-on: ubuntu-latest

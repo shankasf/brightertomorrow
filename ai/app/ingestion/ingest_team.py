@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from .db import conn
+from ..core.db import conn
 
 ROOT = "https://brightertomorrowtherapy.com"
 USER_AGENT = (

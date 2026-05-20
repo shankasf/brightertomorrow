@@ -20,7 +20,7 @@ import tiktoken
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
-from .db import conn
+from ..core.db import conn
 
 ROOT = "https://brightertomorrowtherapy.com"
 EMBED_MODEL = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")

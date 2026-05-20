@@ -14,19 +14,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from .log_stream import broadcaster as log_broadcaster, install as install_log_broadcast
-from .logging_config import configure_logging
+from .core.log_stream import broadcaster as log_broadcaster, install as install_log_broadcast
+from .core.logging_config import configure_logging
 
 load_dotenv()
 configure_logging()
 install_log_broadcast()
 
-from .aws_signer import signed_post
+from .integrations.aws_signer import signed_post
 from .data.payers import resolve_payer_id
-from .db import conn
-from .embed_faqs import embed_all_faqs
-from .info_cache import detect_intent, get_cached_reply, cache_stats
-from .tools import _ELIGIBLE_STATES, _validate_dob
+from .core.db import conn
+from .ingestion.embed_faqs import embed_all_faqs
+from .caching.info_cache import detect_intent, get_cached_reply, cache_stats
+from .integrations.tools import _ELIGIBLE_STATES, _validate_dob
 
 from .graph.graph import get_app as get_langgraph_app
 from .graph.state import initial_state as graph_initial_state
@@ -105,7 +105,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     Go gateway's ChatHandler keeps working as-is.
     """
     session_id = req.session_id or ""
-    from .tools import agent_source
+    from .integrations.tools import agent_source
     agent_source.set("chat-agent")
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -188,7 +188,7 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
     session_id = req.session_id or ""
     msg = req.message or ""
     t0 = time.perf_counter()
-    from .tools import agent_source
+    from .integrations.tools import agent_source
     agent_source.set("chat-agent")
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -389,7 +389,7 @@ async def voice_ws(ws: WebSocket, session_id: str = "") -> None:
     t0 = time.perf_counter()
     # Stamp this connection as voice so tools invoked by the realtime agents
     # (e.g. book_with_insurance) record source=voice-agent on the intake.
-    from .tools import agent_source
+    from .integrations.tools import agent_source
     agent_source.set("voice-agent")
     # New: route to the LangGraph-backed voice bridge (Deepgram STT,
     # LangGraph brain, Cartesia TTS). Same wire protocol as the legacy
@@ -449,7 +449,7 @@ async def twilio_voice() -> Any:
 async def twilio_media_ws(ws: WebSocket) -> None:
     """Twilio Media Stream → LangGraph (μ-law 8 kHz ↔ PCM16 16 kHz)."""
     logger.info("twilio_ws_connect")
-    from .tools import agent_source
+    from .integrations.tools import agent_source
     agent_source.set("voice-phone")
     t0 = time.perf_counter()
     # Delegate to the new LangGraph-backed Twilio bridge. It owns the

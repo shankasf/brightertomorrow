@@ -17,9 +17,9 @@ from zoneinfo import ZoneInfo
 
 from openai import OpenAI
 
+from ..core.db import conn
+from ..data.payers import PAYERS, resolve_payer_id
 from .aws_signer import gateway_post, signed_post
-from .data.payers import PAYERS, resolve_payer_id
-from .db import conn
 
 # Per-request modality marker. Tools that submit intake / book appointments
 # stamp this value into the gateway payload so admin-side reports can split

@@ -15,7 +15,7 @@ import sys
 
 from openai import OpenAI
 
-from .db import conn
+from ..core.db import conn
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
