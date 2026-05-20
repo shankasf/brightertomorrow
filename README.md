@@ -42,6 +42,65 @@ flowchart TD
 
 ---
 
+## 1b. LangGraph topology (`ai/app/graph/`)
+
+The control-flow underneath the agents is a compiled LangGraph `StateGraph`. One cycle per user turn: safety screen → extract → planner (conditional edge) → one action node → respond → END. Checkpointer saves state; the next turn resumes from END.
+
+```mermaid
+flowchart TD
+    START([START]) --> safety_screen[safety_screen<br/>crisis keyword check]
+    safety_screen --> extract[extract<br/>LLM structured parse]
+    extract -->|planner: conditional edge| verify_insurance[verify_insurance]
+    extract -->|planner| propose_slots[propose_slots]
+    extract -->|planner| book_appointment[book_appointment]
+    extract -->|planner| cancel_appointment[cancel_appointment]
+    extract -->|planner| submit_callback[submit_callback]
+    extract -->|planner| search_kb[search_kb]
+    extract -->|planner| rollback[rollback]
+    extract -->|planner| respond[respond<br/>scene-based reply]
+
+    verify_insurance --> respond
+    propose_slots --> respond
+    book_appointment --> respond
+    cancel_appointment --> respond
+    submit_callback --> respond
+    search_kb --> respond
+    rollback --> respond
+
+    respond --> ENDN([END])
+```
+
+**Nodes** (`ai/app/graph/nodes/`):
+
+| Node | Role | Writes |
+|---|---|---|
+| `safety_screen` | deterministic crisis keyword sweep | `safety_signal` |
+| `extract` | LLM structured-output parse of the last user turn | `intent`, `affirmation`, `field_deltas` into `insurance_fields` / `booking_fields` / `callback_fields` |
+| `planner` | pure router (conditional edge, not a real node) — see `planner.py` | nothing |
+| `verify_insurance` / `propose_slots` / `book_appointment` / `cancel_appointment` / `submit_callback` / `search_kb` | action nodes — call one tool from `ai/app/tools.py` | their tool result + `last_action` |
+| `rollback` | undo a pending confirmation when caller says "no" | clears the pending state |
+| `respond` | LLM scene-based patient reply | appends to `messages`, sets `last_reply_text` |
+
+**State** (`ai/app/graph/state.py:State` — one TypedDict, total=False):
+
+- **Identity:** `channel`, `session_id`, `caller_phone`, `agent_source`
+- **Per-turn ephemeral** (overwritten by `extract`): `affirmation`, `safety_signal`, `last_user_text`
+- **Sticky:** `intent`, `payment_path`, `booking_status`, `callback_status`
+- **Collected fields:** `insurance_fields` (5), `booking_fields` (5), `callback_fields` (4), `staff_id`, `staff_name`
+- **Tool results:** `verify_result`, `proposed_slots`, `selected_slot`, `appointment_id`, `callback_id`, `kb_snippets`
+- **Plumbing:** `messages` (with `add_messages` reducer), `last_action`, `pending_question`, `last_reply_text`, `soft_safety_asked`
+
+**Edges** (`ai/app/graph/graph.py`):
+
+- `START → safety_screen → extract`
+- `extract --conditional(planner)--> {respond, verify_insurance, propose_slots, book_appointment, cancel_appointment, submit_callback, search_kb, rollback}`
+- every action node `→ respond`
+- `respond → END`
+
+Planner priority is documented inline in `ai/app/graph/nodes/planner.py:1` — crisis > low-confidence > pending-confirm yes/no > cancel > out-of-scope > info > callback > insurance/booking.
+
+---
+
 ## 2. Tool surface (one source: `ai/app/tools.py`)
 
 ```mermaid
