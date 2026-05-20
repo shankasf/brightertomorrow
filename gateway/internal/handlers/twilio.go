@@ -147,11 +147,14 @@ func (h *TwilioHandler) HandleVoiceWebhook(w http.ResponseWriter, r *http.Reques
 		`<Response>` +
 		`<Connect>` +
 		`<Stream url="` + xmlAttr(streamURL) + `">` +
-		// session_id is what bt-ai uses as the DynamoDB partition key for
-		// transcript turns. It must match chat_sessions.id so the admin UI
-		// can join. The CallSid follows separately via external_ref.
+		// session_id ties bt-ai's per-turn DDB persistence to chat_sessions.
+		// call_sid is the Twilio identifier for audit.
+		// caller_phone lets bt-ai's LangGraph use a stable thread_id keyed
+		// on the E.164 number so a caller who hangs up and calls back
+		// within the staleness cap resumes mid-flow.
 		`<Parameter name="session_id" value="` + xmlAttr(sessionID) + `" />` +
 		`<Parameter name="call_sid" value="` + xmlAttr(callSid) + `" />` +
+		`<Parameter name="caller_phone" value="` + xmlAttr(from) + `" />` +
 		`</Stream>` +
 		`</Connect>` +
 		`</Response>`
