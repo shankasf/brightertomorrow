@@ -196,13 +196,14 @@ def planner(state: State) -> str:
         return _route_after_insurance(state)
 
     # ---- 2. Gate 1: HIPAA disclosure / recording consent ---------------
-    # Must be acknowledged verbally before ANY classification proceeds on
-    # voice channels. Chat is exempt — the widget renders a persistent
-    # HIPAA-compliant badge under the input, so the verbal disclosure
-    # would be redundant. initial_state already sets disclosure_done=True
-    # for new chat sessions; this channel check also rescues legacy chat
-    # sessions whose checkpoint pre-dates that flag.
-    if not gates.get("disclosure_done") and state.get("channel") != "chat":
+    # Required on every channel before ANY classification proceeds. For
+    # voice, the gate clears when the caller verbally acknowledges the
+    # spoken HIPAA notice (extract sets recording_consent=True). For chat,
+    # the disclosure_prompt scene serves the verbatim HIPAA_DISCLOSURE_CHAT
+    # constant and respond.py flips the gate immediately afterwards — the
+    # auditor spot-check phrase "HIPAA-compliant and saved to your patient
+    # record" MUST appear in the transcript on turn 1.
+    if not gates.get("disclosure_done"):
         return _route(state, N.RESPOND, "disclosure_prompt")
 
     # ---- 3. Gate 2: Nevada physical presence ---------------------------

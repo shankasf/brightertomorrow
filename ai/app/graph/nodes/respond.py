@@ -27,6 +27,7 @@ from langchain_openai import ChatOpenAI
 
 from ..config import gateway_base_url, respond_model_name
 from ..prompts.persona import persona_block
+from ..prompts._constants import HIPAA_DISCLOSURE_CHAT, HIPAA_DISCLOSURE_VOICE
 from ..prompts.scenes import FIELD_PROMPTS, SCENE_INSTRUCTIONS
 from ..state import (
     State,
@@ -63,6 +64,16 @@ def _pick_scene(state: State) -> str:
     """
     if state.get("safety_signal") or state.get("intent") == "crisis":
         return "crisis"
+    # HIPAA disclosure gate (mirrors planner.py:206). The planner is a
+    # pure routing function — it returns the next node name but cannot
+    # mutate state.scene. So when it routed here with reason=
+    # "disclosure_prompt" (gates.disclosure_done is still False), we
+    # need to detect that condition here independently and pick the
+    # verbatim-disclosure scene. Without this, _pick_scene would fall
+    # through to "open_question" and the LLM would paraphrase — exact
+    # bug observed in chat session c291a8a7… on 2026-05-21.
+    if not (state.get("gates") or {}).get("disclosure_done"):
+        return "disclosure_prompt"
     # If a prior action node explicitly set a scene (handoffs, gates,
     # self-pay offer, etc.), honor it. This is required so a routing
     # like `handoff_out_of_state` doesn't fall through to the booking
@@ -300,6 +311,14 @@ def _apply_scene_side_effects(scene: str, state: State) -> dict[str, Any]:
         return {"booking_status": "cancel_pending_confirm"}
     if scene == "confirm_callback":
         return {"callback_status": "pending_confirm"}
+    # Chat has no spoken consent step — the disclosure scene IS the
+    # acknowledgement (the visitor sees the HIPAA notice in the transcript).
+    # Flip the gate immediately so the next turn proceeds to greeting/intent.
+    # For voice, extract.py flips the gate when recording_consent=True.
+    if scene == "disclosure_prompt" and state.get("channel") == "chat":
+        gates = dict(state.get("gates") or {})
+        gates["disclosure_done"] = True
+        return {"gates": gates}
     return {}
 
 
@@ -311,6 +330,28 @@ def _apply_scene_side_effects(scene: str, state: State) -> dict[str, Any]:
 def respond(state: State) -> dict[str, Any]:
     scene = _pick_scene(state)
     channel = state.get("channel", "chat")
+
+    # HIPAA disclosure is load-bearing legal text — auditors look for the
+    # exact phrase "HIPAA-compliant and saved to your patient record" in
+    # transcript spot-checks. Serve the constant verbatim; never let the
+    # LLM rephrase it.
+    if scene == "disclosure_prompt":
+        text = HIPAA_DISCLOSURE_VOICE if str(channel).startswith("voice") else HIPAA_DISCLOSURE_CHAT
+        side_effects = _apply_scene_side_effects(scene, state)
+        logger.info(
+            "respond session=%s scene=disclosure_prompt verbatim chars=%d",
+            state.get("session_id", "?"), len(text),
+        )
+        if state.get("channel") != "chat":
+            _persist_turn_async(state, text)
+        return {
+            "messages": [AIMessage(content=text)],
+            "last_reply_text": text,
+            "scene": None,
+            "_scene": scene,
+            **side_effects,
+        }
+
     persona = persona_block(channel, scene=scene)
     scene_instr = SCENE_INSTRUCTIONS[scene]
     context = _context_for_scene(scene, state)

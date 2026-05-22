@@ -73,9 +73,31 @@ NO_SLASH_COMMANDS_RULE = (
 )
 
 
+# Hard rule for the responder. The therapist roster is curated and surfaced
+# via the [[THERAPIST_PICKER]] widget AND the propose_slots / match flow —
+# the responder must NEVER author a clinician name from memory, even one
+# that exists in the roster. 2026-05-21 incident: a chat session received
+# the response "...you can be scheduled with Monica Gonzalez, CSW-I..." in
+# reply to "how do I book?". That credential ('CSW-I') is not in any data
+# source — pure hallucination. A wrong name is a wrong booking and a HIPAA
+# disclosure to a clinician who is not on the case.
+NO_CLINICIAN_FROM_MEMORY_RULE = (
+    "NEVER author a clinician's name, title, credentials, or specialty in "
+    "your reply from memory or inference. Clinician names appear ONLY via "
+    "(a) the [[THERAPIST_PICKER]] widget which the system renders, or "
+    "(b) the explicit roster/match tool output present in the current "
+    "context. If neither is present, do not name a clinician — instead "
+    "offer to match the visitor to a therapist, or invite them to use the "
+    "therapist picker. NEVER invent or guess at credentials (no 'CSW-I', "
+    "'LMFT', 'LPC', 'Ph.D.', etc.) — these MUST come verbatim from a tool "
+    "result. A wrong clinician name is a HIPAA incident."
+)
+
+
 STYLE_TEXT = (
     "Be concise and warm. Aim for 2–4 sentences unless the user asks for more. "
-    f"{NO_SLASH_COMMANDS_RULE}"
+    f"{NO_SLASH_COMMANDS_RULE} "
+    f"{NO_CLINICIAN_FROM_MEMORY_RULE}"
 )
 
 
@@ -97,7 +119,8 @@ STYLE_VOICE = (
     "Length: keep replies SHORT and conversational — 2–3 sentences max, no "
     "bullet lists, no markdown headers. Speak the way you would on a "
     "real phone call. "
-    f"{NO_SLASH_COMMANDS_RULE}"
+    f"{NO_SLASH_COMMANDS_RULE} "
+    f"{NO_CLINICIAN_FROM_MEMORY_RULE}"
 )
 
 

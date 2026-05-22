@@ -86,13 +86,11 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
 
     "greeting": (
         "Greet the caller warmly in ONE to THREE short sentences. "
-        "For the VOICE channel (channel starts with 'voice'), include a brief "
-        "HIPAA notice as the SECOND sentence — e.g. 'Just so you know, this "
-        "call is private and HIPAA-protected, so please continue from your "
-        "own device.' Then invite them to ask about booking, checking "
-        "insurance, finding a therapist, or anything about the practice. "
-        "For the CHAT channel, skip the HIPAA notice (the widget shows a "
-        "persistent badge under the input). Vary wording each session."
+        "NOTE: the HIPAA disclosure has already been delivered on turn 1 "
+        "via the verbatim disclosure_prompt scene — do NOT repeat the "
+        "HIPAA notice here. Invite the caller to ask about booking, "
+        "checking insurance, finding a therapist, or anything about the "
+        "practice. Vary wording each session."
     ),
 
     "ask_insurance_field": (

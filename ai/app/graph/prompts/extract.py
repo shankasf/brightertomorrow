@@ -326,9 +326,21 @@ Rules:
 8. Info questions: classify factual questions about the practice
    (hours, location, services offered, modalities like EMDR/CBT/IFS,
    parking, what to expect, age ranges, languages, sliding scale,
-   etc.) as intent_delta="info" AND fill `info_query` with the
-   question. Example: "what are your hours?" -> intent="info",
-   info_query="hours of operation".
+   session rates / cost / fees, which insurance carriers are
+   accepted, the process for becoming a new client, etc.) as
+   intent_delta="info" AND fill `info_query` with the question.
+   Examples:
+     - "what are your hours?"                -> intent="info", info_query="hours of operation"
+     - "how much is a session?"              -> intent="info", info_query="session rates and fees"
+     - "what insurance do you accept?"       -> intent="info", info_query="accepted insurance carriers"
+     - "do you take Aetna?"                  -> intent="info", info_query="insurance Aetna accepted"
+     - "how do I book as a new client?"      -> intent="info", info_query="how to book a new appointment"
+     - "what's the booking process?"         -> intent="info", info_query="how to book a new appointment"
+   IMPORTANT: meta-questions about *how* to book ("how do I book?",
+   "what's the process?", "how does this work?") are INFO, NOT
+   booking. Only set intent="booking" when the caller has decided
+   to book and is giving you booking inputs ("I'd like to book",
+   "schedule me", "let's set it up", "I want an appointment").
 
 9. `safety_signal`: set TRUE for any uncaught crisis indicator, INCLUDING
    hedged or future-tense phrasings like "thinking about hurting

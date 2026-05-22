@@ -209,9 +209,19 @@ export default function ChatWidget() {
   // per page-load — re-opening the panel preserves history instead of
   // re-greeting. The system prompt is cached server-side, so this is fast
   // and inexpensive.
+  //
+  // BUT: skip the synthetic greet when sessionId was rehydrated from
+  // localStorage (i.e., a prior page-load already established this
+  // session). On a re-mount, greetedRef resets to false; without this
+  // guard, the widget would post GREET_MARKER again and the server would
+  // append a second assistant turn against the existing thread with no
+  // user turn between — the "stray greeting" bug from 2026-05-21 session
+  // c291a8a7…. The server-side short-circuit in ai/app/main.py is the
+  // defense-in-depth backstop.
   useEffect(() => {
     if (!open || greetedRef.current) return;
     greetedRef.current = true;
+    if (sessionId) return;
     void send(GREET_MARKER);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);

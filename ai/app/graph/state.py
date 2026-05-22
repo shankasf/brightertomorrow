@@ -315,13 +315,18 @@ def initial_state(channel: Channel, session_id: str, agent_source: str) -> State
         payment_path="unknown",
         booking_status="none",
         callback_status="none",
-        # Chat shows a persistent HIPAA-compliant badge under the input — the
-        # verbal disclosure is intentionally skipped per scenes.py greeting
-        # comment, so we mark the gate done at session start. Voice channels
-        # still need to speak the disclosure verbally; their gate flips when
-        # the caller acknowledges the spoken HIPAA notice (extract picks it
-        # up via TurnExtraction.recording_consent).
-        gates=Gates(disclosure_done=True) if channel == "chat" else Gates(),
+        # All channels start with disclosure NOT delivered. The disclosure
+        # gate fires on the first turn and the responder serves the verbatim
+        # `HIPAA_DISCLOSURE_CHAT` / `_VOICE` constant. For voice, the gate
+        # clears when the caller acknowledges the spoken HIPAA notice
+        # (extract picks it up via TurnExtraction.recording_consent). For
+        # chat, there is no spoken consent — the gate clears immediately
+        # after the disclosure scene runs once (side-effect in respond.py
+        # _apply_scene_side_effects). The widget's persistent badge is UI
+        # notice but is NOT a substitute for the auditor spot-check phrase
+        # "HIPAA-compliant and saved to your patient record" in the
+        # transcript itself.
+        gates=Gates(),
         caller_relationship=None,
         physical_presence_state=None,
         modality=None,

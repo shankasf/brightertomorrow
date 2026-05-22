@@ -98,17 +98,27 @@ async def _stream_langgraph_respond_tokens(
     cfg = {"configurable": {"thread_id": session_id or "anon"}}
     snapshot = await _lg_app.aget_state(cfg)
     has_prior = bool(snapshot and getattr(snapshot, "values", None))
+    is_greet = user_text.strip() == "Hi"
+
+    # GREET-on-prior-state short-circuit (stray-greeting defense).
+    # A remount / refresh fires a second __BT_GREET__ against an established
+    # thread. Without this guard, the graph runs and emits a generic
+    # "open_question" or "greeting" reply, producing two consecutive
+    # assistant turns with no user turn between (DDB pollution + audit-
+    # trail concern). Yield the verbatim HIPAA_RESUME_CHAT (or _VOICE) as a
+    # single token then short-circuit; no graph invocation, no LLM call.
+    if has_prior and is_greet:
+        from .graph.prompts._constants import HIPAA_RESUME_CHAT, HIPAA_RESUME_VOICE
+        resume_text = HIPAA_RESUME_VOICE if str(channel).startswith("voice") else HIPAA_RESUME_CHAT
+        logger.info(
+            "greet_on_prior_short_circuit session=%s channel=%s chars=%d",
+            session_id or "anon", channel, len(resume_text),
+        )
+        yield {"type": "token", "text": resume_text}
+        yield {"type": "final", "result": {"last_reply_text": resume_text, "_scene": "resume_opener"}}
+        return
 
     if has_prior:
-        if user_text.strip() == "Hi" and channel == "chat":
-            values = snapshot.values
-            has_phi = bool(
-                (values.get("insurance_fields") or {}).get("first_name")
-                or (values.get("booking_fields") or {}).get("phone")
-                or (values.get("booking_fields") or {}).get("email")
-            )
-            if has_phi and not values.get("_resume_offer_pending"):
-                await _lg_app.aupdate_state(cfg, {"_resume_offer_pending": True})
         graph_input: Any = {"messages": [_LCHumanMessage(content=user_text)]}
     else:
         seed = graph_initial_state(channel, session_id or "anon", "chat-agent")
@@ -171,28 +181,26 @@ def _strip_picker_marker_streaming(buf: str) -> tuple[str, str]:
 async def _invoke_langgraph(session_id: str, user_text: str, channel: str = "chat") -> dict:
     """Run one turn through the compiled LangGraph for `session_id`."""
     cfg = {"configurable": {"thread_id": session_id or "anon"}}
-    # If this thread already has state in the checkpointer, only append the
-    # new user message; otherwise seed a fresh state.
     snapshot = await _lg_app.aget_state(cfg)
     has_prior = bool(snapshot and getattr(snapshot, "values", None))
+    is_greet = user_text.strip() == "Hi"
     if has_prior:
-        # Greet-with-prior-state → flip the resume-offer flag so the graph
-        # greets by name and offers a continue-vs-fresh choice instead of
-        # silently picking up where we left off. The frontend already
-        # bounds this to the 30-min reconnect window via localStorage TTL.
-        # Must use aupdate_state (not ainvoke input) because LangGraph's
-        # ainvoke applies the input AFTER the graph starts running, which
-        # is too late — by then extract has already read state and the
-        # planner has routed on a stale flag value.
-        if user_text.strip() == "Hi" and channel == "chat":
-            values = snapshot.values
-            has_phi = bool(
-                (values.get("insurance_fields") or {}).get("first_name")
-                or (values.get("booking_fields") or {}).get("phone")
-                or (values.get("booking_fields") or {}).get("email")
+        # GREET-on-prior-state short-circuit (stray-greeting defense). Same
+        # invariant as _stream_langgraph_respond_tokens — never let the
+        # graph emit a generic re-greeting against an existing thread.
+        if is_greet:
+            from .graph.prompts._constants import (
+                HIPAA_RESUME_CHAT,
+                HIPAA_RESUME_VOICE,
             )
-            if has_phi and not values.get("_resume_offer_pending"):
-                await _lg_app.aupdate_state(cfg, {"_resume_offer_pending": True})
+            resume_text = (
+                HIPAA_RESUME_VOICE if str(channel).startswith("voice") else HIPAA_RESUME_CHAT
+            )
+            logger.info(
+                "greet_on_prior_short_circuit session=%s channel=%s chars=%d",
+                session_id or "anon", channel, len(resume_text),
+            )
+            return {"last_reply_text": resume_text, "_scene": "resume_opener"}
         return await _lg_app.ainvoke(
             {"messages": [_LCHumanMessage(content=user_text)]},
             config=cfg,
@@ -357,6 +365,17 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
                 yield _sse_event("delta", {"text": marker_buf})
                 marker_buf = ""
             reply = (result.get("last_reply_text") or accumulated).strip()
+            # Non-streaming scenes (disclosure_prompt, resume_opener, static
+            # actions) set last_reply_text directly without emitting any
+            # on_chat_model_stream events, so `accumulated` is empty. We must
+            # still ship the text as a delta so the gateway's SSE parser
+            # accumulates it — otherwise gateway sees an empty stream and
+            # persists the chatFallback string instead of the real reply.
+            if reply and not accumulated:
+                if first_token_ms is None:
+                    first_token_ms = (time.perf_counter() - t0) * 1000
+                yield _sse_event("delta", {"text": reply})
+                accumulated = reply
             if not reply:
                 reply = "I'm here — could you tell me a bit more?"
                 yield _sse_event("delta", {"text": reply})
