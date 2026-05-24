@@ -64,13 +64,14 @@ def handoff_admin_verification(state: State) -> dict[str, Any]:
         request_id, payer,
     )
 
-    gates = dict(state.get("gates") or {})
-    gates["terminal"] = True
-
+    # Non-terminal: we still want the caller to finish booking. The admin
+    # team picks up the verification asynchronously; the booking itself
+    # proceeds (the confirm_booking + post_booking scenes mention the
+    # pending verification).
     return {
         "scene": _SCENE,
-        "done": True,
-        "gates": gates,
+        "insurance_pending_admin": True,
+        "last_action": "handoff_admin_verification",
         "audit_event": {
             "type": "handoff",
             "actor": "ai",

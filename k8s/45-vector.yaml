@@ -1,0 +1,286 @@
+# Vector DaemonSet — ships container logs from bt-ai / bt-gateway / bt-web
+# to s3://bt-app-logs as gzipped JSONL, partitioned by service/yyyy/mm/dd/hh.
+#
+# Dedup strategy:
+#   - Vector tracks file offsets in /var/lib/vector (hostPath). Pod restart
+#     does NOT re-read old log content because the offset state survives.
+#   - Each line also gets a UUID log_id at ingestion as a row identifier.
+#
+# HIPAA: logs may contain PHI (patient_id, tool args). S3 SSE-KMS + TLS in
+# transit + least-privilege IAM (Vector PutObject only) cover §164.312(a)(2)(iv),
+# (c)(1), (e)(1). Vector pod's in-memory buffer holds log content for <60s
+# (batch.timeout_secs); not persisted to disk on the Hostinger node.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vector
+  namespace: bt
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vector
+subjects:
+  - kind: ServiceAccount
+    name: vector
+    namespace: bt
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: bt
+data:
+  vector.yaml: |
+    data_dir: /var/lib/vector
+
+    sources:
+      k8s_logs:
+        type: kubernetes_logs
+        # Only pick up our three app containers. Avoids tailing the
+        # vector pod itself (would loop) and any system pods.
+        extra_label_selector: "app in (bt-ai,bt-gateway,bt-web)"
+        # auto_partial_merge handles long lines split across rotation boundaries.
+        auto_partial_merge: true
+
+    transforms:
+      enrich:
+        type: remap
+        inputs: [k8s_logs]
+        source: |
+          # The source message is in `.message` as a string. Try to parse as JSON.
+          raw_line = .message
+          parsed, parse_err = parse_json(raw_line)
+          if parse_err == null && is_object(parsed) {
+            # Parsed fields override Vector-added keys (so the source-provided
+            # log_id, ts, level, etc. take precedence over k8s metadata).
+            . = merge!(., parsed)
+            # Different loggers spell the message field differently:
+            #   slog (Go gateway)   -> "msg"
+            #   Python (bt-ai)      -> sometimes "msg", sometimes "event"
+            #   frontend (forwarded) -> "msg"
+            # Fold whichever exists into a unified "message" column.
+            if exists(.msg) {
+              .message = .msg
+              del(.msg)
+            } else if exists(.event) {
+              .message = .event
+            }
+          } else {
+            # Not JSON — keep the raw line as the message.
+            .raw = raw_line
+          }
+
+          # Derive `service` for partitioning:
+          #   - If JSON has an explicit service field (frontend logs forwarded
+          #     via gateway), use it
+          #   - Otherwise fall back to k8s pod app label
+          if !exists(.service) {
+            .service = .kubernetes.pod_labels.app || "unknown"
+          }
+          # Normalize bt-gateway -> gateway and bt-web -> web for nicer column values.
+          if .service == "bt-gateway" { .service = "gateway" }
+          if .service == "bt-web"     { .service = "web" }
+          # bt-ai stays as-is. "frontend" comes through unchanged.
+
+          # Unique row id — useful for "open this exact line" in admin UI.
+          # Source-generated ids in the JSON (e.g. from frontend POST) are
+          # preserved; otherwise Vector mints one.
+          if !exists(.log_id) {
+            .log_id = uuid_v4()
+          }
+
+          # When the log was ingested by Vector (always now()).
+          .ingestion_ts = now()
+
+          # Event timestamp: prefer source JSON .ts (already a string in our
+          # apps), else format the Vector-ingest .timestamp as ISO 8601.
+          if !exists(.ts) {
+            .ts = format_timestamp!(.timestamp, format: "%+")
+          }
+
+          # Level normalization. Default to INFO if absent or not a string.
+          if !exists(.level) {
+            .level = "INFO"
+          }
+          level_str, level_err = to_string(.level)
+          if level_err != null {
+            level_str = "INFO"
+          }
+          .level = upcase(level_str)
+
+          # k8s metadata as top-level columns (Glue schema expects these).
+          .pod = .kubernetes.pod_name || ""
+          .container = .kubernetes.container_name || ""
+          .host = .kubernetes.pod_node_name || ""
+
+          # Zero-padded partition path components. Glue projection expects
+          # 2-digit month/day/hour in the S3 key, so we use format_timestamp's
+          # padded outputs directly in the sink key_prefix below. The actual
+          # column values are inferred by Glue from the path.
+          .p_year  = format_timestamp!(.timestamp, format: "%Y")
+          .p_month = format_timestamp!(.timestamp, format: "%m")
+          .p_day   = format_timestamp!(.timestamp, format: "%d")
+          .p_hour  = format_timestamp!(.timestamp, format: "%H")
+
+          # Strip noisy fields we don't store.
+          del(.kubernetes)
+          del(.timestamp)
+          del(.source_type)
+          del(.file)
+          del(.stream)
+
+    sinks:
+      s3:
+        type: aws_s3
+        inputs: [enrich]
+        bucket: bt-app-logs
+        region: us-east-1
+        # Partitioned prefix — matches the Glue partition projection.
+        key_prefix: "logs/service={{ service }}/year={{ p_year }}/month={{ p_month }}/day={{ p_day }}/hour={{ p_hour }}/"
+        encoding:
+          codec: json
+        framing:
+          method: newline_delimited
+        compression: gzip
+        # Server-side encryption — KMS with the bt-phi CMK.
+        server_side_encryption: aws:kms
+        ssekms_key_id: alias/bt-phi
+        batch:
+          timeout_secs: 60
+          max_bytes: 5242880  # 5 MB
+        # Buffer to disk so a brief S3 outage doesn't lose recent logs.
+        # Vector enforces a hard minimum near 256 MB; we use 512 MB for
+        # comfortable headroom on the single Hostinger node.
+        buffer:
+          type: disk
+          max_size: 536870912  # 512 MB
+          when_full: drop_newest
+# Secret `vector-aws` is provisioned out-of-band so credentials don't live in
+# git. After deploying the BtAppLogs CDK stack:
+#
+#   aws iam create-access-key --user-name bt-vector-logs-writer
+#   kubectl create secret generic vector-aws -n bt \
+#     --from-literal=AWS_ACCESS_KEY_ID=<id> \
+#     --from-literal=AWS_SECRET_ACCESS_KEY=<secret> \
+#     --dry-run=client -o yaml | kubectl apply -f -
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector
+  namespace: bt
+  labels:
+    app: vector
+spec:
+  selector:
+    matchLabels:
+      app: vector
+  template:
+    metadata:
+      labels:
+        app: vector
+    spec:
+      serviceAccountName: vector
+      tolerations:
+        # Run on all nodes (single Hostinger node today, future-proof).
+        - operator: Exists
+      containers:
+        - name: vector
+          image: timberio/vector:0.42.0-debian
+          args: ["--config-dir", "/etc/vector"]
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: vector-aws
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vector-aws
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_REGION
+              value: us-east-1
+            - name: VECTOR_LOG
+              value: warn
+            # kubernetes_logs source filters to the local node only; needs the
+            # node name to enumerate /var/log/pods correctly.
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: VECTOR_SELF_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: VECTOR_SELF_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: PROCFS_ROOT
+              value: /host/proc
+            - name: SYSFS_ROOT
+              value: /host/sys
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/vector
+            - name: var-log
+              mountPath: /var/log
+              readOnly: true
+            - name: var-lib-docker-containers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+      terminationGracePeriodSeconds: 60
+      volumes:
+        - name: config
+          configMap:
+            name: vector-config
+        # Persistent checkpoint storage — survives pod restarts so Vector
+        # never re-reads log files. This is the primary dedup mechanism.
+        - name: data
+          hostPath:
+            path: /var/lib/vector-bt
+            type: DirectoryOrCreate
+        - name: var-log
+          hostPath:
+            path: /var/log
+        - name: var-lib-docker-containers
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys

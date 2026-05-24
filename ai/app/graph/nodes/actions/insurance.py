@@ -197,8 +197,15 @@ def verify_insurance(state: State) -> dict[str, Any]:
         needs_review_flag = str(resp.get("coverage_status") or "").lower() in (
             "needs_review", "pending", "needs_manual_review"
         )
+        # CLAIM.MD transient failures come back as status="unknown" with an
+        # `elig.error` array (e.g. code 42 "Unable to respond at current
+        # time"). Don't punish the caller with a self-pay offer when the
+        # carrier is just unavailable — escalate to admin verification.
+        elig_block = (resp.get("raw") or {}).get("elig") if isinstance(resp.get("raw"), dict) else None
+        upstream_error = bool(elig_block and elig_block.get("error"))
+        unknown_status = raw_status in ("", "unknown", "error", "timeout")
 
-        if needs_review_flag:
+        if needs_review_flag or upstream_error or unknown_status:
             outcome = "needs_manual_review"
         elif eligible:
             outcome = "eligible"

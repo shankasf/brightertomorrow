@@ -545,14 +545,11 @@ async def voice_ws(ws: WebSocket, session_id: str = "") -> None:
     # (e.g. book_with_insurance) record source=voice-agent on the intake.
     from .integrations.tools import agent_source
     agent_source.set("voice-agent")
-    # New: route to the LangGraph-backed voice bridge (Deepgram STT,
-    # LangGraph brain, Cartesia TTS). Same wire protocol as the legacy
-    # bridge so the React widget needs no changes.
-    from .graph.runtime.voice_browser import voice_ws as _graph_voice_ws
+    # Speech-to-speech realtime voice (gpt-realtime-2 via OpenAI Agents SDK).
+    # run_voice_session expects the caller to have accepted the WS (done above).
+    from .voice import run_voice_session
     try:
-        # The router decorator's accept() is skipped because we already
-        # accepted above — call the inner function directly.
-        await _graph_voice_ws.__wrapped__(ws, session_id) if hasattr(_graph_voice_ws, "__wrapped__") else await _graph_voice_ws(ws, session_id)
+        await run_voice_session(ws, session_id)
     except WebSocketDisconnect:
         logger.info("voice_ws_disconnect session=%s duration_s=%.1f", session_id or "anon", time.perf_counter() - t0)
     except Exception:
@@ -601,17 +598,20 @@ async def twilio_voice() -> Any:
 
 @app.websocket("/twilio/media")
 async def twilio_media_ws(ws: WebSocket) -> None:
-    """Twilio Media Stream → LangGraph (μ-law 8 kHz ↔ PCM16 16 kHz)."""
+    """Twilio Media Stream → OpenAI Realtime (μ-law 8 kHz ↔ PCM16 24 kHz).
+
+    Speech-to-speech via the realtime multi-agent graph. We accept the WS here
+    (with the audio.twilio.com subprotocol the gateway proxy forwards), then
+    hand the accepted socket to run_twilio_session, which expects it pre-accepted.
+    """
     logger.info("twilio_ws_connect")
+    await ws.accept(subprotocol="audio.twilio.com")
     from .integrations.tools import agent_source
     agent_source.set("voice-phone")
     t0 = time.perf_counter()
-    # Delegate to the new LangGraph-backed Twilio bridge. It owns the
-    # WS accept() (with audio.twilio.com subprotocol) so we don't
-    # double-accept here.
-    from .graph.runtime.voice_twilio import twilio_media as _graph_twilio_media
+    from .twilio_voice import run_twilio_session
     try:
-        await _graph_twilio_media.__wrapped__(ws) if hasattr(_graph_twilio_media, "__wrapped__") else await _graph_twilio_media(ws)
+        await run_twilio_session(ws)
     except WebSocketDisconnect:
         logger.info("twilio_ws_disconnect duration_s=%.1f", time.perf_counter() - t0)
     except Exception:

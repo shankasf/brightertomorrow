@@ -1230,7 +1230,7 @@ function FilterBar({
                 <div
                   role="dialog"
                   aria-label="Custom date range"
-                  className="absolute left-0 top-9 z-40 w-[280px] rounded-xl border border-[#E5E5E5] bg-white p-3 shadow-[0_18px_40px_rgba(25,39,53,0.14)]"
+                  className="absolute left-0 right-0 top-9 z-40 mx-auto w-[min(280px,calc(100vw-1.5rem))] rounded-xl border border-[#E5E5E5] bg-white p-3 shadow-[0_18px_40px_rgba(25,39,53,0.14)] sm:left-0 sm:right-auto sm:mx-0"
                 >
                   <div className="grid grid-cols-2 gap-2">
                     <label className="flex flex-col gap-1">

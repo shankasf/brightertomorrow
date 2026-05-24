@@ -104,11 +104,29 @@ def _pick_scene(state: State) -> str:
     if la == "verify_insurance":
         # Insurance-only flow stops here; booking flow continues.
         if intent == "insurance_check":
+            # "no" to the post-verify "book now?" offer = closing
+            # scene, not another copy of the same offer. Must check
+            # here too: the later `intent in ("booking",
+            # "insurance_check")` block is past this short-circuit.
+            if state.get("affirmation") == "no":
+                return "post_verify_declined"
             return "post_verify_offer_booking"
+        # Booking flow — fire a one-shot scene that acknowledges
+        # coverage AND asks the next booking field in the same reply.
+        # Gated on last_node == "verify_insurance" so it only fires on
+        # the exact turn verify ran (extract resets last_node="extract"
+        # on the next user turn, so subsequent booking-field turns fall
+        # through to the plain ask_booking_field below).
+        if (
+            state.get("last_node") == "verify_insurance"
+            and not booking_fields_complete(state)
+            and state.get("verify_result")
+        ):
+            return "post_verify_continue_booking"
         # Booking flow continues — fall through to next missing field.
     if la == "search_kb":
         return "info_answer"
-    if la == "propose_slots":
+    if la == "propose_slots" and not state.get("selected_slot"):
         return "present_slots"
     if la == "rollback":
         # If booking is still booked, just acknowledge.
@@ -139,8 +157,12 @@ def _pick_scene(state: State) -> str:
         # Insurance fields first (unless self_pay).
         if state.get("payment_path") != "self_pay" and not insurance_complete(state):
             return "ask_insurance_field"
-        # After verify, insurance_check ends with the offer.
+        # After verify, insurance_check ends with the offer. "no" from
+        # the caller takes us to the closing scene instead of looping
+        # on the same offer — see planner's matching post_verify branch.
         if intent == "insurance_check" and state.get("verify_result"):
+            if state.get("affirmation") == "no" and state.get("last_action") == "verify_insurance":
+                return "post_verify_declined"
             return "post_verify_offer_booking"
         # Booking fields next.
         if not booking_fields_complete(state):
@@ -234,6 +256,7 @@ def _context_for_scene(scene: str, state: State) -> str:
             f"  slot: {slot.get('displayPT')}\n"
             f"  therapist: {state.get('staff_name')}"
         )
+        bits.append(f"insurance_pending_admin: {bool(state.get('insurance_pending_admin'))}")
     elif scene == "post_booking":
         slot = state.get("selected_slot") or {}
         bits.append(f"booked_slot: {slot.get('displayPT')}")
@@ -242,6 +265,18 @@ def _context_for_scene(scene: str, state: State) -> str:
         vr = state.get("verify_result") or {}
         if vr.get("coverage", {}).get("copay"):
             bits.append(f"copay: ${vr['coverage']['copay']}")
+        bits.append(f"insurance_pending_admin: {bool(state.get('insurance_pending_admin'))}")
+    elif scene == "handoff_admin_verification":
+        # Combined apology + next-question scene. We pass the next missing
+        # booking-field so the LLM can ask it in the same turn instead of
+        # forcing a wasted "ok" round-trip.
+        bits.append(f"payer: {ins.get('payer_name') or 'your insurance'}")
+        next_booking = first_missing_booking(state)
+        next_field_label = FIELD_PROMPTS.get(next_booking or "", next_booking or "")
+        bits.append(f"next_field_to_ask: {next_booking or 'none'}")
+        bits.append(f"next_field_label: {next_field_label}")
+        bits.append(f"staff_picked: {bool(state.get('staff_id'))}")
+        bits.append(f"slot_picked: {bool(state.get('selected_slot'))}")
     elif scene == "confirm_cancel":
         slot = state.get("selected_slot") or {}
         bits.append(f"appointment_slot: {slot.get('displayPT')}")
@@ -249,6 +284,12 @@ def _context_for_scene(scene: str, state: State) -> str:
     elif scene == "post_verify_offer_booking":
         vr = state.get("verify_result") or {}
         bits.append(f"display_text: {vr.get('display_text')}")
+    elif scene == "post_verify_continue_booking":
+        vr = state.get("verify_result") or {}
+        bits.append(f"display_text: {vr.get('display_text')}")
+        next_booking = first_missing_booking(state)
+        bits.append(f"field_to_ask: {next_booking}")
+        bits.append(f"field_label: {FIELD_PROMPTS.get(next_booking or '', next_booking or '')}")
     elif scene == "resume_offer":
         bk = state.get("booking_fields") or {}
         first_name = (ins.get("first_name") or "").strip() or "there"
@@ -296,7 +337,7 @@ def _context_for_scene(scene: str, state: State) -> str:
         snippets = state.get("kb_snippets") or []
         bits.append("kb_snippets:")
         for s in snippets[:5]:
-            bits.append(f"  - {s.get('title')} ({s.get('url')}): {str(s.get('content', ''))[:300]}")
+            bits.append(f"  - {s.get('title')}: {str(s.get('content', ''))[:300]}")
     return "\n".join(bits)
 
 
@@ -344,11 +385,20 @@ def respond(state: State) -> dict[str, Any]:
         )
         if state.get("channel") != "chat":
             _persist_turn_async(state, text)
+        # The disclosure has now been DELIVERED — flip the gate so the
+        # planner stops routing every subsequent turn back through
+        # disclosure_prompt. The previous logic (extract.py) only flipped
+        # the gate on explicit recording_consent, but Nevada is one-party
+        # consent and our disclosure IS the announcement; the caller
+        # never says "I consent" so without this the agent loops forever.
+        gates = dict(state.get("gates") or {})
+        gates["disclosure_done"] = True
         return {
             "messages": [AIMessage(content=text)],
             "last_reply_text": text,
             "scene": None,
             "_scene": scene,
+            "gates": gates,
             **side_effects,
         }
 
@@ -357,13 +407,13 @@ def respond(state: State) -> dict[str, Any]:
     context = _context_for_scene(scene, state)
 
     # Field-template scenes need the field_label substituted in.
-    if scene in {"ask_insurance_field", "ask_booking_field", "ask_callback_field"}:
+    if scene in {"ask_insurance_field", "ask_booking_field", "ask_callback_field", "post_verify_continue_booking"}:
         if scene == "ask_insurance_field":
             field = first_missing_insurance(state) or ""
-        elif scene == "ask_booking_field":
-            field = first_missing_booking(state) or ""
-        else:
+        elif scene == "ask_callback_field":
             field = first_missing_callback(state) or ""
+        else:
+            field = first_missing_booking(state) or ""
         scene_instr = scene_instr.format(field_label=FIELD_PROMPTS.get(field, field))
 
     system = SystemMessage(content=f"{persona}\n\n# Scene: {scene}\n{scene_instr}")

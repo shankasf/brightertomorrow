@@ -12,6 +12,7 @@ import (
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
@@ -56,6 +57,10 @@ func main() {
 		os.Exit(1)
 	}
 	ddbClient := dynamodb.NewFromConfig(awsCfg)
+	// Athena client — powers /admin/api/logs/search. Same creds; the
+	// bt-app-logs-reader managed policy must be attached to the gateway IAM
+	// user (see BtAppLogs CDK output).
+	athenaClient := athena.NewFromConfig(awsCfg)
 
 	phiStore, err := phi.New(phi.Config{
 		DDB:       ddbClient,
@@ -142,7 +147,8 @@ func main() {
 	adminAppointmentsH := &handlers.AdminAppointmentsHandler{Pool: pool, PHI: phiStore}
 	adminInsuranceChecksH := &handlers.AdminInsuranceChecksHandler{Pool: pool, PHI: phiStore}
 	adminCallbacksH := &handlers.AdminCallbacksHandler{Pool: pool, PHI: phiStore}
-	adminLogsH := &handlers.AdminLogsHandler{Pool: pool, PHI: phiStore, AIServiceURL: cfg.AIServiceURL}
+	adminLogsH := &handlers.AdminLogsHandler{Pool: pool, PHI: phiStore, AIServiceURL: cfg.AIServiceURL, Athena: athenaClient}
+	frontendLogsH := &handlers.FrontendLogsHandler{}
 	adminCalendarH := &handlers.AdminCalendarHandler{Pool: pool, PHI: phiStore, Cal: calStore}
 	internalCalendarH := &handlers.InternalCalendarHandler{
 		Cal:            calStore,
@@ -221,6 +227,11 @@ func main() {
 		// entirely. Twilio's own infra retries on 5xx, so 429 is acceptable.
 		r.With(httprate.LimitByIP(20, time.Minute)).Post("/twilio/voice", twilioH.HandleVoiceWebhook)
 		r.With(httprate.LimitByIP(20, time.Minute)).Get("/twilio/media", twilioH.HandleMediaWS)
+
+		// Frontend log ingestion. Browser-callable (no auth) but rate-limited
+		// per IP — a chatty SPA might burst 5-10 lines/sec briefly. Body cap
+		// of 1 MB is enforced inside the handler.
+		r.With(httprate.LimitByIP(120, time.Minute)).Post("/frontend-logs", frontendLogsH.ServeHTTP)
 	})
 
 	// Internal routes — cluster-internal callers only (the bt-ai pod).
@@ -321,6 +332,9 @@ func main() {
 				// Live AI service log stream (SSE). Superadmin-only because
 				// operational logs include patient identifiers and tool args.
 				r.Get("/logs/ai", adminLogsH.StreamAI)
+				// Historical log search across all services (Athena). Same
+				// superadmin gate; each query is audited in admin_access_log.
+				r.Get("/logs/search", adminLogsH.Search)
 
 				r.Get("/audit/phi", adminAuditH.PHIAuditLog)
 				r.Get("/audit/access", adminAuditH.AdminAccessLog)

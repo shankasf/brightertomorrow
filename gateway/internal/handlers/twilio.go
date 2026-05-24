@@ -232,15 +232,28 @@ func (h *TwilioHandler) HandleMediaWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer aiConn.Close()
 
-	slog.Info("twilio: media bridge open",
-		"request_id", chimw.GetReqID(r.Context()),
-	)
+	reqID := chimw.GetReqID(r.Context())
+	slog.Info("twilio: media bridge open", "request_id", reqID)
 
+	start := time.Now()
+	var c2a, a2c proxyStats // twilio→ai (caller audio), ai→twilio (agent audio)
 	errCh := make(chan error, 2)
-	go func() { errCh <- proxyMessages(clientConn, aiConn) }()
-	go func() { errCh <- proxyMessages(aiConn, clientConn) }()
+	go func() { errCh <- proxyMessages(clientConn, aiConn, &c2a) }()
+	go func() { errCh <- proxyMessages(aiConn, clientConn, &a2c) }()
 
-	if proxyErr := <-errCh; proxyErr != nil && !isExpectedCloseError(proxyErr) {
+	proxyErr := <-errCh
+	// Always log the bridge close: duration + per-direction frame/byte counts
+	// make it obvious whether the caller's audio reached bt-ai (twilio2ai) and
+	// whether the agent's reply audio flowed back (ai2twilio) — pinpoints
+	// gateway-proxy vs pipeline faults without guessing.
+	slog.Info("twilio: media bridge closed",
+		"request_id", reqID,
+		"duration_s", time.Since(start).Seconds(),
+		"twilio2ai_frames", c2a.frames.Load(), "twilio2ai_bytes", c2a.bytes.Load(),
+		"ai2twilio_frames", a2c.frames.Load(), "ai2twilio_bytes", a2c.bytes.Load(),
+		"err", fmt.Sprintf("%v", proxyErr),
+	)
+	if proxyErr != nil && !isExpectedCloseError(proxyErr) {
 		slog.Warn("twilio: media proxy error", "err", proxyErr)
 	}
 

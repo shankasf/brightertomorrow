@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: ai
-          image: bt-ai:prod-69f85e6-1779305038
+          image: bt-ai:prod-b880338-1779581168
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
           env:
@@ -24,6 +24,8 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_BASE_URL, optional: true } }
             - name: OPENAI_MODEL
               valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_MODEL, optional: true } }
+            # Flagship gpt-5.5 everywhere (extract + respond). OPENAI_EXTRACT_MODEL
+            # intentionally NOT set so extract_model_name() falls back to OPENAI_MODEL.
             - name: REALTIME_MODEL
               valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_MODEL, optional: true } }
             - name: BT_API_URL

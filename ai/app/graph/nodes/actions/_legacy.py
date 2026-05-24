@@ -28,39 +28,75 @@ def propose_slots(state: State) -> dict[str, Any]:
     staff_id = state.get("staff_id")
     if not staff_id:
         return {"last_action": "propose_slots_blocked_no_staff"}
-    # The extract node may have stored a time-of-day preference into a
-    # transient key; default to "any" if missing.
-    time_of_day = state.get("_time_of_day") or "any"
-    earliest = state.get("_earliest_day_offset") or 1
-    raw = _fetch_free_slots(staff_id, days_ahead=max(14, earliest + 7))
-    # Filter by time-of-day in-place — same logic as the legacy propose_slots
-    # but inlined so we don't double-fetch.
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
+    from ....data.roster import ELIGIBLE_FOR_BOOKING
+
+    time_of_day = state.get("_time_of_day") or "any"
+    earliest = state.get("_earliest_day_offset") or 1
     PT = ZoneInfo("America/Los_Angeles")
     bands = {"morning": (7, 12), "afternoon": (12, 17), "evening": (17, 21), "any": (0, 24)}
     h0, h1 = bands.get(time_of_day, (0, 24))
     now_pt = datetime.now(tz=PT)
     earliest_pt = now_pt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=earliest)
     earliest_dt = earliest_pt.astimezone(timezone.utc)
-    picked = []
-    for s in raw.get("slots", []):
-        start = datetime.fromisoformat(s["startISO"].replace("Z", "+00:00"))
-        if start < earliest_dt:
-            continue
-        if h0 <= start.astimezone(PT).hour < h1:
-            picked.append(s)
-        if len(picked) >= 3:
-            break
+
+    def _pick_for(sid: int) -> list[dict]:
+        raw = _fetch_free_slots(sid, days_ahead=max(14, earliest + 7))
+        out: list[dict] = []
+        for s in raw.get("slots", []):
+            start = datetime.fromisoformat(s["startISO"].replace("Z", "+00:00"))
+            if start < earliest_dt:
+                continue
+            if h0 <= start.astimezone(PT).hour < h1:
+                out.append(s)
+            if len(out) >= 3:
+                break
+        return out
+
+    picked = _pick_for(staff_id)
+    final_staff_id = staff_id
+    final_staff_name = state.get("staff_name")
+
+    # If the user said "first available / no preference" and the
+    # hash-picked therapist has no slots, try the rest of the roster
+    # in roster order. The first therapist with availability wins.
+    if not picked and state.get("_staff_open_to_alternatives"):
+        tried = {staff_id}
+        for t in ELIGIBLE_FOR_BOOKING:
+            tid = t["staffId"]
+            if tid in tried:
+                continue
+            tried.add(tid)
+            alt = _pick_for(tid)
+            if alt:
+                picked = alt
+                final_staff_id = tid
+                final_staff_name = t["name"]
+                logger.info(
+                    "propose_slots fallback session=%s original=%s -> %s (%s)",
+                    state.get("session_id", "?"), staff_id, tid, t["name"],
+                )
+                break
+
     logger.info(
         "action propose_slots session=%s staff_id=%s picked=%d",
-        state.get("session_id", "?"), staff_id, len(picked),
+        state.get("session_id", "?"), final_staff_id, len(picked),
     )
-    return {
+
+    update: dict[str, Any] = {
         "proposed_slots": picked,
         "last_action": "propose_slots",
         "booking_status": "ready_for_slots",
     }
+    if final_staff_id != staff_id:
+        update["staff_id"] = final_staff_id
+        update["staff_name"] = final_staff_name
+    # Empty result after a full roster sweep — surface so respond can
+    # offer a callback instead of looping on propose_slots forever.
+    if not picked:
+        update["last_action"] = "propose_slots_no_availability"
+    return update
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +273,7 @@ def search_kb(state: State) -> dict[str, Any]:
     if not query:
         return {"last_action": "search_kb_blocked_empty"}
     from openai import OpenAI
-    from ...core.db import conn
+    from ....core.db import conn
     import os
     embed_model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
     try:
@@ -246,15 +282,15 @@ def search_kb(state: State) -> dict[str, Any]:
         with conn() as c, c.cursor() as cur:
             cur.execute(
                 """
-                SELECT url, title, content, 1 - (embedding <=> %s::vector) AS score
+                SELECT title, content, 1 - (embedding <=> %s::vector) AS score
                 FROM kb_documents
                 ORDER BY embedding <=> %s::vector
                 LIMIT 5
                 """, (vec, vec),
             )
             rows = cur.fetchall()
-        snippets = [{"url": u, "title": t, "content": cc, "score": round(float(s), 4)}
-                    for u, t, cc, s in rows]
+        snippets = [{"title": t, "content": cc, "score": round(float(s), 4)}
+                    for t, cc, s in rows]
     except Exception:
         logger.exception("search_kb_error")
         snippets = []

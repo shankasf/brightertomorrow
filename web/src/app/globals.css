@@ -38,6 +38,18 @@
 
 html { scroll-behavior: smooth; }
 
+/* Prevent iOS Safari from auto-zooming the viewport on input focus.
+   iOS triggers zoom whenever a focused input/textarea/select has a
+   computed font-size below 16px. Forcing the floor here covers every
+   form (chat, booking, coverage, contact, admin) at once. Desktop
+   appearance is unaffected because we only enforce the minimum at
+   phone widths. */
+@media (max-width: 767.98px) {
+  input, textarea, select {
+    font-size: 16px;
+  }
+}
+
 html, body {
   background: var(--cream-alt);   /* #F2F2F2 — matches live --secondary */
   color: var(--ink);
@@ -239,7 +251,9 @@ h6 {
 /* Containers + section rhythm */
 .section { padding: 6rem 0; }
 @media (max-width: 768px) { .section { padding: 4rem 0; } }
+@media (max-width: 480px) { .section { padding: 3rem 0; } }
 .section-tight { padding: 4rem 0; }
+@media (max-width: 480px) { .section-tight { padding: 2.5rem 0; } }
 .container-x { max-width: 1340px; margin: 0 auto; padding: 0 1rem; }
 .container-narrow { max-width: 880px; margin: 0 auto; padding: 0 1rem; }
 @media (min-width: 640px) {
@@ -416,3 +430,123 @@ h6 {
 .bt-scroll-x::-webkit-scrollbar { height: 8px; width: 8px; }
 .bt-scroll-x::-webkit-scrollbar-thumb { background: rgba(225, 184, 120, 0.45); border-radius: 999px; }
 .bt-scroll-x::-webkit-scrollbar-track { background: transparent; }
+
+/* ─────────────────────────────────────────────────────────────────
+   Accessibility user preferences (set by AccessibilityWidget)
+   Applied via classes on <html> so they cascade everywhere.
+   ───────────────────────────────────────────────────────────────── */
+
+/* Text size — scale the root font-size; rem-based UI scales with it. */
+html.a11y-font-1 { font-size: 112.5%; }
+html.a11y-font-2 { font-size: 125%;   }
+html.a11y-font-3 { font-size: 150%;   }
+
+/* Line height — force a generous leading for easier scanning. */
+html.a11y-line-1, html.a11y-line-1 * { line-height: 1.7 !important; }
+html.a11y-line-2, html.a11y-line-2 * { line-height: 2.1 !important; }
+
+/* Letter / word spacing — helps dyslexia and low-vision readers. */
+html.a11y-track-1, html.a11y-track-1 * {
+  letter-spacing: 0.05em !important;
+  word-spacing: 0.1em !important;
+}
+html.a11y-track-2, html.a11y-track-2 * {
+  letter-spacing: 0.1em !important;
+  word-spacing: 0.2em !important;
+}
+
+/* High contrast — invert the page, then re-invert media so photos look
+   correct. Robust against arbitrary brand colors without hand-listing
+   every selector on the site. */
+html.a11y-contrast {
+  background: #ffffff;
+  filter: invert(1) hue-rotate(180deg);
+}
+html.a11y-contrast img,
+html.a11y-contrast picture,
+html.a11y-contrast video,
+html.a11y-contrast svg,
+html.a11y-contrast canvas,
+html.a11y-contrast iframe {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Light contrast — force pure white background, black text everywhere. */
+html.a11y-contrast-light,
+html.a11y-contrast-light body,
+html.a11y-contrast-light section,
+html.a11y-contrast-light main,
+html.a11y-contrast-light header,
+html.a11y-contrast-light footer,
+html.a11y-contrast-light div,
+html.a11y-contrast-light article,
+html.a11y-contrast-light aside,
+html.a11y-contrast-light nav {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  color: #000000 !important;
+}
+html.a11y-contrast-light p,
+html.a11y-contrast-light h1,
+html.a11y-contrast-light h2,
+html.a11y-contrast-light h3,
+html.a11y-contrast-light h4,
+html.a11y-contrast-light h5,
+html.a11y-contrast-light h6,
+html.a11y-contrast-light span,
+html.a11y-contrast-light li {
+  color: #000000 !important;
+}
+html.a11y-contrast-light a {
+  color: #0000ee !important;
+  text-decoration: underline !important;
+}
+
+/* Monochrome — full grayscale, helps color-blind users. */
+html.a11y-monochrome { filter: grayscale(1) !important; }
+
+/* Low saturation — calmer palette, helps seizure-sensitive visitors. */
+html.a11y-saturate-low { filter: saturate(0.4) !important; }
+
+/* Hide images — declutter for cognitive-load reduction. */
+html.a11y-hide-images img,
+html.a11y-hide-images picture,
+html.a11y-hide-images video,
+html.a11y-hide-images [role="img"],
+html.a11y-hide-images svg:not([data-a11y-keep]) {
+  visibility: hidden !important;
+}
+
+/* Highlight links — bold + always-on underline, including in nav. */
+html.a11y-links a {
+  text-decoration: underline !important;
+  text-underline-offset: 3px;
+  font-weight: 600 !important;
+}
+
+/* Readable font — neutral sans with extra letter and word spacing. */
+html.a11y-readable,
+html.a11y-readable * {
+  font-family: Verdana, Tahoma, Arial, sans-serif !important;
+  letter-spacing: 0.02em !important;
+  word-spacing: 0.05em !important;
+}
+
+/* Reduce motion — neutralize transitions, animations, and smooth scroll. */
+html.a11y-reduce-motion,
+html.a11y-reduce-motion *,
+html.a11y-reduce-motion *::before,
+html.a11y-reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Bigger cursor — yellow-with-black-outline SVG arrow, larger hotspot. */
+html.a11y-big-cursor,
+html.a11y-big-cursor * {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'><path d='M6 4 L6 34 L14 26 L19 38 L24 36 L19 24 L30 24 Z' fill='%23FFEB3B' stroke='%23000000' stroke-width='2' stroke-linejoin='round'/></svg>") 4 4, auto !important;
+}

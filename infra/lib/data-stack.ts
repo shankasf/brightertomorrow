@@ -280,11 +280,11 @@ export class DataStack extends Stack {
       resources: [props.phiKey.keyArn],
     }));
 
-    // ── EventBridge cron: every 2 minutes ────────────────────────────────────
+    // ── EventBridge cron: every 15 minutes ───────────────────────────────────
     const syncRule = new events.Rule(this, "JaneIcalSyncRule", {
       ruleName: "bt-jane-ical-sync-schedule",
-      description: "Trigger bt-jane-ical-sync every 2 minutes to pull iCal data from Jane",
-      schedule: events.Schedule.rate(Duration.minutes(2)),
+      description: "Trigger bt-jane-ical-sync every 15 minutes to pull iCal data from Jane",
+      schedule: events.Schedule.rate(Duration.minutes(15)),
       enabled: true,
     });
     syncRule.addTarget(new targets.LambdaFunction(this.janeIcalSyncFn, {

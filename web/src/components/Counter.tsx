@@ -7,15 +7,23 @@ export default function Counter({
   to,
   prefix = "",
   suffix = "",
-  duration = 1.6,
-}: { to: number; prefix?: string; suffix?: string; duration?: number }) {
+  duration = 2.4,
+  className,
+}: {
+  to: number;
+  prefix?: string;
+  suffix?: string;
+  duration?: number;
+  className?: string;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, margin: "-50px" });
-  const [val, setVal] = useState(0);
+  const [val, setVal] = useState(1);
 
   useEffect(() => {
     if (!inView) return;
-    const controls = animate(0, to, {
+    const from = to >= 1 ? 1 : 0;
+    const controls = animate(from, to, {
       duration,
       ease: [0.16, 1, 0.3, 1],
       onUpdate: (v) => setVal(Math.round(v)),
@@ -26,10 +34,15 @@ export default function Counter({
   return (
     <span
       ref={ref}
-      className="font-display text-4xl md:text-5xl font-bold text-brand tabular-nums tracking-tight"
+      className={
+        className ??
+        "font-display text-4xl md:text-5xl font-bold text-brand tabular-nums tracking-tight"
+      }
       style={{ fontVariantNumeric: "tabular-nums" }}
     >
-      {prefix}{val.toLocaleString()}{suffix}
+      {prefix}
+      {val.toLocaleString()}
+      {suffix}
     </span>
   );
 }

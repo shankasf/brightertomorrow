@@ -13,16 +13,18 @@ export default async function SpecialtiesPage() {
       <section className="bg-cream-alt relative overflow-hidden">
         <div aria-hidden className="absolute inset-0 bg-grid opacity-[0.06]" />
         <div className="container-narrow relative py-20 sm:py-28 lg:py-32 text-center">
-          <span className="eyebrow center">Specialties</span>
-          <h1 className="mt-6 display text-5xl sm:text-6xl lg:text-7xl text-ink">
-            Who we <span className="italic-accent">work with.</span>
-          </h1>
-          <svg aria-hidden viewBox="0 0 200 8" className="mx-auto mt-7 w-36 h-2 text-brand">
-            <path d="M2 5 Q 50 0 100 4 T 198 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-          <p className="mt-7 text-ink-muted text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto">
-            Areas of focus across our collective — find what fits, and we&apos;ll match you to the right clinician.
-          </p>
+          <Reveal>
+            <span className="eyebrow center">Specialties</span>
+            <h1 className="mt-6 display text-4xl sm:text-5xl md:text-6xl lg:text-7xl text-ink">
+              Who we <span className="italic-accent">work with.</span>
+            </h1>
+            <svg aria-hidden viewBox="0 0 200 8" className="mx-auto mt-7 w-36 h-2 text-brand">
+              <path d="M2 5 Q 50 0 100 4 T 198 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <p className="mt-7 text-ink-muted text-lg sm:text-xl leading-relaxed max-w-2xl mx-auto">
+              Areas of focus across our collective — find what fits, and we&apos;ll match you to the right clinician.
+            </p>
+          </Reveal>
         </div>
       </section>
 

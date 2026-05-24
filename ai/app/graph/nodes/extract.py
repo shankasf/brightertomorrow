@@ -343,6 +343,11 @@ def _context_block(state: State) -> str:
     booking = state.get("booking_fields") or {}
     callback = state.get("callback_fields") or {}
     gates = state.get("gates") or {}
+    slots = state.get("proposed_slots") or []
+    slot_lines = "\n".join(
+        f"  [{i}] {s.get('displayPT') or s.get('startISO', '')}"
+        for i, s in enumerate(slots)
+    ) or "  (none)"
     return (
         f"current_intent: {state.get('intent', 'unknown')}\n"
         f"booking_status: {state.get('booking_status', 'none')}\n"
@@ -355,6 +360,7 @@ def _context_block(state: State) -> str:
         f"gates_done: {sorted(k for k, v in gates.items() if v)}\n"
         f"caller_relationship: {state.get('caller_relationship')}\n"
         f"physical_presence_state: {state.get('physical_presence_state')}\n"
+        f"proposed_slots (0-indexed):\n{slot_lines}\n"
     )
 
 
@@ -423,6 +429,11 @@ def _resolve_staff(state: State, deltas) -> dict[str, Any]:
         choice = ELIGIBLE_FOR_BOOKING[idx]
         out["staff_id"] = choice["staffId"]
         out["staff_name"] = choice["name"]
+        # Mark the pick as "open to alternatives" so propose_slots can
+        # fall back to other therapists if this one has no Jane
+        # availability. Without this, a hash-picked therapist with an
+        # empty calendar dead-ends the booking flow.
+        out["_staff_open_to_alternatives"] = True
     return out
 
 
@@ -495,10 +506,17 @@ def _merge_field_deltas(state: State, deltas) -> dict[str, Any]:
     if deltas.info_query:
         update["_info_query"] = deltas.info_query.strip()
 
-    # Selected slot index resolves against the proposed_slots list — done
-    # by the planner / respond, but we stash the index for them to consume.
+    # Selected slot index — resolve against the proposed_slots list so the
+    # planner sees a concrete `selected_slot` and can leave present_slots.
+    # Without this resolution the planner re-routes to present_slots every
+    # turn and the conversation loops.
     if deltas.selected_slot_index is not None:
-        update["_selected_slot_index"] = deltas.selected_slot_index
+        idx = deltas.selected_slot_index
+        slots = state.get("proposed_slots") or []
+        update["_selected_slot_index"] = idx
+        if 0 <= idx < len(slots):
+            update["selected_slot"] = slots[idx]
+            update["booking_status"] = "slot_selected"
 
     return update
 
@@ -644,6 +662,14 @@ def extract(state: State) -> dict[str, Any]:
 
     # Intent: APPLY the delta to sticky intent. "none" means keep prior.
     delta = result.intent_delta
+    # Filter noise during resume-offer reply: the LLM sometimes labels
+    # "yes, keep going" as intent_delta=keep (cancel-rollback meaning),
+    # or a bare hello as intent_delta=greeting. Both clobber the real
+    # prior intent (booking/insurance_check) and torpedo the rest of the
+    # flow. The dedicated resume_decision + affirmation fields already
+    # carry the resume answer; intent must not change on this turn.
+    if state.get("_resume_offer_pending") and delta in {"keep", "greeting", "cancel"}:
+        delta = "none"
     if delta == "none":
         pass
     elif delta == "self_pay":
@@ -654,6 +680,21 @@ def extract(state: State) -> dict[str, Any]:
         "callback", "cancel", "keep", "out_of_scope",
     }:
         update["intent"] = delta
+
+    # Post-verify "want to book now?" — a "yes" reply flips intent to
+    # booking so the planner moves into the booking field collection.
+    # Without this flip intent stays as `insurance_check` and respond
+    # re-renders the post_verify_offer_booking scene every turn,
+    # ignoring the affirmation. The mirror "no" path is handled in
+    # the planner (route to post_verify_declined).
+    if (
+        state.get("intent") == "insurance_check"
+        and state.get("verify_result")
+        and state.get("last_action") == "verify_insurance"
+        and result.affirmation == "yes"
+        and update.get("intent") in (None, "insurance_check")
+    ):
+        update["intent"] = "booking"
 
     # Confidence — pass through to the planner via a transient key so the
     # planner can decide to clarify instead of act on low-confidence.

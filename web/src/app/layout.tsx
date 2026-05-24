@@ -6,6 +6,7 @@ import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import ChatWidget from "@/components/ChatWidget";
 import AccessibilityWidget from "@/components/AccessibilityWidget";
+import { LoggerInit } from "@/components/LoggerInit";
 import { getNav, getSiteSettings } from "@/lib/queries";
 
 // Fonts mirrored from brightertomorrowtherapy.com:
@@ -48,7 +49,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   if (isAdmin) {
     return (
       <html lang="en" className={fontClasses}>
-        <body id="top">{children}</body>
+        <body id="top">
+          <LoggerInit />
+          {children}
+        </body>
       </html>
     );
   }
@@ -62,6 +66,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" className={fontClasses}>
       <body id="top">
+        <LoggerInit />
         <SiteHeader settings={settings} nav={headerNav} />
         <main>{children}</main>
         <SiteFooter settings={settings} nav={footerNav} />

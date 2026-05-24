@@ -9,6 +9,8 @@ import { AuthStack } from "../lib/auth-stack";
 import { ApiStack } from "../lib/api-stack";
 import { ObservabilityStack } from "../lib/observability-stack";
 import { NotificationsRetryStack } from "../lib/notifications-retry-stack";
+import { CostDigestStack } from "../lib/cost-digest-stack";
+import { AppLogsStack } from "../lib/app-logs-stack";
 import { ACCOUNT, REGION, BOOTSTRAP_ADMIN_EMAIL, DDB_GSI1 } from "../lib/constants";
 
 const app = new cdk.App();
@@ -97,6 +99,22 @@ notificationsRetry.addDependency(data);
 // Phase 5 — Admin SPA: removed. admin.brightertomorrowtherapy.cloud now points
 // directly at the Hostinger VM (k3s/Traefik), serving the full Next.js admin
 // from web/src/app/admin/* with cert-manager/LE TLS. No CloudFront.
+
+// Phase 6 — Operational log lake (frontend + gateway + bt-ai → S3 + Athena).
+const appLogs = new AppLogsStack(app, "BtAppLogs", {
+  env,
+  phiKey: security.phiKey,
+});
+appLogs.addDependency(security);
+
+// Phase 7 — Daily AWS cost digest email.
+new CostDigestStack(app, "BtCostDigest", {
+  env,
+  recipientEmail: "sagar@callsphere.ai",
+  fromEmail: "noreply@mail.callsphere.ai",
+  sesFromIdentityArn: `arn:aws:ses:${REGION}:${ACCOUNT}:identity/mail.callsphere.ai`,
+  accountLabel: "BT",
+});
 
 cdk.Tags.of(app).add("project", "brightertomorrowtherapy");
 cdk.Tags.of(app).add("env", "prod");

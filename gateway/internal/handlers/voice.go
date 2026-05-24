@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -122,20 +125,33 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer aiConn.Close()
 
 	// 6. Bidirectional proxy — two goroutines, first error wins.
+	start := time.Now()
+	var c2a, a2c proxyStats
+	slog.Info("voice: bridge open", "session_id", sessionID)
 	errCh := make(chan error, 2)
 
 	// client → AI
 	go func() {
-		errCh <- proxyMessages(clientConn, aiConn)
+		errCh <- proxyMessages(clientConn, aiConn, &c2a)
 	}()
 
 	// AI → client
 	go func() {
-		errCh <- proxyMessages(aiConn, clientConn)
+		errCh <- proxyMessages(aiConn, clientConn, &a2c)
 	}()
 
 	// Wait for the first side to finish (normal close or error).
-	if proxyErr := <-errCh; proxyErr != nil && !isExpectedCloseError(proxyErr) {
+	proxyErr := <-errCh
+	// Always log the bridge close with per-direction frame/byte counts +
+	// duration so a stalled or one-sided proxy is immediately visible.
+	slog.Info("voice: bridge closed",
+		"session_id", sessionID,
+		"duration_s", time.Since(start).Seconds(),
+		"client2ai_frames", c2a.frames.Load(), "client2ai_bytes", c2a.bytes.Load(),
+		"ai2client_frames", a2c.frames.Load(), "ai2client_bytes", a2c.bytes.Load(),
+		"err", fmt.Sprintf("%v", proxyErr),
+	)
+	if proxyErr != nil && !isExpectedCloseError(proxyErr) {
 		slog.Warn("voice: proxy error", "err", proxyErr)
 	}
 
@@ -156,13 +172,27 @@ func (h *VoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	MarkSessionEnded(h.Pool, sessionID)
 }
 
-// proxyMessages reads every message from src and writes it verbatim to dst.
-// It returns when src is closed or an error occurs.
-func proxyMessages(src, dst *websocket.Conn) error {
+// proxyStats accumulates frame/byte counts for ONE direction of a WS proxy.
+// The bridge-close log reads these so we can see exactly how much audio flowed
+// each way — the key signal for isolating "frames reached the gateway but
+// stalled before bt-ai" bugs from pipeline-side issues. Counters are atomic
+// because the two proxy goroutines read/write them concurrently.
+type proxyStats struct {
+	frames atomic.Int64
+	bytes  atomic.Int64
+}
+
+// proxyMessages reads every message from src and writes it verbatim to dst,
+// tallying frames/bytes into st (nil-safe). Returns when src closes or errors.
+func proxyMessages(src, dst *websocket.Conn, st *proxyStats) error {
 	for {
 		msgType, msg, err := src.ReadMessage()
 		if err != nil {
 			return err
+		}
+		if st != nil {
+			st.frames.Add(1)
+			st.bytes.Add(int64(len(msg)))
 		}
 		if err := dst.WriteMessage(msgType, msg); err != nil {
 			return err

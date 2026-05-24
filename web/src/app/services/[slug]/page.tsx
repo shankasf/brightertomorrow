@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import Reveal from "@/components/Reveal";
 import { getServiceBySlug } from "@/lib/queries";
 import { FiArrowLeft, FiArrowUpRight, FiClock, FiShield, FiStar } from "react-icons/fi";
 
@@ -23,9 +24,9 @@ export default async function ServiceDetail({ params }: { params: Promise<{ slug
             <FiArrowLeft /> All services
           </Link>
           <div className="grid lg:grid-cols-12 gap-10 lg:gap-14 items-center">
-            <div className="lg:col-span-7">
+            <Reveal direction="up" className="lg:col-span-7">
               <span className="eyebrow">Service</span>
-              <h1 className="mt-5 display text-5xl sm:text-6xl lg:text-7xl text-ink break-words leading-[1.02]">
+              <h1 className="mt-5 display text-4xl sm:text-5xl md:text-6xl lg:text-7xl text-ink break-words leading-[1.02]">
                 {svc.title}
               </h1>
               <svg aria-hidden viewBox="0 0 200 8" className="mt-6 w-36 h-2 text-brand">
@@ -38,14 +39,14 @@ export default async function ServiceDetail({ params }: { params: Promise<{ slug
                 </Link>
                 <Link href="/services" className="btn-ghost">All services</Link>
               </div>
-            </div>
+            </Reveal>
             {svc.image_url && (
-              <div className="lg:col-span-5">
+              <Reveal direction="right" delay={0.1} className="lg:col-span-5">
                 <div className="relative aspect-[5/4] rounded-4xl overflow-hidden shadow-card border border-surface-line">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={svc.image_url} alt={svc.title} className="w-full h-full object-cover" />
                 </div>
-              </div>
+              </Reveal>
             )}
           </div>
         </div>
@@ -54,7 +55,7 @@ export default async function ServiceDetail({ params }: { params: Promise<{ slug
       {/* Body — main copy + sidebar */}
       <section className="section bg-white">
         <div className="container-x grid lg:grid-cols-12 gap-10 lg:gap-16">
-          <div className="lg:col-span-8">
+          <Reveal className="lg:col-span-8">
             <div className="text-lg leading-[1.85] text-ink-muted break-words whitespace-pre-line">
               {svc.long_desc}
             </div>
@@ -64,9 +65,9 @@ export default async function ServiceDetail({ params }: { params: Promise<{ slug
               </Link>
               <Link href="/team" className="btn-ghost">Meet our therapists</Link>
             </div>
-          </div>
+          </Reveal>
 
-          <aside className="lg:col-span-4">
+          <Reveal direction="left" delay={0.08} className="lg:col-span-4">
             <div className="sticky top-24 space-y-4">
               <div className="rounded-3xl bg-cream border border-surface-line p-7">
                 <span className="eyebrow">At a glance</span>
@@ -117,7 +118,7 @@ export default async function ServiceDetail({ params }: { params: Promise<{ slug
                 </Link>
               </div>
             </div>
-          </aside>
+          </Reveal>
         </div>
       </section>
     </article>

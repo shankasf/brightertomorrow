@@ -18,9 +18,14 @@ langchain-core>=0.3.0
 langchain-openai>=0.3.0
 langsmith>=0.2.0
 
-# --- LiveKit Agents (voice pipeline: STT/LLM/TTS plumbing) -----------------
-# Plugins are used standalone — no LiveKit Room required. Audio I/O
-# rides the existing FastAPI WebSocket bridges (browser PCM16, Twilio mulaw).
+# --- OpenAI Realtime voice (speech-to-speech, gpt-realtime-2) --------------
+# Multi-agent RealtimeRunner graph (bt_agents/realtime/) drives phone +
+# browser voice. Pinned to the snapshot the agent code was written against.
+openai-agents[realtime]==0.17.2
+
+# --- LEGACY cascaded voice pipeline (archived under graph/runtime/legacy_cascaded)
+# Kept installed so the archived Deepgram+Cartesia code stays importable for
+# rollback. Safe to drop once the realtime path is proven in prod.
 livekit-agents[langchain,deepgram,cartesia,silero]>=1.5.0
 
 # audioop is removed in Python 3.13 — provide a shim for the Twilio bridge.

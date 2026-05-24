@@ -294,6 +294,7 @@ class State(TypedDict, total=False):
     _callback_error: str | None       # last submit_callback error
     _cancel_error: str | None         # last cancel_appointment error
     verify_result_next_step: str | None  # post-booking message from Jane
+    insurance_pending_admin: bool     # CLAIM.MD couldn't verify; admin team will follow up. Keeps the booking flow alive so the caller still books a slot.
 
 
 def initial_state(channel: Channel, session_id: str, agent_source: str) -> State:

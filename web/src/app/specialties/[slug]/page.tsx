@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import Reveal from "@/components/Reveal";
 import { getSpecialtyBySlug } from "@/lib/queries";
 import { FiArrowLeft, FiClock, FiShield, FiStar } from "react-icons/fi";
 import MatchTrigger from "./MatchTrigger";
@@ -103,7 +104,7 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
           </Link>
 
           <div className="grid lg:grid-cols-12 gap-10 lg:gap-14 items-center">
-            <div className={sp.image_url ? "lg:col-span-7" : "lg:col-span-12"}>
+            <Reveal direction="up" className={sp.image_url ? "lg:col-span-7" : "lg:col-span-12"}>
               <span className="eyebrow" style={{ color: "#E1B878" }}>Specialty</span>
               <h1
                 className="mt-5 display text-4xl sm:text-5xl lg:text-6xl text-ink break-words leading-[1.05]"
@@ -131,15 +132,15 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
                 </a>
                 <Link href="/contact" className="btn-ghost">Free Consultation</Link>
               </div>
-            </div>
+            </Reveal>
 
             {sp.image_url && (
-              <div className="lg:col-span-5">
+              <Reveal direction="right" delay={0.1} className="lg:col-span-5">
                 <div className="relative aspect-[5/4] rounded-4xl overflow-hidden shadow-card border border-surface-line">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={sp.image_url} alt={sp.title} className="w-full h-full object-cover" />
                 </div>
-              </div>
+              </Reveal>
             )}
           </div>
         </div>
@@ -148,7 +149,8 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
       {/* ───── Body ───── */}
       <section className="section bg-white">
         <div className="container-x grid lg:grid-cols-12 gap-10 lg:gap-16">
-          <div className="lg:col-span-8 space-y-6">
+          <Reveal className="lg:col-span-8">
+           <div className="space-y-6">
             {blocks.map((b, i) => {
               const node = (() => {
                 switch (b.kind) {
@@ -236,9 +238,10 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
               </a>
               <Link href="/team" className="btn-ghost">Meet our therapists</Link>
             </div>
-          </div>
+           </div>
+          </Reveal>
 
-          <aside className="lg:col-span-4">
+          <Reveal direction="left" delay={0.08} className="lg:col-span-4">
             <div className="sticky top-24 space-y-4">
               <div className="rounded-3xl bg-cream border border-surface-line p-7">
                 <span className="eyebrow">At a glance</span>
@@ -287,7 +290,7 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
                 <MatchTrigger />
               </div>
             </div>
-          </aside>
+          </Reveal>
         </div>
       </section>
     </article>

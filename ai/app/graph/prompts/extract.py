@@ -89,7 +89,19 @@ class FieldDeltas(BaseModel):
     )
     selected_slot_index: int | None = Field(
         default=None,
-        description="If the caller picked one of the slots we just offered, the 0-based index (0, 1, 2).",
+        description=(
+            "0-based index into the `proposed_slots` list shown in the "
+            "context block, when the caller picks one. Map the caller's "
+            "phrasing to an index: ordinals (\"the first\"/\"second\"/"
+            "\"third\", \"#2\", \"option 3\") map to 0/1/2; a time or "
+            "day that matches exactly one offered slot maps to that "
+            "slot's index (e.g. caller says \"10:30 Wednesday\" and "
+            "only slot [1] is Wed 10:30 — emit 1). Also accept \"the "
+            "last one\" / \"the earliest\" / \"the latest\" when "
+            "unambiguous. Leave null if the proposed_slots list is "
+            "empty, the caller's pick is ambiguous, or they're asking "
+            "for different times."
+        ),
     )
     time_of_day: Literal["morning", "afternoon", "evening", "any"] | None = None
     earliest_day_offset: int | None = Field(

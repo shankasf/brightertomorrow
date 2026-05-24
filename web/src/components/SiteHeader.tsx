@@ -38,7 +38,19 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
 
   useEffect(() => { setMobileOpen(false); }, [pathname]);
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 12);
+    // Hysteresis: collapse once well past the utility bar; only re-expand near
+    // the very top. Without this, the height change feeds back into scrollY at
+    // the boundary and the bar flickers open/closed.
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const y = window.scrollY;
+        setScrolled((prev) => (prev ? y > 4 : y > 80));
+        ticking = false;
+      });
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);

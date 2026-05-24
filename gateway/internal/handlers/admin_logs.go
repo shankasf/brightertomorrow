@@ -25,6 +25,9 @@ type AdminLogsHandler struct {
 	Pool         *pgxpool.Pool
 	PHI          *phi.Store
 	AIServiceURL string
+	// Athena is the client used by Search (Athena-backed log search across
+	// frontend + gateway + bt-ai). Nil-safe: Search returns 500 if missing.
+	Athena AthenaClient
 }
 
 func (h *AdminLogsHandler) StreamAI(w http.ResponseWriter, r *http.Request) {

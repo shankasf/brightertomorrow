@@ -34,7 +34,19 @@ export const SECRET_TWILIO = "bt/twilio/credentials";
 // S3 bucket for PHI logs written by the s3_phi channel.
 export const PHI_LOGS_BUCKET = "bt-phi-logs";
 
-export const JANE_STAFF_IDS = [71, 47, 24, 21, 34, 53] as const;
+// S3 bucket for operational app logs (frontend + gateway + bt-ai) shipped by
+// Vector. CMK-encrypted, partitioned by service/yyyy/mm/dd/hh, Parquet.
+export const APP_LOGS_BUCKET = "bt-app-logs";
+
+// Glue + Athena names for app-log analytics.
+export const GLUE_LOG_DATABASE = "bt_logs";
+export const GLUE_LOG_TABLE = "app_logs";
+export const ATHENA_LOG_WORKGROUP = "bt-log-search";
+// Per-query scan limit (bytes). 1 GB is plenty for a single search; anything
+// larger would scan years of logs and probably means a missing WHERE clause.
+export const ATHENA_LOG_QUERY_SCAN_LIMIT_BYTES = 1024 * 1024 * 1024;
+
+export const JANE_STAFF_IDS = [71, 47, 24, 21, 34, 53, 59, 16, 45, 66] as const;
 
 export const SECRET_NAMES = {
   CLAIM_MD: "bt/claim-md/account-key",

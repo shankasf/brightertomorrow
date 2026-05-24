@@ -5,101 +5,126 @@ import Counter from "@/components/Counter";
 import AboutIntro from "@/components/AboutIntro";
 import HomeFeatureRow from "@/components/HomeFeatureRow";
 import HomeLocations from "@/components/HomeLocations";
-import PressMentionSection from "@/components/PressMention";
 import AppointmentSection from "@/components/AppointmentSection";
 import HomeFaqs from "@/components/HomeFaqs";
 import FirstStepCta from "@/components/FirstStepCta";
-import NotSureWhereToStart from "@/components/NotSureWhereToStart";
-import FreeResources from "@/components/FreeResources";
 import PodcastSection from "@/components/PodcastSection";
-import HomeMaps from "@/components/HomeMaps";
 import {
-  getBlogPosts, getFaqs, getFreeResources, getLocations, getPodcast,
-  getPressMentions, getServices, getSiteSettings, getStats, getTestimonials,
+  getBlogPosts,
+  getFaqs,
+  getLocations,
+  getPodcast,
+  getServices,
+  getSiteSettings,
+  getStats,
 } from "@/lib/queries";
 import { FiArrowUpRight } from "react-icons/fi";
 
+/**
+ * Cloud homepage — pixel-parity mirror of brightertomorrowtherapy.com home.
+ *
+ * Section order (matches .com):
+ *   1.  Hero (slideshow + headline + CTAs)
+ *   2.  3-card row  (Customer Service / Service Areas / Journal)
+ *   3.  About + Licensed Specialists / Holistic Approach
+ *   4.  Stats strip (Years / Patients / Mental Healing / Therapists)
+ *   5.  Specialties wine band (circle thumbs)
+ *   6.  Two Locations wine band
+ *   7.  First Step CTA (gray photo)
+ *   8.  Have Questions? — FAQ accordion
+ *   9.  Appointment (form + info)
+ *  10.  Podcast wine band
+ *  11.  Blog wine band
+ *
+ * Header + footer are handled in app/layout.tsx.
+ */
+
+const WINE = "#66202A";
+const GOLD = "#E1B878";
+const INK = "#192735";
+
 export default async function HomePage() {
-  const [
-    settings, services, stats, testimonials, posts, locations, press, faqs,
-    podcast, resources,
-  ] = await Promise.all([
-    getSiteSettings(),
-    getServices(),                  // show all 8 in 2x4 like the original
-    getStats(),
-    getTestimonials(),
-    getBlogPosts(3),
-    getLocations(),
-    getPressMentions(),
-    getFaqs(),
-    getPodcast(),
-    getFreeResources(),
-  ]);
+  const [settings, services, stats, posts, locations, podcast, faqs] =
+    await Promise.all([
+      getSiteSettings(),
+      getServices(), // show all in the specialties grid
+      getStats(),
+      getBlogPosts(3),
+      getLocations(),
+      getPodcast(),
+      getFaqs(),
+    ]);
+
+  // Only show first 5 FAQs on the homepage (matches .com home preview).
+  const homeFaqs = faqs.slice(0, 5);
 
   return (
     <>
+      {/* 1. HERO */}
       <Hero settings={settings} />
 
-      {/* 3-card row: Customer Service / Service Areas / Journal — matches live */}
+      {/* 2. 3-card row */}
       <HomeFeatureRow settings={settings} />
 
-      {/* About + 4-col stats */}
+      {/* 3. About + features */}
       <AboutIntro />
 
-      {/* Stats strip — gold accent on cream (matches live's About-section stats row) */}
-      <section className="bg-cream-alt relative overflow-hidden border-y border-surface-line">
-        <div className="container-x grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 py-12 sm:py-14 text-center relative">
+      {/* 4. Stats strip — wine band exactly like .com */}
+      <section
+        className="relative overflow-hidden"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(102,32,42,0.85), rgba(102,32,42,0.9)), url('/images/home/about-bg.jpg')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      >
+        <div className="container-x grid grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8 py-16 sm:py-20 text-center">
           {stats.map((st) => (
-            <div key={st.id}>
+            <Reveal key={st.id} direction="up">
               <div
-                className="text-3xl sm:text-4xl md:text-5xl font-display font-bold"
-                style={{ color: "#66202A" }}
+                className="text-4xl sm:text-5xl md:text-6xl font-display font-bold"
+                style={{ color: GOLD }}
               >
                 <Counter to={Number(st.value)} suffix={st.suffix ?? ""} />
               </div>
-              <div
-                className="text-xs sm:text-sm uppercase tracking-[0.16em] mt-2 font-semibold"
-                style={{ color: "#E1B878" }}
-              >
+              <div className="text-xs sm:text-sm uppercase tracking-[0.18em] mt-3 font-semibold text-white/90">
                 {st.label}
               </div>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
-      {/* Services / Specialties — wine band matching live (#66202A) — circle images */}
+      {/* 5. Specialties — wine band w/ circle thumbs */}
       <section
         className="section relative overflow-hidden"
-        style={{ backgroundColor: "#66202A" }}
+        style={{ backgroundColor: WINE }}
       >
         <div className="container-x">
           <Reveal>
-            <div className="text-center max-w-2xl mx-auto mb-12 sm:mb-16">
-              <span
-                className="eyebrow center"
-                style={{ color: "#E1B878" }}
+            <div className="text-center max-w-3xl mx-auto mb-12 sm:mb-16">
+              <p
+                className="font-script italic text-[20px] sm:text-[24px]"
+                style={{ color: GOLD }}
               >
                 Our Specialities
-              </span>
-              <h2 className="mt-5 display text-4xl sm:text-5xl md:text-6xl text-white">
-                How Our Therapists Can{" "}
-                <span className="italic-accent" style={{ color: "#E1B878" }}>
-                  Help.
-                </span>
+              </p>
+              <h2 className="mt-3 font-display font-bold text-[32px] sm:text-[40px] lg:text-[45px] text-white leading-[1.15]">
+                How Our Therapists in Las Vegas and North Las Vegas, NV, Can
+                Help
               </h2>
               <p
                 className="mt-5 text-base sm:text-lg leading-relaxed"
                 style={{ color: "rgba(255,255,255,0.85)" }}
               >
-                At Brighter Tomorrow, every individual&rsquo;s journey is unique.
-                Our collective is designed to meet you inside your story —
-                explore our areas of specialty below.
+                At Brighter Tomorrow, we understand that every
+                individual&rsquo;s journey is unique.
               </p>
             </div>
           </Reveal>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-8">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
             {services.map((s, i) => (
               <Reveal key={s.id} delay={i * 0.04}>
                 <Link
@@ -107,9 +132,7 @@ export default async function HomePage() {
                   className="group relative flex flex-col h-full items-center text-center px-4 py-6 sm:py-8 hover:-translate-y-1 transition-all duration-500"
                 >
                   {s.image_url ? (
-                    <div
-                      className="relative w-40 sm:w-44 md:w-48 aspect-square rounded-full overflow-hidden ring-4 ring-white/20 group-hover:ring-[#E1B878]/70 transition-all duration-500 shadow-card"
-                    >
+                    <div className="relative w-40 sm:w-44 md:w-48 aspect-square rounded-full overflow-hidden ring-4 ring-white/15 group-hover:ring-[color:#E1B878]/70 transition-all duration-500 shadow-card">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={s.image_url}
@@ -118,7 +141,7 @@ export default async function HomePage() {
                       />
                     </div>
                   ) : (
-                    <div className="w-40 sm:w-44 md:w-48 aspect-square rounded-full bg-white/10 ring-4 ring-white/20 grid place-items-center">
+                    <div className="w-40 sm:w-44 md:w-48 aspect-square rounded-full bg-white/10 ring-4 ring-white/15 grid place-items-center">
                       <span className="font-display text-4xl text-white/70">
                         {s.title.slice(0, 1)}
                       </span>
@@ -127,7 +150,7 @@ export default async function HomePage() {
 
                   <span
                     className="mt-6 text-[11px] font-semibold uppercase tracking-[0.18em] tabular"
-                    style={{ color: "#E1B878" }}
+                    style={{ color: GOLD }}
                   >
                     {String(i + 1).padStart(2, "0")}
                   </span>
@@ -144,7 +167,7 @@ export default async function HomePage() {
                   )}
                   <span
                     className="mt-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em]"
-                    style={{ color: "#E1B878" }}
+                    style={{ color: GOLD }}
                   >
                     Read more
                     <FiArrowUpRight className="transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-0.5" />
@@ -156,109 +179,70 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Not sure where to start — matching tool CTA */}
-      <NotSureWhereToStart />
-
-      {/* Locations */}
+      {/* 6. Two Locations — wine band */}
       <HomeLocations locations={locations} />
 
-      {/* Press mentions / Featured In (enlarged editorial layout) */}
-      <PressMentionSection mentions={press} />
-
-      {/* Testimonials — editorial 2-up */}
-      <section className="section bg-cream-alt relative overflow-hidden">
-        <div className="container-x">
-          <Reveal>
-            <div className="text-center max-w-2xl mx-auto mb-14">
-              <span className="eyebrow center">Client voices</span>
-              <h2 className="mt-5 display text-4xl sm:text-5xl md:text-6xl text-ink">
-                What clients are <span className="italic-accent">saying.</span>
-              </h2>
-            </div>
-          </Reveal>
-          <div className="grid md:grid-cols-2 gap-6 lg:gap-8">
-            {testimonials.map((t, i) => (
-              <Reveal key={t.id} delay={i * 0.06}>
-                <figure className="relative bg-white rounded-4xl border border-surface-line p-8 sm:p-10 lg:p-12 h-full flex flex-col shadow-soft hover:shadow-card transition-all duration-500">
-                  <span
-                    aria-hidden
-                    className="absolute -top-4 left-8 sm:left-12 font-display text-7xl sm:text-8xl text-brand leading-none select-none"
-                    style={{ fontStyle: "italic" }}
-                  >
-                    “
-                  </span>
-                  <div className="text-amber-400 text-base mt-4">★★★★★</div>
-                  <blockquote className="font-display italic text-2xl sm:text-3xl mt-5 leading-[1.35] text-ink flex-1 tracking-tight">
-                    {t.quote}
-                  </blockquote>
-                  <figcaption className="flex items-center gap-4 mt-8 pt-6 border-t border-surface-line">
-                    <div className="w-12 h-12 rounded-full bg-sage-100 text-sage-700 grid place-items-center font-display font-semibold text-base">
-                      {initials(t.author)}
-                    </div>
-                    <div>
-                      <div className="font-display text-base text-ink">{t.author}</div>
-                      <div className="text-xs text-ink-soft uppercase tracking-[0.18em] mt-0.5">Verified client</div>
-                    </div>
-                  </figcaption>
-                </figure>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* "First Step Is Choosing to Take It." gray CTA — matches live */}
+      {/* 7. First Step CTA — gray photo */}
       <FirstStepCta />
 
-      {/* FAQ accordion */}
-      <HomeFaqs faqs={faqs} />
+      {/* 8. Have Questions? — FAQ accordion (gold-italic eyebrow like .com) */}
+      <section className="section bg-white">
+        <div className="container-narrow text-center mb-12 sm:mb-14">
+          <Reveal>
+            <p
+              className="font-script italic text-[20px] sm:text-[24px]"
+              style={{ color: GOLD }}
+            >
+              Have Questions?
+            </p>
+            <h2
+              className="mt-3 font-display font-bold text-[32px] sm:text-[40px] lg:text-[45px] leading-[1.15]"
+              style={{ color: INK }}
+            >
+              Frequently Asked Questions
+            </h2>
+          </Reveal>
+        </div>
+        <HomeFaqs faqs={homeFaqs} />
+      </section>
 
-      {/* Contact / appointment */}
+      {/* 9. Appointment */}
       <AppointmentSection settings={settings} locations={locations} />
 
-      {/* Free resources */}
-      <FreeResources resources={resources} />
-
-      {/* Podcast */}
+      {/* 10. Podcast wine band */}
       <PodcastSection podcast={podcast} />
 
-      {/* Blog preview — wine band matching live */}
+      {/* 11. Blog wine band */}
       <section
         className="section relative overflow-hidden"
-        style={{ backgroundColor: "#66202A" }}
+        style={{ backgroundColor: WINE }}
       >
         <div className="container-x">
           <Reveal>
-            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mb-12">
-              <div>
-                <span className="eyebrow" style={{ color: "#E1B878" }}>
-                  Our Blog
-                </span>
-                <h2 className="mt-4 display text-4xl sm:text-5xl md:text-6xl text-white">
-                  Blog &amp;{" "}
-                  <span className="italic-accent" style={{ color: "#E1B878" }}>
-                    Articles.
-                  </span>
-                </h2>
-              </div>
-              <Link
-                href="/blog"
-                className="inline-flex items-center gap-2 text-white border border-white/40 hover:bg-white hover:text-ink px-6 py-3.5 font-semibold uppercase tracking-[0.12em] text-[0.78rem] transition shrink-0"
-                style={{ borderRadius: "20px 0 20px 20px" }}
+            <div className="text-center max-w-2xl mx-auto mb-12">
+              <p
+                className="font-script italic text-[20px] sm:text-[24px]"
+                style={{ color: GOLD }}
               >
-                View all articles <FiArrowUpRight />
-              </Link>
+                Our Blog
+              </p>
+              <h2 className="mt-3 font-display font-bold text-[32px] sm:text-[40px] lg:text-[45px] text-white leading-[1.15]">
+                Highlighting Thoughtful Reflections and Expert Insights for
+                Mental Well-Being
+              </h2>
             </div>
           </Reveal>
+
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
             {posts.map((p, i) => (
               <Reveal key={p.id} delay={i * 0.06}>
                 <Link
                   href={`/blog/${p.slug}`}
-                  className="group flex flex-col h-full overflow-hidden"
+                  className="group flex flex-col h-full overflow-hidden transition hover:-translate-y-1 duration-500"
                   style={{
-                    backgroundColor: "#F4F4F4",
-                    borderRadius: "20px 0 20px 20px",
+                    backgroundColor: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(225,184,120,0.25)",
+                    borderRadius: "30px 0 30px 30px",
                   }}
                 >
                   {p.cover_url && (
@@ -272,21 +256,28 @@ export default async function HomePage() {
                     </div>
                   )}
                   <div className="p-6 flex-1 flex flex-col">
-                    <div
-                      className="text-[10px] font-semibold uppercase tracking-[0.18em]"
-                      style={{ color: "#E1B878" }}
-                    >
-                      {new Date(p.published_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                    </div>
-                    <h3 className="mt-3 font-display text-xl text-ink break-words leading-snug">
+                    <h3 className="font-display text-lg sm:text-xl text-white break-words leading-snug">
                       {p.title}
                     </h3>
-                    <p className="text-sm text-ink-soft mt-3 flex-1 leading-relaxed">{p.excerpt}</p>
+                    <div
+                      className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em]"
+                      style={{ color: GOLD }}
+                    >
+                      Brighter Tomorrow ·{" "}
+                      {new Date(p.published_at).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </div>
+                    <p className="text-sm text-white/80 mt-4 flex-1 leading-relaxed">
+                      {p.excerpt}
+                    </p>
                     <span
                       className="mt-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em]"
-                      style={{ color: "#66202A" }}
+                      style={{ color: GOLD }}
                     >
-                      Read article
+                      Read more
                       <FiArrowUpRight className="transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-0.5" />
                     </span>
                   </div>
@@ -294,15 +285,24 @@ export default async function HomePage() {
               </Reveal>
             ))}
           </div>
+
+          <Reveal delay={0.15}>
+            <div className="mt-12 flex justify-center">
+              <Link
+                href="/blog"
+                className="inline-block font-display font-bold tracking-[0.15em] text-[13px] uppercase px-8 py-4 transition hover:opacity-90"
+                style={{
+                  backgroundColor: GOLD,
+                  color: INK,
+                  borderRadius: "30px 0 30px 30px",
+                }}
+              >
+                View All Blog
+              </Link>
+            </div>
+          </Reveal>
         </div>
       </section>
-
-      {/* Google Maps — both physical offices */}
-      <HomeMaps />
     </>
   );
-}
-
-function initials(name: string): string {
-  return name.split(/\s+/).map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 }

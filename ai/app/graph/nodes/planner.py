@@ -246,7 +246,22 @@ def planner(state: State) -> str:
     if ins_outcome and state.get("verify_result"):
         # Only branch on outcome if we're still in the booking/insurance flow
         # and haven't moved past the outcome yet (check if we have proposed_slots).
-        if intent in ("booking", "insurance_check") and not state.get("proposed_slots"):
+        # Skip re-routing if we already presented the downstream scene — the
+        # dedicated affirmation handlers further down own the caller's reply
+        # (e.g. self_pay_offer_yes/no). Without this guard the caller would
+        # stay pinned on offer_self_pay every turn no matter what they said.
+        already_routed = state.get("last_action") in (
+            "offer_self_pay",
+            "capture_self_pay_consent",
+            "handoff_admin_verification",
+            "handoff_admin_with_note",
+            "handoff_admin_callback",
+        ) or bool(state.get("insurance_pending_admin"))
+        if (
+            intent in ("booking", "insurance_check")
+            and not state.get("proposed_slots")
+            and not already_routed
+        ):
             if ins_outcome not in ("eligible",):
                 return _route_after_insurance(state)
 
@@ -293,6 +308,27 @@ def planner(state: State) -> str:
         if aff == "no":
             return _route(state, N.HANDOFF_ADMIN_CALLBACK, "self_pay_offer_no")
 
+    # Post-verify offer affirmation. After verify_insurance returned an
+    # `eligible` outcome on an insurance_check flow, respond showed the
+    # "your plan is active — want to book now?" scene. yes/no here must
+    # change the flow; otherwise step 14 below re-renders the same offer
+    # every turn no matter what the caller says (extract correctly sets
+    # affirmation but the planner ignored it).
+    #
+    # The "yes" path relies on extract flipping intent from
+    # `insurance_check` to `booking` (it does), so by the time we get
+    # here intent will already be "booking" — no extra branch needed
+    # for yes. The "no" path needs an explicit terminal route so the
+    # caller doesn't get pinned on the offer.
+    if (
+        intent == "insurance_check"
+        and state.get("verify_result")
+        and bs == "none"
+        and state.get("last_action") == "verify_insurance"
+        and aff == "no"
+    ):
+        return _route(state, N.RESPOND, "post_verify_declined")
+
     # ---- 10. Cancel intent on booked appointment -----------------------
     if intent == "cancel" and bs == "booked":
         return _route(state, N.RESPOND, "ask_cancel_confirm")
@@ -316,7 +352,13 @@ def planner(state: State) -> str:
         return _route(state, N.RESPOND, "callback_ask_field")
 
     # ---- 14. Booking / insurance-check flow ---------------------------
-    if intent in ("booking", "insurance_check"):
+    # If we're already mid-booking (verified insurance, selected slot,
+    # pending confirmation, etc.) treat intent as booking regardless of
+    # what the LLM extractor most recently said. Stale/noisy intent
+    # classifications would otherwise dump us back to greeting_or_open
+    # and re-ask everything.
+    mid_booking = bs in ("collecting", "ready_for_slots", "slot_selected", "pending_confirm")
+    if intent in ("booking", "insurance_check") or mid_booking:
         if state.get("payment_path") != "self_pay" and not insurance_complete(state):
             return _route(state, N.RESPOND, "ask_insurance_field")
         if needs_verification(state):
@@ -328,6 +370,11 @@ def planner(state: State) -> str:
         if not state.get("staff_id"):
             return _route(state, N.RESPOND, "ask_therapist")
         if not state.get("proposed_slots"):
+            # propose_slots already ran and found nothing across the
+            # entire roster — escalate to an admin callback instead of
+            # looping back into propose forever.
+            if state.get("last_action") == "propose_slots_no_availability":
+                return _route(state, N.HANDOFF_ADMIN_CALLBACK, "no_calendar_availability")
             return _route(state, N.PROPOSE, "need_slots")
         if not state.get("selected_slot"):
             return _route(state, N.RESPOND, "present_slots")

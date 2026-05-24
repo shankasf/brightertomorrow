@@ -9,6 +9,7 @@ per-event log line is the structured summary at the end of each staffId run.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -107,6 +108,27 @@ def _parse_events(raw: bytes, event_type: str) -> List[Dict[str, Any]]:
     return events
 
 
+def _content_hash(ev: Dict[str, Any]) -> str:
+    """Stable hash over the fields a re-poll might change.
+
+    fetchedAt and ttl are excluded — they drift every run by design.
+    """
+    payload = json.dumps(
+        {
+            "startISO": ev["startISO"],
+            "endISO": ev["endISO"],
+            "summary": ev["summary"],
+            "description": ev["description"],
+            "location": ev["location"],
+            "status": ev["status"],
+            "type": ev["type"],
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _ttl_from_end_iso(end_iso: str) -> int:
     """epoch seconds = endISO + 90 days."""
     try:
@@ -116,8 +138,13 @@ def _ttl_from_end_iso(end_iso: str) -> int:
     return int((dt + timedelta(seconds=TTL_EXTENSION_SECONDS)).timestamp())
 
 
-def _sync_staff(staff_id: int, table: Any) -> Tuple[int, int, int]:
-    """Sync one staff member. Returns (appts_upserted, shifts_upserted, deleted)."""
+def _sync_staff(staff_id: int, table: Any) -> Tuple[int, int, int, int]:
+    """Sync one staff member.
+
+    Returns (appts_fetched, shifts_fetched, written, deleted). Rows whose
+    contentHash already matches Jane are skipped — the dominant cost driver
+    when the schedule re-polls unchanged calendars.
+    """
     secret = _get_secret(staff_id)
     appts_url: str = secret["apptsUrl"]
     shifts_url: str = secret["shiftsUrl"]
@@ -137,12 +164,41 @@ def _sync_staff(staff_id: int, table: Any) -> Tuple[int, int, int]:
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     seen_uids: Set[str] = set()
 
-    # Upsert all events
+    # Single pass over existing rows for this staff member. We need this scan
+    # anyway for orphan deletion below — adding contentHash to the projection
+    # lets the upsert loop skip no-op puts at zero extra read cost.
+    existing_hash: Dict[str, str] = {}  # sk -> contentHash
+    existing_rows: List[Dict[str, Any]] = []
+    paginator_kwargs: Dict[str, Any] = {
+        "KeyConditionExpression": "pk = :pk",
+        "ExpressionAttributeValues": {":pk": pk},
+        "ProjectionExpression": "pk, sk, uid, endISO, contentHash",
+    }
+    last_key = None
+    while True:
+        if last_key:
+            paginator_kwargs["ExclusiveStartKey"] = last_key
+        resp = table.query(**paginator_kwargs)
+        for row in resp.get("Items", []):
+            existing_rows.append(row)
+            sk_val = row.get("sk")
+            h = row.get("contentHash")
+            if sk_val and h:
+                existing_hash[sk_val] = h
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+
+    # Upsert only changed events.
+    written = 0
     with table.batch_writer() as batch:
         for ev in all_events:
             uid = ev["uid"]
             seen_uids.add(uid)
             sk = f"{ev['type']}#{ev['startISO']}#{uid}"
+            content_hash = _content_hash(ev)
+            if existing_hash.get(sk) == content_hash:
+                continue
             item: Dict[str, Any] = {
                 "pk": pk,
                 "sk": sk,
@@ -155,41 +211,24 @@ def _sync_staff(staff_id: int, table: Any) -> Tuple[int, int, int]:
                 "location": ev["location"],
                 "status": ev["status"],
                 "uid": uid,
+                "contentHash": content_hash,
                 "fetchedAt": fetched_at,
                 "ttl": _ttl_from_end_iso(ev["endISO"]),
             }
             batch.put_item(Item=item)
+            written += 1
 
-    # Delete orphaned future events (Jane removed/moved them)
-    # Query existing rows for this staffId, filter those not in seen_uids
-    # and whose endISO is in the future.
+    # Delete orphaned future events (Jane removed/moved them).
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     deleted = 0
+    for row in existing_rows:
+        row_uid = row.get("uid", "")
+        row_end = row.get("endISO", "")
+        if row_uid not in seen_uids and row_end > now_iso:
+            table.delete_item(Key={"pk": row["pk"], "sk": row["sk"]})
+            deleted += 1
 
-    paginator_kwargs: Dict[str, Any] = {
-        "KeyConditionExpression": "pk = :pk",
-        "ExpressionAttributeValues": {":pk": pk},
-        "ProjectionExpression": "pk, sk, uid, endISO",
-    }
-
-    # Manual pagination (DDB resource doesn't expose a paginator directly)
-    last_key = None
-    while True:
-        if last_key:
-            paginator_kwargs["ExclusiveStartKey"] = last_key
-        resp = table.query(**paginator_kwargs)
-        for row in resp.get("Items", []):
-            row_uid = row.get("uid", "")
-            row_end = row.get("endISO", "")
-            # Only delete if: uid gone from feed AND event is in the future
-            if row_uid not in seen_uids and row_end > now_iso:
-                table.delete_item(Key={"pk": row["pk"], "sk": row["sk"]})
-                deleted += 1
-        last_key = resp.get("LastEvaluatedKey")
-        if not last_key:
-            break
-
-    return len(appts), len(shifts), deleted
+    return len(appts), len(shifts), written, deleted
 
 
 # ── Lambda entry point ───────────────────────────────────────────────────────
@@ -202,18 +241,27 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     for staff_id in STAFF_IDS:
         t0 = time.monotonic()
         try:
-            appts, shifts, deleted = _sync_staff(staff_id, table)
+            appts, shifts, written, deleted = _sync_staff(staff_id, table)
             duration_ms = int((time.monotonic() - t0) * 1000)
             # Structured log — no PHI content
             log.info(json.dumps({
                 "staffId": staff_id,
                 "appts": appts,
                 "shifts": shifts,
+                "written": written,
+                "skipped": (appts + shifts) - written,
                 "deleted": deleted,
                 "durationMs": duration_ms,
                 "status": "ok",
             }))
-            results.append({"staffId": staff_id, "ok": True, "appts": appts, "shifts": shifts, "deleted": deleted})
+            results.append({
+                "staffId": staff_id,
+                "ok": True,
+                "appts": appts,
+                "shifts": shifts,
+                "written": written,
+                "deleted": deleted,
+            })
         except Exception as exc:
             duration_ms = int((time.monotonic() - t0) * 1000)
             # Log error without PHI — exc may contain URL fragment but not patient data

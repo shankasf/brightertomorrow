@@ -8,8 +8,31 @@ type Msg = { role: "user" | "assistant"; content: string };
 
 // Marker the booking agent emits when it asks for insurance — the widget
 // strips it out and renders an in-line dropdown of payer names. Mirror of
-// `INSURANCE_PICKER_MARKER` in ai/app/bt_agents/booking_agent.py.
+// the `[[INSURANCE_PICKER]]` constant in ai/app/graph/prompts/scenes.py.
 const INSURANCE_PICKER_MARKER = "[[INSURANCE_PICKER]]";
+
+// Mirror of the `[[THERAPIST_PICKER]]` marker in the ask_therapist scene
+// (ai/app/graph/prompts/scenes.py). Same widget pattern as insurance —
+// the LLM puts the marker on its own line, we strip it from the bubble
+// text and render a dropdown of full names.
+const THERAPIST_PICKER_MARKER = "[[THERAPIST_PICKER]]";
+
+// Display labels mirror THERAPISTS_WITH_FEEDS in ai/app/data/roster.py.
+// "Any therapist" sits at the top — the agent treats it as "no preference,
+// pick the soonest slot across the roster".
+const THERAPIST_OPTIONS: string[] = [
+  "Any therapist",
+  "Sagar Shankaran",
+  "Elisia Danley",
+  "Keunshea Fleming",
+  "Alayna Hammond",
+  "Christie Johnson",
+  "Janelle Thompson",
+  "Samara Cobb",
+  "Joanne Tran",
+  "Jordan Fuller",
+  "Monica Gonzalez",
+];
 
 // Display names mirror `PAYERS` in ai/app/data/payers.py — the source of
 // truth on the backend. The dropdown is ergonomic only; the agent will
@@ -647,24 +670,34 @@ export default function ChatWidget() {
               </div>
             </div>
 
-            <div ref={scroller} className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2 bg-surface min-w-0">
+            <div ref={scroller} className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 bg-gradient-to-b from-surface to-white min-w-0">
               {msgs.map((m, i) => {
-                // Only let the LAST assistant message render an interactive
-                // picker — older ones get the marker stripped but no dropdown,
-                // so visitors can't re-submit a stale choice.
+                // Group consecutive same-sender messages: the LAST one in
+                // a cluster carries the "tail" corner + (for assistants)
+                // the avatar; earlier ones lose those flourishes so the
+                // chain reads as one continuous thought.
                 const isLast = i === msgs.length - 1;
+                const prev = msgs[i - 1];
+                const next = msgs[i + 1];
+                const isFirstInGroup = !prev || prev.role !== m.role;
+                const isLastInGroup = !next || next.role !== m.role;
                 return (
                   <Bubble
                     key={i}
                     role={m.role}
                     content={m.content}
+                    isFirstInGroup={isFirstInGroup}
+                    isLastInGroup={isLastInGroup}
+                    isLastOverall={isLast}
                     onPickInsurance={isLast && !loading ? (name) => void send(name) : undefined}
+                    onPickTherapist={isLast && !loading ? (name) => void send(name) : undefined}
                   />
                 );
               })}
               {loading && (
-                <div className="flex justify-start">
-                  <div className="bg-white text-ink rounded-2xl rounded-bl-sm px-3 py-2 text-sm border border-surface-line">
+                <div className="flex items-end gap-2 mt-1">
+                  <AssistantAvatar />
+                  <div className="bg-white text-ink rounded-2xl rounded-bl-md px-3.5 py-2.5 text-sm border border-surface-line shadow-sm">
                     <Typing />
                   </div>
                 </div>
@@ -787,35 +820,123 @@ export default function ChatWidget() {
   );
 }
 
+function AssistantAvatar({ hidden = false }: { hidden?: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className={`shrink-0 grid place-items-center w-7 h-7 rounded-full bg-gradient-to-br from-brand to-brand-600 text-white text-[10.5px] font-display font-bold tracking-tight shadow-sm ring-1 ring-brand-700/20 ${
+        hidden ? "invisible" : ""
+      }`}
+    >
+      BT
+    </div>
+  );
+}
+
 function Bubble({
   role,
   content,
+  isFirstInGroup,
+  isLastInGroup,
+  isLastOverall,
   onPickInsurance,
+  onPickTherapist,
 }: {
   role: "user" | "assistant";
   content: string;
+  isFirstInGroup: boolean;
+  isLastInGroup: boolean;
+  isLastOverall: boolean;
   onPickInsurance?: (name: string) => void;
+  onPickTherapist?: (name: string) => void;
 }) {
   const isUser = role === "user";
-  const hasPicker = !isUser && content.includes(INSURANCE_PICKER_MARKER);
-  const visibleText = hasPicker
-    ? content.split(INSURANCE_PICKER_MARKER).join("").replace(/\n{3,}/g, "\n\n").trim()
-    : content;
+  const hasInsurancePicker = !isUser && content.includes(INSURANCE_PICKER_MARKER);
+  const hasTherapistPicker = !isUser && content.includes(THERAPIST_PICKER_MARKER);
+  const visibleText = (() => {
+    if (isUser) return content;
+    let t = content;
+    if (hasInsurancePicker) t = t.split(INSURANCE_PICKER_MARKER).join("");
+    if (hasTherapistPicker) t = t.split(THERAPIST_PICKER_MARKER).join("");
+    return t.replace(/\n{3,}/g, "\n\n").trim();
+  })();
+
+  // Asymmetric radii: tight on the "tail" side only for the last bubble in
+  // a same-sender cluster, gentle on all other corners so grouped messages
+  // read as one flow rather than a wall of identical pills.
+  const tail = isUser
+    ? isLastInGroup
+      ? "rounded-br-md"
+      : "rounded-br-2xl"
+    : isLastInGroup
+    ? "rounded-bl-md"
+    : "rounded-bl-2xl";
+
+  // Vertical rhythm: tight inside a cluster, wider between clusters.
+  const groupSpacing = isFirstInGroup ? "mt-3 first:mt-0" : "mt-1";
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <motion.div
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18, ease: "easeOut" }}
+      className={`flex items-end gap-2 ${groupSpacing} ${isUser ? "justify-end" : "justify-start"}`}
+    >
+      {!isUser && (
+        // Avatar only on the last bubble in a cluster; earlier ones reserve
+        // the same width with an invisible placeholder so bubble edges align.
+        isLastInGroup ? <AssistantAvatar /> : <AssistantAvatar hidden />
+      )}
       <div
-        className={`max-w-[88%] sm:max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-[1.6] tracking-[-0.005em] break-words [overflow-wrap:anywhere] shadow-sm ${
+        className={`max-w-[82%] sm:max-w-[80%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-[1.6] tracking-[-0.005em] break-words [overflow-wrap:anywhere] ${tail} ${
           isUser
-            ? "bg-brand text-white rounded-br-sm font-medium"
-            : "bg-white text-ink rounded-bl-sm border border-surface-line"
+            ? "bg-gradient-to-br from-brand to-brand-600 text-white font-medium shadow-[0_2px_8px_-2px_rgba(var(--brand-rgb,124,99,182),0.35)]"
+            : "bg-white text-ink border border-surface-line shadow-[0_1px_2px_rgba(15,23,42,0.04),0_2px_8px_-4px_rgba(15,23,42,0.06)]"
         }`}
       >
-        {isUser ? <span className="whitespace-pre-wrap">{content}</span> : <RichMarkdown text={visibleText} />}
-        {hasPicker && onPickInsurance && (
+        {isUser ? (
+          <span className="whitespace-pre-wrap">{content}</span>
+        ) : (
+          <RichMarkdown text={visibleText} />
+        )}
+        {hasInsurancePicker && onPickInsurance && isLastOverall && (
           <InsurancePicker onPick={onPickInsurance} />
         )}
+        {hasTherapistPicker && onPickTherapist && isLastOverall && (
+          <TherapistPicker onPick={onPickTherapist} />
+        )}
       </div>
+    </motion.div>
+  );
+}
+
+function TherapistPicker({ onPick }: { onPick: (name: string) => void }) {
+  return (
+    <div className="mt-2.5">
+      <label
+        htmlFor="bt-therapist-picker"
+        className="block text-[11px] uppercase tracking-[0.08em] text-ink-soft mb-1"
+      >
+        Choose your therapist
+      </label>
+      <select
+        id="bt-therapist-picker"
+        defaultValue=""
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v) onPick(v);
+        }}
+        className="w-full px-3 py-2 rounded-lg border border-surface-line bg-white text-sm text-ink focus:outline-none focus:border-brand"
+      >
+        <option value="" disabled>
+          Select a therapist…
+        </option>
+        {THERAPIST_OPTIONS.map((name, i) => (
+          <option key={name} value={name}>
+            {name}{i === 0 ? " (soonest available)" : ""}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -852,20 +973,22 @@ function InsurancePicker({ onPick }: { onPick: (name: string) => void }) {
 }
 
 /** Tiny markdown-ish renderer — handles **bold**, *italic*, `code`, links, bullet & numbered lists,
- *  headings, paragraphs. Built so very long URLs / words don't blow out the bubble width. */
+ *  headings, blockquotes, horizontal rules, paragraphs. Built so very long URLs / words don't blow
+ *  out the bubble width. */
 function RichMarkdown({ text }: { text: string }) {
   const blocks: React.ReactNode[] = [];
   const lines = text.split("\n");
   let ulBuf: string[] = [];
   let olBuf: string[] = [];
+  let bqBuf: string[] = [];
 
   const flushUl = () => {
     if (!ulBuf.length) return;
     blocks.push(
-      <ul key={`ul-${blocks.length}`} className="my-2 space-y-1.5 pl-1">
+      <ul key={`ul-${blocks.length}`} className="my-2 space-y-1 pl-0.5">
         {ulBuf.map((li, i) => (
-          <li key={i} className="flex gap-2.5">
-            <span aria-hidden className="mt-[0.55em] inline-block w-1.5 h-1.5 rounded-full bg-brand-300 shrink-0" />
+          <li key={i} className="flex gap-2.5 leading-[1.55]">
+            <span aria-hidden className="mt-[0.62em] inline-block w-1.5 h-1.5 rounded-full bg-gradient-to-br from-brand to-brand-600 shrink-0 ring-2 ring-brand/10" />
             <span className="flex-1">{renderInline(li)}</span>
           </li>
         ))}
@@ -877,10 +1000,10 @@ function RichMarkdown({ text }: { text: string }) {
   const flushOl = () => {
     if (!olBuf.length) return;
     blocks.push(
-      <ol key={`ol-${blocks.length}`} className="my-2 space-y-1.5">
+      <ol key={`ol-${blocks.length}`} className="my-2 space-y-1">
         {olBuf.map((li, i) => (
-          <li key={i} className="flex gap-2.5">
-            <span aria-hidden className="font-display font-semibold text-brand-700 tabular shrink-0 min-w-[1.25rem]">
+          <li key={i} className="flex gap-2.5 leading-[1.55]">
+            <span aria-hidden className="font-display font-semibold text-brand-700 tabular-nums shrink-0 min-w-[1.35rem] text-right">
               {i + 1}.
             </span>
             <span className="flex-1">{renderInline(li)}</span>
@@ -891,24 +1014,46 @@ function RichMarkdown({ text }: { text: string }) {
     olBuf = [];
   };
 
-  const flushAll = () => { flushUl(); flushOl(); };
+  const flushBq = () => {
+    if (!bqBuf.length) return;
+    blocks.push(
+      <blockquote
+        key={`bq-${blocks.length}`}
+        className="my-2 pl-3 border-l-2 border-brand/40 bg-brand/[0.04] text-ink-soft italic rounded-r-md py-1.5 pr-2"
+      >
+        {bqBuf.map((li, i) => (
+          <div key={i} className="leading-[1.55]">{renderInline(li)}</div>
+        ))}
+      </blockquote>,
+    );
+    bqBuf = [];
+  };
+
+  const flushAll = () => { flushUl(); flushOl(); flushBq(); };
 
   for (const raw of lines) {
     const line = raw.trim();
     const ul = line.match(/^[-*]\s+(.*)$/);
     const ol = line.match(/^(\d+)[.)]\s+(.*)$/);
     const h = line.match(/^(#{1,3})\s+(.*)$/);
+    const bq = line.match(/^>\s?(.*)$/);
+    const hr = /^---+$/.test(line) || /^\*\*\*+$/.test(line);
 
-    if (ul) { flushOl(); ulBuf.push(ul[1]); continue; }
-    if (ol) { flushUl(); olBuf.push(ol[2]); continue; }
+    if (ul) { flushOl(); flushBq(); ulBuf.push(ul[1]); continue; }
+    if (ol) { flushUl(); flushBq(); olBuf.push(ol[2]); continue; }
+    if (bq) { flushUl(); flushOl(); bqBuf.push(bq[1]); continue; }
     flushAll();
     if (!line) { blocks.push(<div key={blocks.length} className="h-1.5" />); continue; }
+    if (hr) {
+      blocks.push(<hr key={blocks.length} className="my-2.5 border-0 h-px bg-gradient-to-r from-transparent via-surface-line to-transparent" />);
+      continue;
+    }
     if (h) {
       const level = h[1].length;
       const cls =
-        level === 1 ? "font-display text-[1.05rem] font-semibold text-ink mt-1.5 mb-1"
-        : level === 2 ? "font-display text-[1rem] font-semibold text-ink mt-1.5 mb-1"
-        : "font-display text-[0.95rem] font-semibold text-ink-soft uppercase tracking-[0.08em] mt-1.5 mb-0.5";
+        level === 1 ? "font-display text-[1.1rem] font-semibold text-ink mt-2 mb-1 leading-tight"
+        : level === 2 ? "font-display text-[1.02rem] font-semibold text-ink mt-2 mb-1 leading-tight"
+        : "font-display text-[0.78rem] font-semibold text-brand-700 uppercase tracking-[0.1em] mt-2 mb-1";
       blocks.push(<div key={blocks.length} className={cls}>{renderInline(h[2])}</div>);
       continue;
     }
@@ -919,15 +1064,16 @@ function RichMarkdown({ text }: { text: string }) {
 }
 
 function renderInline(s: string): React.ReactNode {
-  // Order: code → bold → italic → links. Each pass tokenizes around the prior.
+  // Order: code → bold → italic → md-link → autolinks. Each pass tokenizes around the prior.
   const codeRe = /`([^`]+)`/g;
   const boldRe = /\*\*([^*]+)\*\*/g;
   const italicRe = /(?<![*\w])\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g;
+  const mdLinkRe = /\[([^\]]+)\]\(([^)]+)\)/g;
 
-  type Tok = { kind: "text" | "code" | "bold" | "italic"; value: string };
+  type Tok = { kind: "text" | "code" | "bold" | "italic" | "mdlink"; value: string; href?: string };
   let toks: Tok[] = [{ kind: "text", value: s }];
 
-  const splitWith = (re: RegExp, kind: Tok["kind"]) => {
+  const splitWith = (re: RegExp, kind: Exclude<Tok["kind"], "mdlink">) => {
     const next: Tok[] = [];
     for (const t of toks) {
       if (t.kind !== "text") { next.push(t); continue; }
@@ -944,9 +1090,27 @@ function renderInline(s: string): React.ReactNode {
     toks = next;
   };
 
+  const splitMdLinks = () => {
+    const next: Tok[] = [];
+    for (const t of toks) {
+      if (t.kind !== "text") { next.push(t); continue; }
+      let last = 0;
+      mdLinkRe.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = mdLinkRe.exec(t.value))) {
+        if (m.index > last) next.push({ kind: "text", value: t.value.slice(last, m.index) });
+        next.push({ kind: "mdlink", value: m[1], href: m[2] });
+        last = m.index + m[0].length;
+      }
+      if (last < t.value.length) next.push({ kind: "text", value: t.value.slice(last) });
+    }
+    toks = next;
+  };
+
   splitWith(codeRe, "code");
   splitWith(boldRe, "bold");
   splitWith(italicRe, "italic");
+  splitMdLinks();
 
   const out: React.ReactNode[] = [];
   toks.forEach((t, i) => {
@@ -954,10 +1118,25 @@ function renderInline(s: string): React.ReactNode {
     else if (t.kind === "bold") out.push(<strong key={`b-${i}`} className="font-semibold text-ink">{t.value}</strong>);
     else if (t.kind === "italic") out.push(<em key={`i-${i}`} className="italic text-ink-soft">{t.value}</em>);
     else if (t.kind === "code") out.push(
-      <code key={`c-${i}`} className="px-1.5 py-0.5 rounded-md bg-surface-line/60 text-[0.9em] font-mono text-ink">
+      <code key={`c-${i}`} className="px-1.5 py-[1px] rounded-md bg-brand/[0.08] text-[0.88em] font-mono text-brand-700 ring-1 ring-brand/15">
         {t.value}
       </code>,
     );
+    else if (t.kind === "mdlink") {
+      const href = t.href || "#";
+      const isExternal = /^https?:/i.test(href);
+      out.push(
+        <a
+          key={`md-${i}`}
+          href={href}
+          target={isExternal ? "_blank" : undefined}
+          rel={isExternal ? "noopener noreferrer" : undefined}
+          className="text-brand-700 font-medium underline decoration-brand-300 underline-offset-[3px] decoration-2 hover:decoration-brand transition"
+        >
+          {t.value}
+        </a>,
+      );
+    }
   });
   return out;
 }

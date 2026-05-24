@@ -1,9 +1,8 @@
 """Single source of truth for the therapist roster.
 
-Only therapists in THERAPISTS_WITH_FEEDS have iCal calendar feeds wired
-to the gateway, so AI-driven slot proposals and bookings are limited to
-that pool. THERAPISTS_WITHOUT_FEEDS are still valid clinicians but must
-be booked via callback (request_intake_callback) rather than self-service.
+All 10 therapists now have iCal feeds wired to the gateway (the prior
+4 self-served their tokens on 2026-05-21), so the entire roster is
+eligible for AI-driven slot proposals and bookings.
 """
 from __future__ import annotations
 
@@ -14,14 +13,13 @@ THERAPISTS_WITH_FEEDS: list[dict] = [
     {"staffId": 21, "name": "Alayna Hammond"},
     {"staffId": 34, "name": "Christie Johnson"},
     {"staffId": 53, "name": "Janelle Thompson"},
+    {"staffId": 59, "name": "Samara Cobb"},
+    {"staffId": 16, "name": "Joanne Tran"},
+    {"staffId": 45, "name": "Jordan Fuller"},
+    {"staffId": 66, "name": "Monica Gonzalez"},
 ]
 
-# excluded from AI self-service booking — no iCal feed
-THERAPISTS_WITHOUT_FEEDS: list[dict] = [
-    {"staffId": 59, "name": "Samara Cobb"},    # excluded
-    {"staffId": 16, "name": "Joanne Tran"},    # excluded
-    {"staffId": 45, "name": "Jordan Fuller"},  # excluded
-    {"staffId": 66, "name": "Monica Gonzalez"},# excluded
-]
+# Reserved for future clinicians without feeds; empty for now.
+THERAPISTS_WITHOUT_FEEDS: list[dict] = []
 
 ELIGIBLE_FOR_BOOKING: list[dict] = THERAPISTS_WITH_FEEDS

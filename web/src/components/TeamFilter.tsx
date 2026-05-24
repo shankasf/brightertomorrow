@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import Reveal from "@/components/Reveal";
-import { FiChevronDown, FiX, FiSearch, FiMapPin } from "react-icons/fi";
+import { FiChevronDown, FiX, FiSearch, FiMapPin, FiArrowRight } from "react-icons/fi";
 import type { TeamGroup, TeamMember } from "@/lib/queries";
+import { therapistSlug } from "@/lib/slug";
 
 type Filters = {
   name: string;
@@ -327,85 +329,103 @@ export default function TeamFilter({
                 const specialties = m.specialties ?? [];
                 const price = m.pricing_tier;
                 const network = m.network_status;
+                const slug = therapistSlug(m.full_name);
+                const first = m.full_name.replace(/^Dr\.\s+/i, "").split(/\s+/)[0] ?? m.full_name;
                 return (
                   <Reveal key={m.id} delay={Math.min(i, 8) * 0.04}>
-                    <article className="group h-full flex flex-col bg-white border border-surface-line rounded-3xl shadow-soft overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-card">
-                      {m.photo_url && (
-                        <div className="relative overflow-hidden aspect-[4/5] bg-cream-deep">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={m.photo_url}
-                            alt={m.full_name}
-                            loading={i < 6 ? "eager" : "lazy"}
-                            className="w-full h-full object-cover object-top group-hover:scale-[1.04] transition-transform duration-[900ms] ease-out"
-                          />
-                          {/* Location chips — supports hybrid (multiple offices) */}
-                          {officeLabels.length > 0 && (
-                            <div className="absolute left-3 top-3 right-3 flex flex-wrap gap-1.5">
-                              {officeLabels.slice(0, 3).map((o) => (
+                    <Link
+                      href={`/team/${slug}`}
+                      aria-label={`Learn more about ${m.full_name}`}
+                      className="group h-full flex flex-col bg-white border border-surface-line rounded-3xl shadow-soft overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+                    >
+                      <article className="contents">
+                        {m.photo_url && (
+                          <div className="relative overflow-hidden aspect-[4/5] bg-cream-deep">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={m.photo_url}
+                              alt={m.full_name}
+                              loading={i < 6 ? "eager" : "lazy"}
+                              className="w-full h-full object-cover object-top group-hover:scale-[1.04] transition-transform duration-[900ms] ease-out"
+                            />
+                            {/* Location chips — supports hybrid (multiple offices) */}
+                            {officeLabels.length > 0 && (
+                              <div className="absolute left-3 top-3 right-3 flex flex-wrap gap-1.5">
+                                {officeLabels.slice(0, 3).map((o) => (
+                                  <span
+                                    key={o}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/90 backdrop-blur-sm text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-700 shadow-soft border border-brand-700/10"
+                                  >
+                                    <FiMapPin aria-hidden size={10} />
+                                    {o}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <div className="p-5 sm:p-6 flex-1 flex flex-col">
+                          <h3 className="font-display text-[1.45rem] sm:text-[1.55rem] text-ink leading-[1.15] break-words group-hover:text-brand-700 transition-colors">
+                            {m.full_name}
+                            {m.credentials && (
+                              <span className="text-ink-soft font-medium text-[0.95rem]">
+                                , {m.credentials}
+                              </span>
+                            )}
+                          </h3>
+                          {m.role && (
+                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">
+                              {m.role}
+                            </div>
+                          )}
+                          {m.bio && (
+                            <p className="text-[14px] text-ink-muted mt-3 leading-relaxed line-clamp-3">
+                              {m.bio}
+                            </p>
+                          )}
+
+                          {/* Specialty chips */}
+                          {specialties.length > 0 && (
+                            <div className="mt-4 flex flex-wrap gap-1.5">
+                              {specialties.map((s) => (
                                 <span
-                                  key={o}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/90 backdrop-blur-sm text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-700 shadow-soft border border-brand-700/10"
+                                  key={s}
+                                  className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-semibold uppercase tracking-[0.12em]"
                                 >
-                                  <FiMapPin aria-hidden size={10} />
-                                  {o}
+                                  {s}
                                 </span>
                               ))}
                             </div>
                           )}
-                        </div>
-                      )}
-                      <div className="p-5 sm:p-6 flex-1 flex flex-col">
-                        <h3 className="font-display text-[1.45rem] sm:text-[1.55rem] text-ink leading-[1.15] break-words">
-                          {m.full_name}
-                          {m.credentials && (
-                            <span className="text-ink-soft font-medium text-[0.95rem]">
-                              , {m.credentials}
-                            </span>
+
+                          {/* Bottom row: pricing (wine) + network (sage) — hidden when empty */}
+                          {(price || network) && (
+                            <div className="mt-auto pt-5 flex flex-wrap items-center gap-2">
+                              {price && (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-brand-700 text-white text-[10.5px] font-semibold tracking-[0.04em]">
+                                  {price}
+                                </span>
+                              )}
+                              {network && (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-sage-100 text-sage-700 border border-sage-200 text-[10.5px] font-semibold tracking-[0.04em]">
+                                  {network}
+                                </span>
+                              )}
+                            </div>
                           )}
-                        </h3>
-                        {m.role && (
-                          <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">
-                            {m.role}
-                          </div>
-                        )}
-                        {m.bio && (
-                          <p className="text-[14px] text-ink-muted mt-3 leading-relaxed line-clamp-3">
-                            {m.bio}
-                          </p>
-                        )}
 
-                        {/* Specialty chips */}
-                        {specialties.length > 0 && (
-                          <div className="mt-4 flex flex-wrap gap-1.5">
-                            {specialties.map((s) => (
-                              <span
-                                key={s}
-                                className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-semibold uppercase tracking-[0.12em]"
-                              >
-                                {s}
-                              </span>
-                            ))}
+                          {/* Learn more affordance — entire card is clickable; this is the visible CTA */}
+                          <div className={`${price || network ? "mt-4" : "mt-auto pt-5"} flex items-center gap-2 text-brand-700 font-semibold text-sm`}>
+                            <span>Learn more about {first}</span>
+                            <FiArrowRight
+                              aria-hidden
+                              size={14}
+                              className="transition-transform duration-300 group-hover:translate-x-1"
+                            />
                           </div>
-                        )}
-
-                        {/* Bottom row: pricing (wine) + network (sage) — hidden when empty */}
-                        {(price || network) && (
-                          <div className="mt-auto pt-5 flex flex-wrap items-center gap-2">
-                            {price && (
-                              <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-brand-700 text-white text-[10.5px] font-semibold tracking-[0.04em]">
-                                {price}
-                              </span>
-                            )}
-                            {network && (
-                              <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-sage-100 text-sage-700 border border-sage-200 text-[10.5px] font-semibold tracking-[0.04em]">
-                                {network}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </article>
+                        </div>
+                      </article>
+                    </Link>
                   </Reveal>
                 );
               })}

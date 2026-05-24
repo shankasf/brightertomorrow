@@ -32,6 +32,8 @@ Scene = Literal[
     "confirm_cancel",
     "post_cancel",
     "post_verify_offer_booking",
+    "post_verify_continue_booking",
+    "post_verify_declined",
     "confirm_callback",
     "post_callback",
     "info_answer",
@@ -140,9 +142,18 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
     ),
 
     "ask_therapist": (
-        "Ask the caller which therapist they would like to book with. List the "
-        "available therapists by first name only (the planner will provide the "
-        "names in the context). Mention they can ask for a brief intro to any."
+        "Ask the caller which therapist they would like to book with. "
+        "ONE short sentence — do NOT list the therapists by name in "
+        "your reply (the widget renders the dropdown on chat; on voice "
+        "the caller will say a name freely). Mention they can pick "
+        "'Any therapist' for the soonest slot, or name a specific "
+        "therapist if they have a preference.\n"
+        "Therapist picker — when `channel` is `chat`, end your reply "
+        "with the literal marker `[[THERAPIST_PICKER]]` on its own "
+        "line. The chat widget detects it and renders an in-line "
+        "dropdown of full names with 'Any therapist' at the top. Do "
+        "NOT emit the marker on voice channels — it will leak into "
+        "spoken output. Do NOT type the therapist list yourself."
     ),
 
     "present_slots": (
@@ -155,16 +166,21 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
     "confirm_booking": (
         "Recap the booking in ONE short block: name, date of birth, phone, "
         "email, address, sex, insurance + member ID (or self-pay), reason, "
-        "and the chosen slot with therapist name and 'Pacific Time'. End "
-        "with a single yes/no question: 'Is that correct?'. The state will "
-        "be flipped to pending_confirm in this turn."
+        "and the chosen slot with therapist name and 'Pacific Time'. If "
+        "`insurance_pending_admin` is True, add ONE line right after the "
+        "insurance line: 'insurance: pending admin verification — our team "
+        "will confirm coverage shortly'. End with a single yes/no question: "
+        "'Is that correct?'. The state will be flipped to pending_confirm "
+        "in this turn."
     ),
 
     "post_booking": (
         "Tell the caller their appointment is booked. Include the slot, "
         "therapist name, and timezone. If a copay was returned during "
-        "verification, mention it. End with: 'You can reach us anytime at "
-        "725-238-6990.'"
+        "verification, mention it. If `insurance_pending_admin` is True, "
+        "add ONE sentence: 'Our admin team will verify your insurance and "
+        "follow up to confirm coverage details.' End with: 'You can reach "
+        "us anytime at 725-238-6990.'"
     ),
 
     "confirm_cancel": (
@@ -183,6 +199,30 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "Speak the verify_result's display_text VERBATIM, then ask: 'Would "
         "you like to go ahead and book an appointment now, or is there "
         "anything else I can help with?'"
+    ),
+
+    "post_verify_continue_booking": (
+        "The caller's insurance just verified as eligible AND they are "
+        "already in a booking flow. Reply with TWO things in ONE smooth "
+        "message (2 sentences, no more):\n"
+        "1) FIRST sentence — speak the verify_result's `display_text` "
+        "VERBATIM so the caller hears their coverage was confirmed.\n"
+        "2) SECOND sentence — keep the booking moving by asking for ONE "
+        "next field: {field_label}. Use a natural connector like 'Now, "
+        "to keep going,' or 'Next,'.\n"
+        "Do NOT ask 'would you like to book now?' — they are already "
+        "booking. Do NOT re-list fields already collected."
+    ),
+
+    "post_verify_declined": (
+        "The caller just said NO to booking after a successful coverage "
+        "check. In ONE warm sentence: acknowledge ('Got it — glad I "
+        "could help confirm your coverage.') and gently offer the door "
+        "for anything else ('Let me know if you'd like to book later "
+        "or have other questions — you can always reach us at "
+        "725-238-6990.'). Do NOT re-pitch booking. Do NOT repeat the "
+        "coverage result. Do NOT ask 'would you like to book now?' "
+        "again."
     ),
 
     "resume_offer": (
@@ -235,15 +275,17 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
 
     "info_answer": (
         "Answer the caller's question (see `user_just_said` in the "
-        "context) using ONLY the KB snippets provided. Cite the source "
-        "URL inline if you draw from one. If the snippets do not contain "
-        "the specific information the caller asked for (e.g. they asked "
-        "about hours and the snippets don't mention hours), say so "
-        "honestly — 'I don't have that detail on hand' — and offer the "
-        "practice number 725-238-6990 so they can get an exact answer. "
-        "Do NOT fall back to a generic 'what can I help you with?' "
-        "menu — directly address the question or explicitly acknowledge "
-        "you don't have the answer. Keep it to 2-4 sentences."
+        "context) directly and conversationally using ONLY the KB "
+        "snippets provided. NEVER include URLs, links, or 'see our "
+        "website / page X' phrasing — the snippets are the source of "
+        "truth; the caller does not need or want a URL. If the snippets "
+        "do not contain the specific information the caller asked for "
+        "(e.g. they asked about hours and the snippets don't mention "
+        "hours), say so honestly — 'I don't have that detail on hand' — "
+        "and offer the practice number 725-238-6990 so they can get an "
+        "exact answer. Do NOT fall back to a generic 'what can I help "
+        "you with?' menu — directly address the question or explicitly "
+        "acknowledge you don't have the answer. Keep it to 2-4 sentences."
     ),
 
     "crisis": (
@@ -337,26 +379,23 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
 
     "handoff_out_of_state": (
         "The caller is physically outside Nevada. Brighter Tomorrow is "
-        "licensed in Nevada only, so we cannot start care while they're "
-        "out of state — but we want to be kind about it. Two short "
-        "sentences: (1) acknowledge warmly that they reached out; "
-        "(2) explain that our therapists are licensed in Nevada, so we'd "
-        "want to wait until they're back in NV (or we can collect their "
-        "info now and have someone follow up when they return). Offer "
-        "725-238-6990 as a follow-up. NEVER say 'transferring' or 'handing "
-        "off' — phrase the team follow-up as the action itself."
+        "licensed in Nevada only — we cannot start care out of state. "
+        "TWO sentences maximum: (1) acknowledge warmly that they reached "
+        "out and explain our therapists are licensed in Nevada only; "
+        "(2) offer 725-238-6990 or say a team member can follow up when "
+        "they return. No more than two sentences — do not add extra "
+        "empathy clauses or elaborations. NEVER say 'transferring' or "
+        "'handing off'."
     ),
 
     "handoff_roi_required": (
-        "The caller is a guardian / third party trying to act on behalf "
-        "of another adult, and we need a signed Release of Information "
-        "before we can share or schedule. In one short paragraph: "
-        "acknowledge what they're trying to do, then explain that for "
-        "this caller we need a signed release on file. Offer to have "
-        "a team member email or call them within one business day with "
-        "the form. Do NOT use the word 'transfer' — say 'a member of "
-        "our team will email you the release form shortly'. Keep it "
-        "warm; many of these callers are stressed family members."
+        "The caller is a guardian / third party acting on behalf of "
+        "another adult. We need a signed Release of Information before "
+        "we can share or schedule. TWO sentences maximum: (1) briefly "
+        "acknowledge and say we need a signed release on file; "
+        "(2) tell them a team member will reach out within one business "
+        "day with the form. No extra clauses or empathy elaborations — "
+        "keep it tight. Do NOT use the word 'transfer'. Keep tone warm."
     ),
 
     "handoff_mandatory_report": (
@@ -392,14 +431,18 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
     ),
 
     "handoff_admin_verification": (
-        "Insurance verification came back as `needs_manual_review` or "
-        "`secondary_required` — CLAIM.MD couldn't give us a clean answer "
-        "and a human biller needs to look at it. Tell the caller in one "
-        "short sentence: 'Your coverage needs a closer look from our "
-        "billing team — they'll get back to you within one business day "
-        "with the full breakdown.' Then offer to continue with booking "
-        "in the meantime if they'd like to lock in a slot. Do NOT use "
-        "the word 'transfer'."
+        "Insurance verification came back as `needs_manual_review` — the "
+        "carrier didn't respond cleanly. The booking flow continues; "
+        "admin will finish verification asynchronously. Open with a one-"
+        "sentence apology that names the payer: \"I'm sorry — I'm "
+        "unable to verify your {payer} coverage right now; our admin "
+        "team will follow up to finish verifying it.\" Then in the SAME "
+        "message ask the next thing we need to keep the booking moving: "
+        "if `next_field_to_ask` is not `none`, ask `next_field_label` "
+        "in one short sentence; else if `staff_picked` is False, ask "
+        "which therapist they'd like; else if `slot_picked` is False, "
+        "ask what day/time works best. Do NOT offer self-pay. Do NOT "
+        "ask for more insurance details. Do NOT use 'transfer'."
     ),
 
     "handoff_admin_callback": (

@@ -152,7 +152,7 @@ export async function getStats(): Promise<Stat[]> {
 export async function getBlogPosts(limit?: number): Promise<BlogPost[]> {
   const { rows } = await q<BlogPost>(
     `SELECT id, slug, title, excerpt, body_md, cover_url, author,
-            to_char(published_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS published_at
+            to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
      FROM bt.blog_posts WHERE published ORDER BY published_at DESC
      ${limit ? "LIMIT $1" : ""}`, limit ? [limit] : undefined);
   return rows;
@@ -160,7 +160,7 @@ export async function getBlogPosts(limit?: number): Promise<BlogPost[]> {
 export async function getBlogBySlug(slug: string): Promise<BlogPost | null> {
   const { rows } = await q<BlogPost>(
     `SELECT id, slug, title, excerpt, body_md, cover_url, author,
-            to_char(published_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS published_at
+            to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
      FROM bt.blog_posts WHERE slug = $1 AND published`, [slug]);
   return rows[0] ?? null;
 }

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getStoredToken } from '@/components/admin/useAdminAuth';
 import { PageHeader, PageWrap, Button, ErrorBanner, Input } from '@/components/admin/ui';
+import { LogSearchPanel } from '@/components/admin/LogSearchPanel';
 
 type LogRecord = {
   id: number;
@@ -53,6 +54,7 @@ function levelStyle(level: string): string {
 }
 
 export default function AdminLogsPage() {
+  const [tab, setTab] = useState<'search' | 'live'>('search');
   const [records, setRecords] = useState<LogRecord[]>([]);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState('');
@@ -143,13 +145,18 @@ export default function AdminLogsPage() {
     }
   }, [append]);
 
-  // Open the stream on mount; close on unmount.
+  // Connect only when the Live tab is active. Switching to Search aborts
+  // the stream so we're not paying for an idle SSE connection.
   useEffect(() => {
+    if (tab !== 'live') {
+      abortRef.current?.abort();
+      return;
+    }
     void connect();
     return () => {
       abortRef.current?.abort();
     };
-  }, [connect]);
+  }, [tab, connect]);
 
   // Autoscroll to bottom when new records arrive (if enabled).
   useEffect(() => {
@@ -184,27 +191,103 @@ export default function AdminLogsPage() {
   return (
     <PageWrap max="max-w-7xl">
       <PageHeader
-        title="Live AI logs"
+        title="Logs"
         subtitle={
           <>
-            Live stream from the <span className="font-medium text-ink">bt-ai</span> service
-            (INFO level and above). Records may contain operational PHI (patient identifiers,
-            tool latencies). Each viewing session is recorded in the{' '}
-            <span className="font-medium text-ink">admin access log</span>. §164.312(b)
+            Search history across frontend, gateway, and bt-ai (S3 + Athena), or
+            tail the live AI service stream. Records may contain operational
+            PHI; each access is audited. §164.312(b)
           </>
         }
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={status} />
-            <Button onClick={() => setPaused((p) => !p)}>
-              {paused ? 'Resume' : 'Pause'}
-            </Button>
-            <Button onClick={() => setRecords([])}>Clear</Button>
-            <Button onClick={connect}>Reconnect</Button>
-          </div>
+          tab === 'live' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge status={status} />
+              <Button onClick={() => setPaused((p) => !p)}>
+                {paused ? 'Resume' : 'Pause'}
+              </Button>
+              <Button onClick={() => setRecords([])}>Clear</Button>
+              <Button onClick={connect}>Reconnect</Button>
+            </div>
+          ) : null
         }
       />
 
+      {/* Tab bar */}
+      <div className="mb-4 inline-flex rounded-lg border border-[#E5E5E5] bg-white p-1">
+        <button
+          type="button"
+          onClick={() => setTab('search')}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+            tab === 'search' ? 'bg-brand text-white' : 'text-ink-soft hover:bg-slate-50'
+          }`}
+        >
+          Search history
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('live')}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+            tab === 'live' ? 'bg-brand text-white' : 'text-ink-soft hover:bg-slate-50'
+          }`}
+        >
+          Live AI stream
+        </button>
+      </div>
+
+      {tab === 'search' && <LogSearchPanel />}
+      {tab === 'live' && <LiveAiStream
+        records={records}
+        status={status}
+        paused={paused}
+        autoscroll={autoscroll}
+        levelFilter={levelFilter}
+        search={search}
+        error={error}
+        filtered={filtered}
+        counts={counts}
+        scrollRef={scrollRef}
+        setLevelFilter={setLevelFilter}
+        setSearch={setSearch}
+        setAutoscroll={setAutoscroll}
+      />}
+    </PageWrap>
+  );
+}
+
+type LiveAiStreamProps = {
+  records: LogRecord[];
+  status: Status;
+  paused: boolean;
+  autoscroll: boolean;
+  levelFilter: 'ALL' | 'INFO' | 'WARNING' | 'ERROR';
+  search: string;
+  error: string;
+  filtered: LogRecord[];
+  counts: { ERROR: number; WARNING: number; INFO: number; DEBUG: number };
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  setLevelFilter: (v: 'ALL' | 'INFO' | 'WARNING' | 'ERROR') => void;
+  setSearch: (v: string) => void;
+  setAutoscroll: (v: boolean | ((p: boolean) => boolean)) => void;
+};
+
+function LiveAiStream({
+  records,
+  status,
+  paused,
+  autoscroll,
+  levelFilter,
+  search,
+  error,
+  filtered,
+  counts,
+  scrollRef,
+  setLevelFilter,
+  setSearch,
+  setAutoscroll,
+}: LiveAiStreamProps) {
+  return (
+    <>
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <div className="mb-3 grid grid-cols-1 gap-3 rounded-xl border border-[#E5E5E5] bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -283,7 +366,7 @@ export default function AdminLogsPage() {
         </span>
         {paused && <span className="font-semibold text-amber-700">Paused — new records dropped</span>}
       </div>
-    </PageWrap>
+    </>
   );
 }
 
