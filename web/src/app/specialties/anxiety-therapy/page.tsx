@@ -76,7 +76,7 @@ export default function AnxietyTherapyPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/anxiety-therapy/img-1.webp')",
+              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/anxiety-therapy/hero.webp')",
           }}
           aria-hidden
         />
@@ -366,6 +366,14 @@ export default function AnxietyTherapyPage() {
         className="relative overflow-hidden"
         style={{ backgroundColor: "#6E7A8A" }}
       >
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(110,122,138,0.82), rgba(110,122,138,0.82)), url('/images/specialties/anxiety-therapy/cta-bg.webp')",
+          }}
+          aria-hidden
+        />
         <div className="container-x py-20 lg:py-24 text-center relative z-10">
           <Reveal>
             <p

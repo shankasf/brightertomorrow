@@ -117,7 +117,7 @@ export default function FAQsPage() {
                   <p className="text-sm font-semibold text-slate-900">{f.question}</p>
                   <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{f.answer}</p>
                 </div>
-                <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="flex shrink-0 gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                   <Button variant="ghost" size="sm" onClick={() => startEdit(f)}>Edit</Button>
                   <Button variant="ghost" size="sm" onClick={() => del(f.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
                 </div>

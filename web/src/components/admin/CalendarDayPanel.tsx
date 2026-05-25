@@ -42,7 +42,7 @@ export default function CalendarDayPanel({ open, selectedDate, events, therapist
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: 16, opacity: 0 }}
           transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          className="flex h-full w-[380px] shrink-0 flex-col overflow-hidden rounded-2xl border border-[#E5E5E5] bg-white shadow-[0_8px_28px_-16px_rgba(25,39,53,0.18)]"
+          className="flex max-h-[70vh] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-[#E5E5E5] bg-white shadow-[0_8px_28px_-16px_rgba(25,39,53,0.18)] lg:h-full lg:max-h-none lg:w-[380px]"
         >
           <header className="flex items-center justify-between border-b border-[#EDE6D9] px-4 py-3">
             <div>

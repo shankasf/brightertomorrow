@@ -71,7 +71,7 @@ export default function IndividualTherapyPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/services/individual-therapy/hero.webp')",
+              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/services/individual-therapy/banner.webp')",
           }}
           aria-hidden
         />
@@ -320,6 +320,14 @@ export default function IndividualTherapyPage() {
 
       {/* SECTION 7 — CTA */}
       <section className="relative overflow-hidden" style={{ backgroundColor: "#6E7A8A" }}>
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(15,22,30,0.62), rgba(15,22,30,0.62)), url('/images/services/cta-bg.webp')",
+          }}
+          aria-hidden
+        />
         <div className="container-x py-20 lg:py-24 text-center relative z-10">
           <Reveal>
             <p className="font-script italic text-[20px] sm:text-[24px]" style={{ color: GOLD }}>

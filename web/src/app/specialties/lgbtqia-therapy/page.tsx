@@ -70,7 +70,7 @@ export default function LgbtqiaTherapyPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/lgbtqia-therapy/01-betzy-arosemena-Mx15HMZGQzY-unsplash.webp')",
+              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/lgbtqia-therapy/00-hero-Brighter-Tomorrow-teletherapy.webp')",
           }}
           aria-hidden
         />

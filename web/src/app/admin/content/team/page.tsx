@@ -247,7 +247,7 @@ export default function TeamPage() {
                       <p className="truncate text-sm font-semibold text-slate-900">{m.full_name}</p>
                       {m.credentials && <span className="text-xs text-slate-500">{m.credentials}</span>}
                     </div>
-                    <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <div className="flex shrink-0 gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                       <Button variant="ghost" size="sm" onClick={() => startEdit(m)}>Edit</Button>
                       <Button variant="ghost" size="sm" onClick={() => del(m.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
                     </div>

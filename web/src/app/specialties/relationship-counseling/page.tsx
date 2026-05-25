@@ -105,7 +105,7 @@ export default function RelationshipCounselingPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/relationship-counseling/01-1_pexels-photo-6753172-scaled.jpg')",
+              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/relationship-counseling/00-Brighter-Tomorrow-teletherapy-hero.webp')",
           }}
           aria-hidden
         />
@@ -368,8 +368,19 @@ export default function RelationshipCounselingPage() {
       </section>
 
       {/* What to Expect — wine bg */}
-      <section style={{ backgroundColor: WINE }} className="py-20 lg:py-28">
-        <div className="container-x">
+      <section
+        style={{ backgroundColor: WINE }}
+        className="relative overflow-hidden py-20 lg:py-28"
+      >
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(102,32,42,0.88), rgba(102,32,42,0.88)), url('/images/specialties/relationship-counseling/12-what-to-expect-bg.webp')",
+          }}
+          aria-hidden
+        />
+        <div className="container-x relative z-10">
           <Reveal>
             <h3 className="font-display font-bold text-[28px] sm:text-[34px] lg:text-[37.5px] text-white leading-[1.2]">
               What to Expect in Therapy
@@ -604,6 +615,14 @@ export default function RelationshipCounselingPage() {
 
       {/* CTA banner — Healing Is Possible */}
       <section className="relative overflow-hidden" style={{ backgroundColor: "#6E7A8A" }}>
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(110,122,138,0.78), rgba(110,122,138,0.78)), url('/images/specialties/relationship-counseling/13-cta-bg.webp')",
+          }}
+          aria-hidden
+        />
         <div className="container-x py-20 lg:py-24 text-center relative z-10">
           <Reveal>
             <p className="font-script italic text-[20px] sm:text-[24px]" style={{ color: GOLD }}>

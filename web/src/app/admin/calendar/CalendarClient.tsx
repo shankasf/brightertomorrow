@@ -341,7 +341,7 @@ export default function CalendarClient() {
         initial={{ opacity: 0, x: direction * 12 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-        className="flex items-stretch gap-3"
+        className="flex flex-col items-stretch gap-3 lg:flex-row"
       >
         <div className="min-w-0 flex-1">
           {view === 'month' && (

@@ -10,7 +10,6 @@ export type TeamBio = {
   credentials_suffix: string | null;
   role: string | null;
   photo_url: string | null;
-  source_url: string | null;
   hero_headline: string | null;
   hero_intro: string | null;
   bio_paragraphs: string[];

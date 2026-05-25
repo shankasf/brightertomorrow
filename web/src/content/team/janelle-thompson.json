@@ -3,8 +3,7 @@
   "full_name": "Janelle Thompson",
   "credentials_suffix": "CSW-I",
   "role": "Clinical Social Work, Intern",
-  "photo_url": "https://brightertomorrowtherapy.com/wp-content/uploads/2026/01/12-27-25-2-1365x2048.jpg",
-  "source_url": "https://brightertomorrowtherapy.com/janelle-thompson/",
+  "photo_url": "/team/janelle-thompson.jpg",
   "hero_headline": "Compassionate Therapy for Kids and Teens with Janelle Thompson, CSW-I",
   "hero_intro": "Growing up is full of changes—and sometimes those changes feel overwhelming. As a therapist who specializes in working with children and teens, I help young people navigate the stress, emotions, and big questions that come with growing up in today's world.",
   "bio_paragraphs": [
@@ -22,10 +21,22 @@
   "approach_headline": "Trauma-informed care, empowerment approach",
   "approach_intro": "Janelle's work is grounded in trauma-informed care, empowerment theory, and deep respect for each child's lived experience. She helps kids and teens explore their feelings, learn healthy coping strategies, and grow into more confident, connected versions of themselves. You can expect therapy with Janelle to be:",
   "modalities": [
-    {"name": "Kid and Teen Friendly", "description": "Sessions are designed to help young people feel safe, respected, and at ease"},
-    {"name": "Emotionally Attuned", "description": "To help your child or teen name, understand, and manage their emotions without shame"},
-    {"name": "Strengths-Based", "description": "To highlight what's going well and help your child or teen build on their resilience"},
-    {"name": "Creative and Flexible", "description": "Incorporating art, games, and storytelling alongside talk therapy as needed"}
+    {
+      "name": "Kid and Teen Friendly",
+      "description": "Sessions are designed to help young people feel safe, respected, and at ease"
+    },
+    {
+      "name": "Emotionally Attuned",
+      "description": "To help your child or teen name, understand, and manage their emotions without shame"
+    },
+    {
+      "name": "Strengths-Based",
+      "description": "To highlight what's going well and help your child or teen build on their resilience"
+    },
+    {
+      "name": "Creative and Flexible",
+      "description": "Incorporating art, games, and storytelling alongside talk therapy as needed"
+    }
   ],
   "who_i_help_headline": "Who She Helps",
   "who_i_help": [

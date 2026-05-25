@@ -418,6 +418,14 @@ export default function ReikiPage() {
         className="relative overflow-hidden"
         style={{ backgroundColor: "#6E7A8A" }}
       >
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(15,22,30,0.62), rgba(15,22,30,0.62)), url('/images/services/cta-bg.webp')",
+          }}
+          aria-hidden
+        />
         <div className="container-x py-20 lg:py-24 text-center relative z-10">
           <Reveal>
             <p

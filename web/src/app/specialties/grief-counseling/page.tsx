@@ -226,7 +226,7 @@ export default function GriefCounselingPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.6), rgba(15,22,30,0.6)), url('/images/specialties/grief-counseling/img-1.webp')",
+              "linear-gradient(rgba(15,22,30,0.6), rgba(15,22,30,0.6)), url('/images/specialties/grief-counseling/00-Brighter-Tomorrow-Grief-Counseling-hero.webp')",
           }}
           aria-hidden
         />
@@ -562,6 +562,14 @@ export default function GriefCounselingPage() {
         className="relative overflow-hidden"
         style={{ backgroundColor: "#6E7A8A" }}
       >
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(110,122,138,0.78), rgba(110,122,138,0.78)), url('/images/specialties/grief-counseling/03-cta-bg.webp')",
+          }}
+          aria-hidden
+        />
         <div className="container-x py-20 lg:py-24 text-center relative z-10">
           <Reveal>
             <p

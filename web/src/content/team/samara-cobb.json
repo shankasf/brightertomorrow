@@ -3,8 +3,7 @@
   "full_name": "Samara Cobb",
   "credentials_suffix": "MSW Student",
   "role": "Master of Social Work (MSW) Student",
-  "photo_url": "https://brightertomorrowtherapy.com/wp-content/uploads/2026/01/Bio_Photo_-_Samara_Cobb-1.jpg",
-  "source_url": "https://brightertomorrowtherapy.com/samara-cobb/",
+  "photo_url": "/team/samara-cobb.jpg",
   "hero_headline": "Creating Space for Reflection, Growth, and Emotional Safety with Samara Cobb, MSW Student",
   "hero_intro": null,
   "bio_paragraphs": [
@@ -25,10 +24,22 @@
   "approach_headline": "A Grounded and Collaborative Therapy Approach",
   "approach_intro": "Samara's therapy style centers on empathy, reflection, and skill-building. She is especially interested in both individual and group therapy, and believes group spaces can be powerful environments for connection, shared learning, and realizing you are not alone. Her approach includes:",
   "modalities": [
-    {"name": "Cognitive Behavioral Therapy (CBT) & Strengths-Based Therapy", "description": "Helping clients identify patterns in thoughts and behaviors and develop practical coping strategies."},
-    {"name": "Dialectical Behavior Therapy (DBT) Skills", "description": "Supporting emotional regulation, distress tolerance, and mindfulness."},
-    {"name": "Strengths-Based & Trauma-Informed Care", "description": "Honoring each client's lived experience while recognizing resilience and capacity for growth."},
-    {"name": "Reflective & Collaborative Exploration", "description": "Sitting with emotions, exploring worst- and best-case scenarios, and brainstorming solutions when clients are ready."}
+    {
+      "name": "Cognitive Behavioral Therapy (CBT) & Strengths-Based Therapy",
+      "description": "Helping clients identify patterns in thoughts and behaviors and develop practical coping strategies."
+    },
+    {
+      "name": "Dialectical Behavior Therapy (DBT) Skills",
+      "description": "Supporting emotional regulation, distress tolerance, and mindfulness."
+    },
+    {
+      "name": "Strengths-Based & Trauma-Informed Care",
+      "description": "Honoring each client's lived experience while recognizing resilience and capacity for growth."
+    },
+    {
+      "name": "Reflective & Collaborative Exploration",
+      "description": "Sitting with emotions, exploring worst- and best-case scenarios, and brainstorming solutions when clients are ready."
+    }
   ],
   "who_i_help_headline": "Who She Helps",
   "who_i_help": [

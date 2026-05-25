@@ -88,7 +88,7 @@ export default function CalendarLegend({ therapists, selected, onToggle }: Props
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute right-0 top-full z-30 mt-2 w-[360px] origin-top-right rounded-2xl border border-[#E5E5E5] bg-white p-3 shadow-[0_18px_40px_-18px_rgba(25,39,53,0.28)]"
+            className="absolute right-0 top-full z-30 mt-2 w-[min(360px,calc(100vw-1.5rem))] origin-top-right rounded-2xl border border-[#E5E5E5] bg-white p-3 shadow-[0_18px_40px_-18px_rgba(25,39,53,0.28)]"
           >
             <div className="mb-1.5 flex items-center justify-between px-1">
               <span className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-ink-soft">

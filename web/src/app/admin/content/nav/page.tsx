@@ -121,12 +121,12 @@ export default function NavPage() {
                           className="group flex items-center justify-between gap-3 rounded-xl border border-slate-200/70 bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
                         >
                           <div className="flex min-w-0 items-center gap-2">
-                            {item.parent_id && <span className="text-slate-300">↳</span>}
-                            <span className="text-sm font-medium text-slate-900">{item.label}</span>
-                            <span className="font-mono text-[11px] text-slate-400">{item.href}</span>
+                            {item.parent_id && <span className="shrink-0 text-slate-300">↳</span>}
+                            <span className="shrink-0 text-sm font-medium text-slate-900">{item.label}</span>
+                            <span className="truncate font-mono text-[11px] text-slate-400">{item.href}</span>
                             {item.parent_id && <Pill tone="slate">child</Pill>}
                           </div>
-                          <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                          <div className="flex shrink-0 gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                             <Button variant="ghost" size="sm" onClick={() => startEdit(item)}>Edit</Button>
                             <Button variant="ghost" size="sm" onClick={() => del(item.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
                           </div>

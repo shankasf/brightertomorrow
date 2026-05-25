@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import Reveal from "@/components/Reveal";
 import Counter from "@/components/Counter";
 import { FiArrowUpRight, FiChevronRight } from "react-icons/fi";
+import { FaQuoteLeft } from "react-icons/fa";
 
 // Brand palette mirrored from brightertomorrowtherapy.com.
 const WINE = "#66202A";
@@ -57,6 +58,27 @@ const SERVICES: Service[] = [
     body: "A significant loss can feel overwhelming, isolating, and impossible to navigate alone. We offer grief counseling to help you process the loss of a loved one, manage difficult emotions, and find a path forward.",
     img: "/images/our-approach/svc-grief.webp",
     href: "/specialties/grief-counseling",
+  },
+];
+
+type Testimonial = { quote: string };
+
+const TESTIMONIALS: Testimonial[] = [
+  {
+    quote:
+      "My therapist has been working with my children for two years. She has been supportive and helpful as they transition in age and with their struggles in life. I am happy she continues to assist them.",
+  },
+  {
+    quote:
+      "Awesome, is the one word that describe the atmosphere. The interactions with staff have been impressive! Keep up the great work.",
+  },
+  {
+    quote:
+      "My therapist helps me process my experiences in justice work. Talking with her is like a deep, clearing breath for my mind. Everyone should find a therapist, even if it takes a few tries to find the right match.",
+  },
+  {
+    quote:
+      "My therapist is the best! She always listens and cares. I am extremely satisfied with the treatment.",
   },
 ];
 
@@ -389,6 +411,79 @@ export default function OurApproachPage() {
               addresses your specific needs.
             </p>
           </Reveal>
+        </div>
+      </section>
+
+      {/* TESTIMONIALS — client reviews, cream bg (mirrors .com /approach) */}
+      <section className="bg-cream py-20 lg:py-28">
+        <div className="container-x">
+          <Reveal>
+            <div className="text-center max-w-2xl mx-auto mb-14">
+              <span
+                className="font-display font-semibold tracking-[0.18em] uppercase text-[12px]"
+                style={{ color: WINE }}
+              >
+                Client Reviews
+              </span>
+              <h2
+                className="mt-5 font-display font-bold text-[32px] sm:text-[40px] lg:text-[45px] leading-[1.15]"
+                style={{ color: INK }}
+              >
+                Stories of{" "}
+                <span style={{ color: WINE, fontStyle: "italic" }}>
+                  brighter tomorrows.
+                </span>
+              </h2>
+            </div>
+          </Reveal>
+          <motion.div
+            className="grid sm:grid-cols-2 gap-6 lg:gap-8"
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, amount: 0.1 }}
+            transition={{ staggerChildren: 0.1 }}
+          >
+            {TESTIMONIALS.map((t, i) => (
+              <motion.figure
+                key={i}
+                variants={cardVariants}
+                className="h-full bg-white border border-surface-line p-7 lg:p-9 shadow-soft hover:shadow-card transition-shadow duration-500"
+                style={{ borderRadius: "30px 0 30px 30px" }}
+              >
+                <FaQuoteLeft size={26} style={{ color: GOLD }} />
+                <blockquote className="mt-5 text-ink-muted text-[16px] leading-[1.8]">
+                  {t.quote}
+                </blockquote>
+                <figcaption className="mt-7 flex items-center gap-4">
+                  <span
+                    aria-hidden
+                    className="grid place-items-center w-11 h-11 font-display font-bold text-[15px]"
+                    style={{
+                      backgroundColor: WINE,
+                      color: "#FFFFFF",
+                      borderRadius: "16px 0 16px 16px",
+                    }}
+                  >
+                    BT
+                  </span>
+                  <span className="leading-tight">
+                    <span
+                      className="block font-display font-bold text-[16px]"
+                      style={{ color: INK }}
+                    >
+                      Client
+                    </span>
+                    <span
+                      className="block text-[13px]"
+                      style={{ color: WINE }}
+                    >
+                      Brighter Tomorrow
+                    </span>
+                  </span>
+                </figcaption>
+              </motion.figure>
+            ))}
+          </motion.div>
         </div>
       </section>
 

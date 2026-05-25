@@ -3,8 +3,7 @@
   "full_name": "Elisia Danley",
   "credentials_suffix": "CSW-I",
   "role": "Clinical Social Work, Intern",
-  "photo_url": "https://brightertomorrowtherapy.com/wp-content/uploads/elementor/thumbs/Bio_Photo_-_Elisia_Danley-r7ui1p5wusql987wa02tfxow94urewbmg769yun488.jpg",
-  "source_url": "https://brightertomorrowtherapy.com/elisia-danley/",
+  "photo_url": "/team/elisia-danley.jpg",
   "hero_headline": "Creative and Compassionate Therapy with Elisia Danley, CSW-I",
   "hero_intro": "Talking about emotions can be hard—especially for kids and teens. That's why I believe therapy should be a space where self-expression feels safe, natural, and even creative. Whether through conversation, art, or playful exploration, I help clients of all ages, especially children and adolescents, work through their emotions and life challenges with understanding, care, and encouragement.",
   "bio_paragraphs": [
@@ -20,11 +19,26 @@
   "approach_headline": "Client-centered, strengths-based approach",
   "approach_intro": "Elisia uses a client-centered, strengths-based approach, blending traditional and creative therapies to meet clients where they are. Whether it's through art, play, or structured interventions, I tailor sessions to support self-expression, resilience, and emotional balance. Here's how she helps her clients grow and heal:",
   "modalities": [
-    {"name": "Cognitive Behavioral Therapy (CBT) & Strengths-Based Therapy", "description": "Helping clients identify and challenge unhelpful thoughts and behaviors."},
-    {"name": "Dialectical Behavior Therapy (DBT)", "description": "Teaching emotional regulation, distress tolerance, and mindfulness (currently in training)."},
-    {"name": "Art Therapy", "description": "Using creativity as a tool to process emotions and communicate when words aren't enough."},
-    {"name": "Play Therapy Techniques", "description": "Especially helpful for younger children who may struggle to express emotions directly."},
-    {"name": "Feelings Charts & Analogies", "description": "Breaking down complex emotions and situations into manageable, relatable parts."}
+    {
+      "name": "Cognitive Behavioral Therapy (CBT) & Strengths-Based Therapy",
+      "description": "Helping clients identify and challenge unhelpful thoughts and behaviors."
+    },
+    {
+      "name": "Dialectical Behavior Therapy (DBT)",
+      "description": "Teaching emotional regulation, distress tolerance, and mindfulness (currently in training)."
+    },
+    {
+      "name": "Art Therapy",
+      "description": "Using creativity as a tool to process emotions and communicate when words aren't enough."
+    },
+    {
+      "name": "Play Therapy Techniques",
+      "description": "Especially helpful for younger children who may struggle to express emotions directly."
+    },
+    {
+      "name": "Feelings Charts & Analogies",
+      "description": "Breaking down complex emotions and situations into manageable, relatable parts."
+    }
   ],
   "who_i_help_headline": "Who She Helps",
   "who_i_help": [

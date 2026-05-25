@@ -101,7 +101,7 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
                     style={{ backgroundColor: "#E1B878", color: "#66202A", borderRadius: "6px 0 6px 6px" }}
                   >
                     <span className="inline-block w-1 h-1 rounded-full bg-[#66202A] animate-pulse" />
-                    AI&nbsp;&middot;&nbsp;24/7
+                    AI&nbsp;booking&nbsp;&middot;&nbsp;24/7
                   </span>
                   <FiPhone size={13} className="text-[#E1B878]" />
                   {AI_PHONE_DISPLAY}
@@ -111,11 +111,12 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
                     <span aria-hidden className="hidden xl:inline-block w-px h-4 bg-white/25" />
                     <a
                       href={`tel:${settings.primary_phone}`}
-                      aria-label={`Speak with our team at ${settings.primary_phone}, Monday through Friday 9am to 5pm`}
-                      className="hidden xl:inline-flex items-center gap-1.5 text-white/80 hover:text-white transition tabular-nums text-[12.5px]"
-                      title="Speak with our team — Mon–Fri 9 AM–5 PM"
+                      aria-label={`Front desk at ${settings.primary_phone}, Monday through Friday 9am to 5pm`}
+                      className="hidden xl:inline-flex items-center gap-1.5 text-white/65 hover:text-white transition tabular-nums text-[12.5px]"
+                      title="Front desk — Mon–Fri 9 AM–5 PM"
                     >
-                      <FiPhone size={11} className="text-white/55" />
+                      <FiPhone size={11} className="text-white/45" />
+                      <span className="text-white/55 font-medium">Front desk</span>
                       {settings.primary_phone}
                     </a>
                   </>
@@ -182,14 +183,16 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
 
           {/* Wine "Get Scheduled" CTA — matches live red/burgundy button */}
           <div className="hidden lg:flex items-center shrink-0">
-            <Link
-              href="/contact"
+            <a
+              href="https://brightertomorrow.janeapp.com/"
+              target="_blank"
+              rel="noopener noreferrer"
               className="group inline-flex items-center gap-2 text-white text-[12px] font-semibold uppercase tracking-[0.14em] px-5 py-3 hover:opacity-90 transition"
               style={{ backgroundColor: "#66202A", borderRadius: "20px 0 20px 20px" }}
             >
               Get Scheduled
               <FiArrowRight className="transition-transform duration-300 group-hover:translate-x-0.5" size={13} />
-            </Link>
+            </a>
           </div>
 
           <button
@@ -242,14 +245,16 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
               </div>
 
               <div className="px-4 pb-5 pt-4 border-t border-surface-line space-y-2.5 shrink-0 bg-cream-alt/40">
-                <Link
-                  href="/contact"
+                <a
+                  href="https://brightertomorrow.janeapp.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="w-full inline-flex justify-center items-center gap-2 text-white font-semibold uppercase tracking-[0.14em] text-[13px] px-4 py-3.5 transition"
                   style={{ backgroundColor: "#66202A", borderRadius: "20px 0 20px 20px" }}
                   onClick={() => setMobileOpen(false)}
                 >
                   Get Scheduled <FiArrowRight size={14} />
-                </Link>
+                </a>
                 <a
                   href={`tel:${AI_PHONE_TEL}`}
                   aria-label={`Call our AI booking assistant at ${AI_PHONE_DISPLAY}, available 24/7`}
@@ -267,7 +272,7 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
                     style={{ backgroundColor: "#E1B878", color: "#66202A", borderRadius: "5px 0 5px 5px" }}
                   >
                     <span className="inline-block w-1 h-1 rounded-full bg-[#66202A] animate-pulse" />
-                    AI&nbsp;24/7
+                    AI&nbsp;booking&nbsp;&middot;&nbsp;24/7
                   </span>
                   <FiPhone size={14} /> {AI_PHONE_DISPLAY}
                 </a>
@@ -278,6 +283,7 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
                     className="w-full inline-flex justify-center items-center gap-2 border border-ink/15 text-ink font-medium text-[13px] px-4 py-3 rounded-full hover:border-ink/40 transition tabular-nums"
                   >
                     <FiPhone size={13} className="text-ink/55" />
+                    <span className="text-ink/55">Front desk</span>
                     <span>{settings.primary_phone}</span>
                     <span className="text-ink/45 text-[11.5px]">&middot; Mon&ndash;Fri 9&ndash;5</span>
                   </a>

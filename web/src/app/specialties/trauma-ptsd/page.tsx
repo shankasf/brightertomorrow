@@ -76,7 +76,7 @@ export default function TraumaPtsdPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/trauma-ptsd/01-Brighter-Tomorrow-Trauma-Therapy-3.webp')",
+              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/trauma-ptsd/00-Brighter-Tomorrow-Trauma-Therapy-hero.webp')",
           }}
           aria-hidden
         />
@@ -333,6 +333,14 @@ export default function TraumaPtsdPage() {
 
       {/* CTA banner */}
       <section className="relative overflow-hidden" style={{ backgroundColor: "#6E7A8A" }}>
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(110,122,138,0.78), rgba(110,122,138,0.78)), url('/images/specialties/trauma-ptsd/04-cta-bg.webp')",
+          }}
+          aria-hidden
+        />
         <div className="container-x py-20 lg:py-24 text-center relative z-10">
           <Reveal>
             <p className="font-script italic text-[20px] sm:text-[24px]" style={{ color: GOLD }}>

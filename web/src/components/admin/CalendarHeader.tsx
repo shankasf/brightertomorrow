@@ -40,7 +40,7 @@ export default function CalendarHeader({
           <LuChevronLeft width={16} height={16} strokeWidth={2} />
         </button>
         <h2
-          className="min-w-[200px] text-center text-[17px] font-semibold tracking-tight text-ink"
+          className="min-w-[140px] text-center text-[15px] font-semibold tracking-tight text-ink sm:min-w-[200px] sm:text-[17px]"
           aria-live="polite"
         >
           {title}

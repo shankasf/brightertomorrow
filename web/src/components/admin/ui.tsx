@@ -76,13 +76,23 @@ export function Card({
 export function TableCard({
   children,
   className = '',
+  scrollX = false,
 }: {
   children: ReactNode;
   className?: string;
+  /** When true, the table scrolls horizontally inside the card instead of
+   *  clipping — lets wide, data-dense tables show every column at any width. */
+  scrollX?: boolean;
 }) {
   return (
     <Card padded={false} className={`overflow-hidden ${className}`}>
-      <table className="bt-table">{children}</table>
+      {scrollX ? (
+        <div className="overflow-x-auto">
+          <table className="bt-table">{children}</table>
+        </div>
+      ) : (
+        <table className="bt-table">{children}</table>
+      )}
     </Card>
   );
 }

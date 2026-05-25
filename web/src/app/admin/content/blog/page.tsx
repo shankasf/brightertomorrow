@@ -138,7 +138,7 @@ export default function BlogPage() {
                   <p className="text-sm font-semibold text-slate-900">{p.title}</p>
                   <p className="mt-0.5 font-mono text-[11px] text-slate-400">/{p.slug}</p>
                 </div>
-                <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="flex shrink-0 gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                   <Button variant="ghost" size="sm" onClick={() => startEdit(p)}>Edit</Button>
                   <Button variant="ghost" size="sm" onClick={() => del(p.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
                 </div>

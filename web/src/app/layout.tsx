@@ -6,6 +6,7 @@ import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
 import ChatWidget from "@/components/ChatWidget";
 import AccessibilityWidget from "@/components/AccessibilityWidget";
+import TherapistPopup from "@/components/TherapistPopup";
 import { LoggerInit } from "@/components/LoggerInit";
 import { getNav, getSiteSettings } from "@/lib/queries";
 
@@ -72,6 +73,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SiteFooter settings={settings} nav={footerNav} />
         <ChatWidget />
         <AccessibilityWidget />
+        <TherapistPopup />
       </body>
     </html>
   );

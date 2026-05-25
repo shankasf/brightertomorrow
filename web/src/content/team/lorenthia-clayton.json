@@ -3,8 +3,7 @@
   "full_name": "Lorenthia Clayton",
   "credentials_suffix": "CSW-I",
   "role": "Clinical Social Worker, Intern",
-  "photo_url": "https://brightertomorrowtherapy.com/wp-content/uploads/2025/02/Lorenthia-Clayton.webp",
-  "source_url": "https://brightertomorrowtherapy.com/lorenthia-clayton/",
+  "photo_url": "/team/lorenthia-clayton.webp",
   "hero_headline": "Finding Healing and Hope with Lorenthia Clayton, LCSW",
   "hero_intro": null,
   "bio_paragraphs": [
@@ -24,11 +23,26 @@
   "approach_headline": "A Holistic and Trauma-Informed Approach",
   "approach_intro": "Lorenthia believes that therapy should be a space for self-exploration, healing, and personal growth. She integrates a variety of evidence-based and compassionate approaches to help clients move forward. Her approach includes:",
   "modalities": [
-    {"name": "Cognitive Behavioral Therapy (CBT)", "description": "Helping clients shift negative thought patterns and improve emotional well-being."},
-    {"name": "Dialectical Behavior Therapy (DBT)", "description": "Teaching practical skills for emotional regulation and personal resilience."},
-    {"name": "Grief & Bereavement Counseling", "description": "Providing a space for clients to process loss and navigate the emotions surrounding grief."},
-    {"name": "Family Systems Work", "description": "Helping clients improve relationships and break unhealthy generational patterns."},
-    {"name": "Trauma-Informed Care", "description": "Supporting individuals with past trauma in a way that fosters healing and self-compassion."}
+    {
+      "name": "Cognitive Behavioral Therapy (CBT)",
+      "description": "Helping clients shift negative thought patterns and improve emotional well-being."
+    },
+    {
+      "name": "Dialectical Behavior Therapy (DBT)",
+      "description": "Teaching practical skills for emotional regulation and personal resilience."
+    },
+    {
+      "name": "Grief & Bereavement Counseling",
+      "description": "Providing a space for clients to process loss and navigate the emotions surrounding grief."
+    },
+    {
+      "name": "Family Systems Work",
+      "description": "Helping clients improve relationships and break unhealthy generational patterns."
+    },
+    {
+      "name": "Trauma-Informed Care",
+      "description": "Supporting individuals with past trauma in a way that fosters healing and self-compassion."
+    }
   ],
   "who_i_help_headline": "Who She Helps",
   "who_i_help": [

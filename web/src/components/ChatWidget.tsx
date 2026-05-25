@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiMic, FiMicOff } from "react-icons/fi";
+import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiPhone, FiPhoneOff } from "react-icons/fi";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -97,13 +97,30 @@ const GREET_MARKER = "__BT_GREET__";
 //     more PHI density per second than typed chat.
 const CHAT_SID_KEY = "bt_chat_session";
 const VOICE_SID_KEY = "bt_voice_session";
-// 30-min reconnect window for chat — long enough to cover a tab refresh
-// or accidental close, short enough that PHI (already on file) isn't
-// re-surfaced to a different person sharing the device hours later.
-// Past the window, mintSession() returns a brand-new UUID so the
-// backend sees an unrelated session with no prior state.
-const CHAT_SID_MAX_AGE_MS = 30 * 60 * 1000;        // 30min
+// 5-min window for chat, ROLLING from the last message (each turn refreshes
+// the timestamp). Within it, a refresh OR a brand-new tab restores the same
+// session — same thread_id → LangGraph resumes from DDB, so the agent keeps
+// what it already verified/collected (no re-asking insurance). Past 5 min of
+// inactivity everything is flushed (transcript + session) and the next chat
+// is a clean fresh greeting. Short window = minimum-necessary PHI lifetime.
+const CHAT_SID_MAX_AGE_MS = 5 * 60 * 1000;         // 5min
 const VOICE_SID_MAX_AGE_MS = 30 * 60 * 1000;       // 30min
+
+// Transcript cache — the *rendered* messages, kept so the visible chat is
+// restored as-is across a refresh or a new tab within the same 5-min window.
+//
+// HIPAA posture (why these exact choices):
+//   * localStorage (shared across tabs) so "come back in a new tab" works —
+//     sessionStorage is tab-scoped and would not survive a new tab.
+//   * 5-min ROLLING TTL, evicted on read AND flushed by an in-tab idle timer,
+//     so PHI's at-rest lifetime is bounded (§164.312(a)(2)(iii) auto-logoff).
+//     Residual: if the browser is fully closed before the timer fires, the
+//     bytes sit on disk until the next visit evicts them on read.
+//   * NOT encrypted: a browser-held key travels with the ciphertext, so it
+//     would protect nothing against XSS or the next user on the device — the
+//     control that matters is the short rolling TTL + flush, not a cipher.
+const CHAT_MSGS_KEY = "bt_chat_msgs";
+const CHAT_MSGS_MAX_AGE_MS = 5 * 60 * 1000;        // 5min, must match CHAT_SID
 
 type StoredSession = { id: string; ts: number };
 
@@ -143,6 +160,52 @@ function clearSession(key: string): void {
   }
 }
 
+type StoredMsgs = { id: string; ts: number; msgs: Msg[] };
+
+// Load the cached transcript iff it belongs to `sessionId` and is within the
+// 5-min TTL. Anything stale or mismatched is evicted and treated as absent.
+function loadMsgsCache(sessionId: string): Msg[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CHAT_MSGS_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<StoredMsgs>;
+    if (!p || p.id !== sessionId || typeof p.ts !== "number" || !Array.isArray(p.msgs)) return null;
+    if (Date.now() - p.ts > CHAT_MSGS_MAX_AGE_MS) {
+      window.localStorage.removeItem(CHAT_MSGS_KEY);
+      return null;
+    }
+    return p.msgs.filter(
+      (m): m is Msg =>
+        !!m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string",
+    );
+  } catch {
+    return null;
+  }
+}
+
+function saveMsgsCache(sessionId: string, msgs: Msg[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      CHAT_MSGS_KEY,
+      JSON.stringify({ id: sessionId, ts: Date.now(), msgs } satisfies StoredMsgs),
+    );
+  } catch {
+    // localStorage unavailable (private mode, quota) — skip; the chat still
+    // works for the current tab, it just won't restore after a refresh.
+  }
+}
+
+function clearMsgsCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(CHAT_MSGS_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 function mintUuid(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -151,14 +214,18 @@ function mintUuid(): string {
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
-  const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
-  // Hydrate sessionId from localStorage on first render so a refresh
-  // resumes the conversation. Entries past CHAT_SID_MAX_AGE_MS are
-  // auto-discarded; see loadSession() above.
+  // Hydrate sessionId AND the rendered transcript from localStorage on first
+  // render so a refresh or a new tab within the 5-min window restores the
+  // chat exactly as it was. Entries past the TTL are evicted inside
+  // loadSession/loadMsgsCache, so a stale visit starts clean.
   const [sessionId, setSessionId] = useState<string | null>(() =>
     loadSession(CHAT_SID_KEY, CHAT_SID_MAX_AGE_MS),
   );
+  const [msgs, setMsgs] = useState<Msg[]>(() => {
+    const sid = loadSession(CHAT_SID_KEY, CHAT_SID_MAX_AGE_MS);
+    return sid ? (loadMsgsCache(sid) ?? []) : [];
+  });
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const greetedRef = useRef(false);
   const [muted, setMuted] = useState(false);
@@ -175,6 +242,18 @@ export default function ChatWidget() {
   const playingRef = useRef(false);
 
   useEffect(() => { scroller.current?.scrollTo({ top: 9e9, behavior: "smooth" }); }, [msgs, open, loading]);
+
+  // Mirror the rendered transcript into the 5-min localStorage cache so a
+  // refresh or a new tab restores it as-is. Skip until there's a real user
+  // turn — a greeting-only session isn't worth restoring. Each save refreshes
+  // BOTH the transcript and the session timestamp, so the 5-min window rolls
+  // from the last message and the two expire together.
+  useEffect(() => {
+    if (!sessionId) return;
+    if (!msgs.some((m) => m.role === "user")) return;
+    saveMsgsCache(sessionId, msgs);
+    saveSession(CHAT_SID_KEY, sessionId);
+  }, [msgs, sessionId]);
 
   // Terminate the chat session when the visitor closes the tab / navigates
   // away. The gateway flips chat_sessions.ended_at so the admin UI stops
@@ -228,31 +307,71 @@ export default function ChatWidget() {
     return () => clearInterval(t);
   }, [open]);
 
-  // First-open: stream the assistant's greeting from the agent. Fires once
-  // per page-load — re-opening the panel preserves history instead of
-  // re-greeting. The system prompt is cached server-side, so this is fast
-  // and inexpensive.
-  //
-  // BUT: skip the synthetic greet when sessionId was rehydrated from
-  // localStorage (i.e., a prior page-load already established this
-  // session). On a re-mount, greetedRef resets to false; without this
-  // guard, the widget would post GREET_MARKER again and the server would
-  // append a second assistant turn against the existing thread with no
-  // user turn between — the "stray greeting" bug from 2026-05-21 session
-  // c291a8a7…. The server-side short-circuit in ai/app/main.py is the
-  // defense-in-depth backstop.
+  // Broadcast the panel's open/closed state so other global UI — namely the
+  // "Find Your Therapist" popup mounted in layout.tsx — can suppress itself
+  // while a conversation is active. Nothing should pop over a live chat. We
+  // set a synchronous window flag (for listeners that mount/fire later) AND
+  // dispatch an event (for live updates).
+  useEffect(() => {
+    try {
+      (window as unknown as { __btChatOpen?: boolean }).__btChatOpen = open;
+      window.dispatchEvent(new CustomEvent("bt:chat", { detail: { open } }));
+    } catch {
+      /* SSR / no window — ignore */
+    }
+  }, [open]);
+
+  // First-open behaviour:
+  //   * If a transcript was restored from cache (msgs already populated) —
+  //     just show it as-is. No greeting, no chooser.
+  //   * If a session id survived but the transcript didn't, still do NOT
+  //     re-greet: posting GREET_MARKER on an existing thread creates a stray
+  //     assistant turn (the 2026-05-21 bug). The visitor types and the agent
+  //     resumes from its server-side state.
+  //   * Otherwise (fresh visitor / flushed) — stream the agent's greeting.
   useEffect(() => {
     if (!open || greetedRef.current) return;
     greetedRef.current = true;
+    if (msgs.length > 0) return;
     if (sessionId) return;
     void send(GREET_MARKER);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Idle auto-flush. Once a real conversation exists, arm a timer for the
+  // rolling 5-min window; every new message re-runs this effect and resets
+  // it. When it fires (5 min of inactivity) everything is wiped — transcript,
+  // session id, and the server-side session — so a refresh or new tab after
+  // that starts clean. This is the §164.312(a)(2)(iii) automatic-logoff
+  // safeguard, enforced even if the tab is left open and idle.
+  useEffect(() => {
+    if (!sessionId || !msgs.some((m) => m.role === "user")) return;
+    const t = setTimeout(() => {
+      clearMsgsCache();
+      clearSession(CHAT_SID_KEY);
+      clearSession(VOICE_SID_KEY);
+      try {
+        void fetch("/v1/chat/end", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+          keepalive: true,
+        });
+      } catch {
+        // best-effort — the TTL eviction on next read is the backstop
+      }
+      setMsgs([]);
+      setSessionId(null);
+      greetedRef.current = false;
+    }, CHAT_MSGS_MAX_AGE_MS);
+    return () => clearTimeout(t);
+  }, [msgs, sessionId]);
+
   async function send(override?: string) {
     const text = (override ?? input).trim();
     if (!text || loading) return;
     if (override === undefined) setInput("");
+    const sid = sessionId;
     // The greet marker is a synthetic prompt — never render it as a user
     // bubble; the visitor never typed it. Everything else echoes normally.
     const isGreet = text === GREET_MARKER;
@@ -269,7 +388,7 @@ export default function ChatWidget() {
       const r = await fetch("/v1/chat/stream", {
         method: "POST",
         headers: { "content-type": "application/json", accept: "text/event-stream" },
-        body: JSON.stringify({ session_id: sessionId, message: text }),
+        body: JSON.stringify({ session_id: sid, message: text }),
       });
 
       if (!r.ok || !r.body) {
@@ -760,8 +879,8 @@ export default function ChatWidget() {
                 <button
                   type="button"
                   onClick={() => void toggleVoice()}
-                  title={voiceActive ? "End voice" : "Talk via voice"}
-                  aria-label={voiceActive ? "End voice" : "Start voice"}
+                  title={voiceActive ? "End call" : "Talk to us — start a call"}
+                  aria-label={voiceActive ? "End call" : "Start a voice call"}
                   className={`grid place-items-center w-11 h-11 rounded-full transition shrink-0 ${
                     voiceActive
                       ? "bg-red-500 text-white animate-pulse"
@@ -770,7 +889,7 @@ export default function ChatWidget() {
                       : "bg-surface border border-surface-line text-ink-muted hover:text-brand hover:border-brand"
                   }`}
                 >
-                  {voiceActive ? <FiMicOff size={16} /> : <FiMic size={16} />}
+                  {voiceActive ? <FiPhoneOff size={16} /> : <FiPhone size={16} />}
                 </button>
                 <button
                   type="submit"
@@ -801,6 +920,7 @@ export default function ChatWidget() {
                     onClick={() => {
                       clearSession(CHAT_SID_KEY);
                       clearSession(VOICE_SID_KEY);
+                      clearMsgsCache();
                       setSessionId(null);
                       setMsgs([]);
                       greetedRef.current = false;

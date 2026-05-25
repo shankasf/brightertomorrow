@@ -3,8 +3,7 @@
   "full_name": "Alayna Hammond",
   "credentials_suffix": "CPC-I",
   "role": "Clinical Professional Counselor, Intern",
-  "photo_url": "https://brightertomorrowtherapy.com/wp-content/uploads/2025/06/Bio_Photo_-_Alayna_Hammond-1-scaled.jpeg",
-  "source_url": "https://brightertomorrowtherapy.com/alayna-hammond",
+  "photo_url": "/team/alayna-hammond.jpeg",
   "hero_headline": "Real Conversations. Safe Space. Lasting Change with Alayna Hammond, CPC-I",
   "hero_intro": "Sometimes life feels like too much—too overwhelming, too fast, or too heavy. If you're dealing with anxiety, depression, mood swings, or feeling emotionally stuck, I want you to know you're not alone. Therapy with me is a no-pressure, no-judgment zone where you can breathe, be yourself, and start taking steps toward what truly matters to you.",
   "bio_paragraphs": [
@@ -26,11 +25,26 @@
   "approach_headline": "A Personalized and Holistic Approach",
   "approach_intro": "Therapy doesn't have to be stiff or clinical—it should feel like real conversations, in a safe space, with someone who sees your whole self. Alayna uses a mix of evidence-based tools and genuine human connection to help clients build emotional balance, healthier coping skills, and renewed self-worth. Here's how I work with clients:",
   "modalities": [
-    {"name": "Dialectical Behavior Therapy (DBT)", "description": "Building skills in emotional regulation, distress tolerance, mindfulness, and interpersonal effectiveness."},
-    {"name": "Cognitive Behavioral Therapy (CBT)", "description": "Challenging negative thought patterns and developing healthier ways of thinking."},
-    {"name": "Trauma-Informed Counseling", "description": "Recognizing the impact of past experiences and creating a safe, non-triggering space to explore them."},
-    {"name": "Strengths-Based Counseling", "description": "Focusing on what's working and helping clients build confidence and direction."},
-    {"name": "Affirming and Inclusive Care", "description": "Providing culturally sensitive support for queer, BIPOC, and marginalized individuals."}
+    {
+      "name": "Dialectical Behavior Therapy (DBT)",
+      "description": "Building skills in emotional regulation, distress tolerance, mindfulness, and interpersonal effectiveness."
+    },
+    {
+      "name": "Cognitive Behavioral Therapy (CBT)",
+      "description": "Challenging negative thought patterns and developing healthier ways of thinking."
+    },
+    {
+      "name": "Trauma-Informed Counseling",
+      "description": "Recognizing the impact of past experiences and creating a safe, non-triggering space to explore them."
+    },
+    {
+      "name": "Strengths-Based Counseling",
+      "description": "Focusing on what's working and helping clients build confidence and direction."
+    },
+    {
+      "name": "Affirming and Inclusive Care",
+      "description": "Providing culturally sensitive support for queer, BIPOC, and marginalized individuals."
+    }
   ],
   "who_i_help_headline": "Who She Helps",
   "who_i_help": [

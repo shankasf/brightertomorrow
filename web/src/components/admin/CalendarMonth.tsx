@@ -83,6 +83,12 @@ export default function CalendarMonth({
 
   return (
     <div className="rounded-2xl border border-[#E5E5E5] bg-white p-3 shadow-[0_1px_2px_rgba(25,39,53,0.04)]">
+      {/* On phones a 7-col month crushes each cell below legibility, so the
+          grid scrolls horizontally inside the card (intentional, scoped to
+          <sm); from sm up it's the approved fluid layout. The inner wrapper
+          carries a min-width only while scrolling. */}
+      <div className="bt-scroll-x -mx-3 px-3 sm:mx-0 sm:overflow-visible sm:px-0">
+      <div className="min-w-[560px] sm:min-w-0">
       <div className="grid grid-cols-7 gap-1 pb-2">
         {WEEKDAYS.map((w) => (
           <div
@@ -130,6 +136,8 @@ export default function CalendarMonth({
                 })}
           </motion.div>
         </AnimatePresence>
+      </div>
+      </div>
       </div>
     </div>
   );

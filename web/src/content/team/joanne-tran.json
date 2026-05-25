@@ -3,8 +3,7 @@
   "full_name": "Joanne Tran",
   "credentials_suffix": "LCSW, Team Lead",
   "role": "Licensed Clinical Social Worker, Team Lead",
-  "photo_url": "https://brightertomorrowtherapy.com/wp-content/uploads/2025/02/Joanne-Tran-profile.webp",
-  "source_url": "https://brightertomorrowtherapy.com/joanne-tran/",
+  "photo_url": "/team/joanne-tran.webp",
   "hero_headline": "Finding Strength Through Life's Challenges with Joanne Tran, LCSW, Team Lead",
   "hero_intro": null,
   "bio_paragraphs": [
@@ -27,12 +26,30 @@
   "approach_headline": "A Holistic and Trauma-Informed Approach",
   "approach_intro": "Joanne believes that true healing requires more than just talk therapy—it involves addressing the mind, body, and spirit as a whole. By blending evidence-based psychotherapy with mindfulness-based interventions, she creates a compassionate and empowering space for her clients to explore their emotions, develop coping strategies, and foster self-awareness. Her approach integrates:",
   "modalities": [
-    {"name": "Brainspotting", "description": "A powerful trauma-healing technique that helps process and release deeply stored emotional pain."},
-    {"name": "Parts and Memory Therapy", "description": "A gentle yet effective approach to working with different aspects of self, allowing for healing at a deeper level."},
-    {"name": "Trauma-Informed Yoga & Somatic Practices", "description": "Using movement, breathwork, and mindfulness to support emotional regulation and stress relief."},
-    {"name": "Reiki & Energy Healing", "description": "Helping clients restore balance, release emotional blockages, and enhance overall well-being."},
-    {"name": "Mindfulness & Meditation", "description": "Teaching clients how to develop inner awareness, self-compassion, and grounding techniques for daily life."},
-    {"name": "Nutrition & Lifestyle Integration", "description": "Encouraging wellness practices that support emotional and physical health."}
+    {
+      "name": "Brainspotting",
+      "description": "A powerful trauma-healing technique that helps process and release deeply stored emotional pain."
+    },
+    {
+      "name": "Parts and Memory Therapy",
+      "description": "A gentle yet effective approach to working with different aspects of self, allowing for healing at a deeper level."
+    },
+    {
+      "name": "Trauma-Informed Yoga & Somatic Practices",
+      "description": "Using movement, breathwork, and mindfulness to support emotional regulation and stress relief."
+    },
+    {
+      "name": "Reiki & Energy Healing",
+      "description": "Helping clients restore balance, release emotional blockages, and enhance overall well-being."
+    },
+    {
+      "name": "Mindfulness & Meditation",
+      "description": "Teaching clients how to develop inner awareness, self-compassion, and grounding techniques for daily life."
+    },
+    {
+      "name": "Nutrition & Lifestyle Integration",
+      "description": "Encouraging wellness practices that support emotional and physical health."
+    }
   ],
   "who_i_help_headline": "Who She Helps",
   "who_i_help": [

@@ -457,51 +457,86 @@ export default function TeenTherapyPage() {
       {/* Our Approach — wine bg */}
       <section style={{ backgroundColor: WINE }} className="pt-20 lg:pt-28 pb-20">
         <div className="container-x">
-          <div className="grid lg:grid-cols-12 gap-10 lg:gap-12">
-            <Reveal className="lg:col-span-5">
-              <h3 className="font-display font-bold text-[28px] sm:text-[34px] lg:text-[37.5px] text-white leading-[1.2]">
-                Our Approach to Teen Counseling
-              </h3>
-              <p className="mt-5 text-white/85 leading-[1.7] text-[15px]">
-                Trust is the foundation of effective teen therapy. We begin by building a
-                therapeutic relationship that feels safe and respectful. Teens need to feel heard
-                before they can open up.
-              </p>
-              <h4 className="mt-8 font-display font-bold text-[20px] sm:text-[22px] text-white">
-                Confidentiality Matters
-              </h4>
-              <p className="mt-3 text-white/85 leading-[1.7] text-[15px]">
-                We value parental involvement, especially during the intake process. However, for
-                therapy to be effective, teens must feel secure in the privacy of their sessions.
-                Information is only shared with parents if:
-              </p>
-            </Reveal>
-
-            <div className="lg:col-span-7 grid gap-y-6 self-center">
-              {CONFIDENTIALITY.map((it, i) => (
-                <Reveal key={it.title} delay={i * 0.07}>
-                  <div className="flex items-start gap-4">
-                    <span
-                      className="mt-0.5 inline-grid place-items-center w-9 h-9 shrink-0 rounded-full"
-                      style={{ border: `2px solid ${GOLD}`, color: GOLD }}
-                    >
-                      <FiCheckCircle size={20} strokeWidth={2} />
-                    </span>
-                    <div>
-                      <h4 className="font-display font-bold text-[18px] sm:text-[20px] text-white leading-[1.25]">
-                        {it.title}
-                      </h4>
-                      <p className="mt-2 text-white/85 text-[14.5px] leading-[1.65]">{it.body}</p>
-                    </div>
-                  </div>
-                </Reveal>
-              ))}
-              <Reveal delay={0.3}>
-                <p className="mt-2 text-white text-[15px] leading-[1.7]">
-                  We aim to create collaboration, not secrecy.
+          <div className="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
+            <div className="lg:col-span-7">
+              <Reveal>
+                <h3 className="font-display font-bold text-[28px] sm:text-[34px] lg:text-[37.5px] text-white leading-[1.2]">
+                  Our Approach to Teen Counseling
+                </h3>
+                <p className="mt-5 text-white/85 leading-[1.7] text-[15px]">
+                  Trust is the foundation of effective teen therapy. We begin by building a
+                  therapeutic relationship that feels safe and respectful. Teens need to feel heard
+                  before they can open up.
+                </p>
+                <h4 className="mt-8 font-display font-bold text-[20px] sm:text-[22px] text-white">
+                  Confidentiality Matters
+                </h4>
+                <p className="mt-3 text-white/85 leading-[1.7] text-[15px]">
+                  We value parental involvement, especially during the intake process. However, for
+                  therapy to be effective, teens must feel secure in the privacy of their sessions.
+                  Information is only shared with parents if:
                 </p>
               </Reveal>
+
+              <div className="mt-6 grid gap-y-6">
+                {CONFIDENTIALITY.map((it, i) => (
+                  <Reveal key={it.title} delay={i * 0.07}>
+                    <div className="flex items-start gap-4">
+                      <span
+                        className="mt-0.5 inline-grid place-items-center w-9 h-9 shrink-0 rounded-full"
+                        style={{ border: `2px solid ${GOLD}`, color: GOLD }}
+                      >
+                        <FiCheckCircle size={20} strokeWidth={2} />
+                      </span>
+                      <div>
+                        <h4 className="font-display font-bold text-[18px] sm:text-[20px] text-white leading-[1.25]">
+                          {it.title}
+                        </h4>
+                        <p className="mt-2 text-white/85 text-[14.5px] leading-[1.65]">{it.body}</p>
+                      </div>
+                    </div>
+                  </Reveal>
+                ))}
+                <Reveal delay={0.3}>
+                  <p className="mt-2 text-white text-[15px] leading-[1.7]">
+                    We aim to create collaboration, not secrecy.
+                  </p>
+                  <div className="mt-8">
+                    <Link
+                      href="/contact"
+                      className="inline-block font-display font-bold tracking-[0.15em] text-[13px] uppercase px-8 py-4 transition hover:opacity-90"
+                      style={{ backgroundColor: GOLD, color: INK, borderRadius: "30px 0 30px 30px" }}
+                    >
+                      Schedule An Appointment
+                    </Link>
+                  </div>
+                </Reveal>
+              </div>
             </div>
+
+            <Reveal delay={0.1} className="lg:col-span-5">
+              <div className="relative mx-auto max-w-[460px]">
+                <div
+                  className="absolute -bottom-6 -right-6 w-full h-full"
+                  style={{ backgroundColor: GOLD, borderRadius: "60px 0 60px 60px" }}
+                  aria-hidden
+                />
+                <motion.div
+                  className="relative aspect-[4/5] overflow-hidden"
+                  style={{ borderRadius: "60px 0 60px 60px" }}
+                  whileHover={{ scale: 1.02 }}
+                  transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <Image
+                    src="/images/specialties/teen-therapy/04-pexels-shvets-production-7176233.webp"
+                    alt="Teen building trust in a counseling session"
+                    fill
+                    sizes="(min-width:1024px) 460px, 100vw"
+                    className="object-cover"
+                  />
+                </motion.div>
+              </div>
+            </Reveal>
           </div>
         </div>
       </section>

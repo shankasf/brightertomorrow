@@ -122,7 +122,7 @@ export default function LifeTransitionsPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/life-transitions/01-Brighter-Tomorrow-Life-Transitions-2.webp')",
+              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/life-transitions/00-hero-Brighter-Tomorrow-Life-Transitions.webp')",
           }}
           aria-hidden
         />

@@ -89,7 +89,7 @@ export default function StatsPage() {
                         </div>
                         <div className="mt-1 text-xs font-medium uppercase tracking-wider text-slate-500">{s.label}</div>
                       </div>
-                      <Button variant="ghost" size="sm" onClick={() => setEditing(s.id)} className="opacity-0 transition-opacity group-hover:opacity-100">
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(s.id)} className="transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                         Edit
                       </Button>
                     </motion.div>

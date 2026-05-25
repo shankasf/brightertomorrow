@@ -61,7 +61,7 @@ export default function PartsMemoryTherapyPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/parts-memory-therapy/01-Brighter-Tomorrow-Parts-Memory-Therapy-4.webp')",
+              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.55)), url('/images/specialties/parts-memory-therapy/00-hero-Brighter-Tomorrow-Parts-Memory-Therapy.webp')",
           }}
           aria-hidden
         />

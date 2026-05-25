@@ -3,8 +3,7 @@
   "full_name": "Dr. Tony Martinez",
   "credentials_suffix": "Ph.D., LMFT",
   "role": "Licensed Marriage and Family Therapist",
-  "photo_url": "https://brightertomorrowtherapy.com/wp-content/uploads/2025/10/Bio_Photo_-_Tony_Martinez.jpg",
-  "source_url": "https://brightertomorrowtherapy.com/tony-martinez/",
+  "photo_url": "/team/tony-martinez.jpg",
   "hero_headline": "Depth, Healing, and Lasting Change With Dr. Tony Martinez, Ph.D., LMFT",
   "hero_intro": "Sometimes life has a way of choosing our path. For me, therapy wasn't just a career—it was a calling. Growing up in difficult circumstances taught me the value of resilience, compassion, and truly being heard. Today, I bring that same depth of understanding into my work as a therapist, helping individuals and couples find clarity, connection, and hope—even in their most challenging seasons.",
   "bio_paragraphs": [
@@ -27,10 +26,22 @@
   "approach_headline": "A Client-Centered and Relationship-Focused Approach",
   "approach_intro": "Dr. Martinez uses a psychodynamic approach, helping you understand how your past experiences shape current patterns, emotions, and relationships. Together, we'll explore how those experiences influence your sense of self—and how to break free from what's holding you back.",
   "modalities": [
-    {"name": "Collaborative and Reflective", "description": "We work together to understand your story and create meaningful goals."},
-    {"name": "Holistic and Practical", "description": "We look at the full picture: emotional health, daily habits, boundaries, relationships, and for some, spiritual well-being."},
-    {"name": "Culturally Grounded", "description": "With a multicultural background and international life experience, I offer a space that honors identity, culture, and lived experience."},
-    {"name": "Trauma-Informed", "description": "Whether you've experienced combat trauma, childhood adversity, or emotional wounds, I meet you with care and clinical expertise."}
+    {
+      "name": "Collaborative and Reflective",
+      "description": "We work together to understand your story and create meaningful goals."
+    },
+    {
+      "name": "Holistic and Practical",
+      "description": "We look at the full picture: emotional health, daily habits, boundaries, relationships, and for some, spiritual well-being."
+    },
+    {
+      "name": "Culturally Grounded",
+      "description": "With a multicultural background and international life experience, I offer a space that honors identity, culture, and lived experience."
+    },
+    {
+      "name": "Trauma-Informed",
+      "description": "Whether you've experienced combat trauma, childhood adversity, or emotional wounds, I meet you with care and clinical expertise."
+    }
   ],
   "who_i_help_headline": "Who He Helps",
   "who_i_help": [

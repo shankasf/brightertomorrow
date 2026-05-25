@@ -126,7 +126,7 @@ export default function ServicesPage() {
                     {s.short_desc && <div className="mt-1 line-clamp-1 text-xs text-slate-500">{s.short_desc}</div>}
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="flex shrink-0 gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                   <Button variant="ghost" size="sm" onClick={() => startEdit(s)}>Edit</Button>
                   <Button variant="ghost" size="sm" onClick={() => del(s.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
                 </div>

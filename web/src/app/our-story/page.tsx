@@ -395,23 +395,52 @@ export default function OurStoryPage() {
         </div>
       </section>
 
-      {/* OUR MISSION — wine band */}
-      <section style={{ backgroundColor: WINE }} className="py-20 lg:py-24">
-        <div className="container-narrow text-center">
-          <Reveal direction="up">
-            <h3 className="font-display font-bold text-[28px] sm:text-[34px] lg:text-[40px] text-white leading-[1.2]">
-              Our{" "}
-              <span style={{ color: GOLD, fontStyle: "italic" }}>Mission</span>
-            </h3>
-            <p className="mt-6 text-white/90 text-[16px] sm:text-[17px] leading-[1.8] max-w-3xl mx-auto">
-              At Brighter Tomorrow Therapy, our mission is clear: to provide
-              compassionate, evidence-based therapy that empowers individuals
-              to build resilience, enhance their quality of life, and face
-              challenges with confidence. Whether you&rsquo;re managing chronic
-              pain, adjusting to life after a loss, or facing relationship
-              struggles, we&rsquo;re here to walk with you every step of the
-              way.
-            </p>
+      {/* OUR MISSION — text left + logo right (mirrors .com /story) */}
+      <section className="bg-white py-20 lg:py-28">
+        <div className="container-x grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <Reveal direction="left">
+            <div>
+              <span
+                className="font-display font-semibold tracking-[0.18em] uppercase text-[12px]"
+                style={{ color: WINE }}
+              >
+                Brighter Tomorrow Counseling
+              </span>
+              <h2
+                className="mt-5 font-display font-bold leading-[1.15] text-[32px] sm:text-[40px] lg:text-[45px]"
+                style={{ color: INK }}
+              >
+                Our{" "}
+                <span style={{ color: WINE, fontStyle: "italic" }}>
+                  Mission
+                </span>
+              </h2>
+              <p className="mt-7 text-ink-muted text-[16px] sm:text-[17px] leading-[1.8]">
+                At Brighter Tomorrow Therapy, our mission is clear: to provide
+                compassionate, evidence-based therapy that empowers individuals
+                to build resilience, enhance their quality of life, and face
+                challenges with confidence. Whether you&rsquo;re managing
+                chronic pain, adjusting to life after a loss, or facing
+                relationship struggles, we&rsquo;re here to walk with you every
+                step of the way.
+              </p>
+            </div>
+          </Reveal>
+
+          <Reveal direction="right" delay={0.1}>
+            <div
+              className="relative mx-auto w-full max-w-[460px] grid place-items-center p-10 sm:p-14 bg-cream"
+              style={{ borderRadius: "60px 0 60px 60px" }}
+            >
+              <Image
+                src="/brand/logo.png"
+                alt="Brighter Tomorrow Counseling Services logo"
+                width={460}
+                height={150}
+                sizes="(min-width:1024px) 460px, 100vw"
+                className="w-full h-auto object-contain"
+              />
+            </div>
           </Reveal>
         </div>
       </section>

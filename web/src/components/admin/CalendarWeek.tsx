@@ -135,6 +135,12 @@ export default function CalendarWeek({
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[#E5E5E5] bg-white shadow-[0_1px_2px_rgba(25,39,53,0.04)]">
+      {/* Seven day columns at a 64px gutter crush below ~640px, so the whole
+          week (header + body) scrolls horizontally as one unit on phones. The
+          min-width only applies while scrolling; from sm up it's the approved
+          fluid grid. */}
+      <div className="bt-scroll-x sm:overflow-visible">
+      <div className="min-w-[640px] sm:min-w-0">
       {/* Header row — day labels with workload count */}
       <div className="grid border-b border-[#EDE6D9]" style={gridTemplate()}>
         <div className="border-r border-[#EDE6D9] bg-cream-alt/40" />
@@ -223,6 +229,8 @@ export default function CalendarWeek({
             );
           })}
         </div>
+      </div>
+      </div>
       </div>
     </div>
   );

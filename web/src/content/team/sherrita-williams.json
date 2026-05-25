@@ -3,8 +3,7 @@
   "full_name": "Sherrita Williams",
   "credentials_suffix": "CSW-I",
   "role": "Clinical Social Worker, Intern",
-  "photo_url": "https://brightertomorrowtherapy.com/wp-content/uploads/2025/02/Sherrita-Williams.webp",
-  "source_url": "https://brightertomorrowtherapy.com/sherrita-williams/",
+  "photo_url": "/team/sherrita-williams.webp",
   "hero_headline": "Finding Your Voice and Strength in Therapy with Sherrita Williams, CSW-I",
   "hero_intro": null,
   "bio_paragraphs": [
@@ -20,11 +19,26 @@
   "approach_headline": "A Client-Centered and Relationship-Focused Approach",
   "approach_intro": "Sherrita believes that effective communication is the foundation of healthy relationships—whether in marriage, friendships, or personal growth. She utilizes a blend of traditional and innovative therapy techniques to help clients develop stronger emotional awareness and communication skills. Her approach includes:",
   "modalities": [
-    {"name": "Client-Centered Therapy", "description": "Focusing on each individual's unique strengths and experiences."},
-    {"name": "EMDR & Brainspotting (in training)", "description": "Using evidence-based techniques to heal past emotional wounds."},
-    {"name": "Marriage & Relationship Counseling", "description": "Helping couples work through conflict, reconnect, and improve communication."},
-    {"name": "Solution-Focused Therapy", "description": "Providing practical tools to navigate challenges with confidence."},
-    {"name": "Behavioral Health Support", "description": "Assisting individuals in managing mental health concerns and emotional struggles."}
+    {
+      "name": "Client-Centered Therapy",
+      "description": "Focusing on each individual's unique strengths and experiences."
+    },
+    {
+      "name": "EMDR & Brainspotting (in training)",
+      "description": "Using evidence-based techniques to heal past emotional wounds."
+    },
+    {
+      "name": "Marriage & Relationship Counseling",
+      "description": "Helping couples work through conflict, reconnect, and improve communication."
+    },
+    {
+      "name": "Solution-Focused Therapy",
+      "description": "Providing practical tools to navigate challenges with confidence."
+    },
+    {
+      "name": "Behavioral Health Support",
+      "description": "Assisting individuals in managing mental health concerns and emotional struggles."
+    }
   ],
   "who_i_help_headline": "Who She Helps",
   "who_i_help": [

@@ -300,12 +300,13 @@ export default function AccessibilityWidget() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="fixed z-50 bg-white border border-surface-line rounded-2xl shadow-card overflow-hidden
+            className="fixed z-50 flex flex-col bg-white border border-surface-line rounded-2xl shadow-card overflow-hidden
                        bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-4 right-4 sm:right-auto sm:left-10 sm:bottom-28
-                       w-auto sm:w-[420px] max-w-[calc(100vw-2rem)]"
+                       w-auto sm:w-[420px] max-w-[calc(100vw-2rem)]
+                       max-h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] sm:max-h-[calc(100dvh-9rem)]"
           >
             {/* Header */}
-            <div className="px-5 py-3.5 bg-[#66202a] text-white flex items-center justify-between">
+            <div className="shrink-0 px-5 py-3.5 bg-[#66202a] text-white flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <AccessibilityIcon className="w-5 h-5" />
                 <span className="font-semibold tracking-tight">Accessibility</span>
@@ -321,7 +322,7 @@ export default function AccessibilityWidget() {
             </div>
 
             {/* Tabs */}
-            <div role="tablist" className="flex border-b border-surface-line bg-[var(--cream)]">
+            <div role="tablist" className="shrink-0 flex border-b border-surface-line bg-[var(--cream)]">
               {(["profiles", "features"] as const).map((t) => (
                 <button
                   key={t}
@@ -341,7 +342,7 @@ export default function AccessibilityWidget() {
             </div>
 
             {/* Body */}
-            <div className="p-4 max-h-[70vh] overflow-y-auto">
+            <div className="flex-1 min-h-0 p-4 overflow-y-auto overscroll-contain">
               {tab === "profiles" ? (
                 <div className="grid grid-cols-2 gap-2.5">
                   {PROFILES.map((p) => {
@@ -452,7 +453,7 @@ export default function AccessibilityWidget() {
             </div>
 
             {/* Footer */}
-            <div className="px-4 py-3 border-t border-surface-line flex items-center justify-between gap-3 bg-[var(--cream)]">
+            <div className="shrink-0 px-4 py-3 border-t border-surface-line flex items-center justify-between gap-3 bg-[var(--cream)]">
               <button
                 type="button"
                 onClick={reset}
