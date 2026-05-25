@@ -5,6 +5,9 @@ Each function receives a fully-loaded outbox row (dict) and the decrypted
 payload string.  It raises on retryable errors and raises TerminalError on
 permanent failures so handler.py can branch correctly.
 
+Supported channels: email, sms.
+s3_phi is retired; handler.py marks such rows dead before reaching this module.
+
 HIPAA note: NO PHI logged here.  Log only notification_id, channel, status.
 """
 from __future__ import annotations
@@ -27,15 +30,12 @@ import boto3
 log = logging.getLogger(__name__)
 
 _ses = boto3.client("ses")
-_s3 = boto3.client("s3")
 
 # Injected via Lambda environment
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_SECRET_ARN = os.environ.get("TWILIO_SECRET_ARN", "")
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
 SES_FROM_EMAIL = os.environ.get("SES_FROM_EMAIL", "")
-PHI_BUCKET = os.environ.get("PHI_BUCKET", "bt-phi-logs")
-KMS_KEY_ID = os.environ.get("KMS_KEY_ID", "")
 
 
 def _env_flag(name: str, default: str) -> bool:
@@ -71,7 +71,6 @@ _TWILIO_TERMINAL_CODES = {
     21212,  # Invalid 'From' phone number
     21214,  # 'To' phone number cannot receive SMS
     21610,  # Message cannot be sent to landlines
-    21211,  # Invalid phone number
     30006,  # Landline or unreachable carrier
 }
 
@@ -101,6 +100,8 @@ def send_sms(row: Dict[str, Any], decrypted_payload: str) -> None:
     # Lazy import — see top-of-file note about CDK asset bundling.
     import requests  # noqa: PLC0415
 
+    # handler.py Guard 3 guarantees recipient is present and non-empty before
+    # any sender is invoked, so bracket-access is safe here.
     to_number: str = row["recipient"]  # E.164 format; never logged
     url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
 
@@ -130,12 +131,17 @@ def send_sms(row: Dict[str, Any], decrypted_payload: str) -> None:
 
 def send_email(row: Dict[str, Any], decrypted_payload: str) -> None:
     """
-    Send via SES.  payload JSON must include 'subject' and 'html_body'.
+    Send via SES. payload JSON carries STRUCTURED content
+    ({subject, heading, paragraphs[], details[]}); the one central branded
+    template in email_template.py renders the HTML + text. A legacy
+    pre-rendered {subject, html_body, text_body} payload is also accepted.
     Raises TerminalError on permanent bounces (MessageRejected).
     """
     if SES_DISABLED:
         raise ServiceUnavailableError("ses_disabled")
 
+    # handler.py Guard 3 guarantees recipient is present and non-empty before
+    # any sender is invoked, so bracket-access is safe here.
     to_email: str = row["recipient"]  # never logged
 
     try:
@@ -143,9 +149,9 @@ def send_email(row: Dict[str, Any], decrypted_payload: str) -> None:
     except json.JSONDecodeError as exc:
         raise TerminalError(f"email payload not valid JSON: {exc}") from exc
 
-    subject = body.get("subject", "Message from BrighterTomorrow Therapy")
-    html_body = body.get("html_body", "")
-    text_body = body.get("text_body", html_body)
+    # Central template renders the single branded look from structured content.
+    from email_template import render_from_payload  # noqa: PLC0415
+    subject, html_body, text_body = render_from_payload(body)
 
     try:
         _ses.send_email(
@@ -163,27 +169,3 @@ def send_email(row: Dict[str, Any], decrypted_payload: str) -> None:
         raise TerminalError(f"SES MessageRejected: {exc}") from exc
     except _ses.exceptions.MailFromDomainNotVerifiedException as exc:
         raise TerminalError(f"SES domain not verified: {exc}") from exc
-
-
-def send_s3_phi(row: Dict[str, Any], decrypted_payload: str) -> None:
-    """
-    Write a PHI log object to the bt-phi-logs S3 bucket.
-    Key pattern: phi/{session_id}/{turn_id}.json
-    SSE-KMS with the bt CMK.  Raises on any S3 error (all retryable by default).
-    """
-    session_id: str = row.get("session_id", "unknown")
-    turn_id: str = row.get("turn_id", row["notification_id"])
-    key = f"phi/{session_id}/{turn_id}.json"
-
-    try:
-        _s3.put_object(
-            Bucket=PHI_BUCKET,
-            Key=key,
-            Body=decrypted_payload.encode("utf-8"),
-            ContentType="application/json",
-            ServerSideEncryption="aws:kms",
-            SSEKMSKeyId=KMS_KEY_ID,
-        )
-    except _s3.exceptions.from_code("AccessDenied") as exc:
-        # KMS-denied or bucket policy denial — terminal
-        raise TerminalError(f"S3 PutObject access denied: {exc}") from exc

@@ -50,6 +50,18 @@ export class DataStack extends Stack {
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
+    // byPhoneHash — look up a confirmed appointment by caller phone.
+    // HIPAA: GSI key carries only the SHA-256 hash of the normalised 10-digit
+    // phone number; raw phone lives in the encrypted item body, never in the key.
+    // Sparse index: only items that have BOTH phoneHash AND appointmentTime are
+    // indexed — exactly the booking/confirmed-intake records we want.
+    this.table.addGlobalSecondaryIndex({
+      indexName: "byPhoneHash",
+      partitionKey: { name: "phoneHash", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "appointmentTime", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
     // ── Jane iCal events table ───────────────────────────────────────────────
     // PHI present (description field). CMK encrypted, PITR, RETAIN.
     this.janeEventsTable = new dynamodb.Table(this, "JaneEventsTable", {

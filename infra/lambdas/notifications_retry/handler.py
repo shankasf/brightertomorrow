@@ -3,7 +3,7 @@ notifications_retry/handler.py — EventBridge-triggered retry worker.
 
 Fires every 60 s. Scans bt-notifications-outbox GSI1 for rows with
 status IN (pending, retry) AND next_retry_at <= now, then dispatches
-each by channel (sms | email | s3_phi).
+each by channel (sms | email only — s3_phi is retired).
 
 HIPAA constraints:
 - NO PHI logged.  Only notification_id, channel, status, attempt_count.
@@ -29,7 +29,6 @@ from senders import (
     ServiceUnavailableError,
     TerminalError,
     send_email,
-    send_s3_phi,
     send_sms,
 )
 
@@ -53,6 +52,9 @@ MAX_ATTEMPTS = 6
 
 # TTL for sent rows: 30 days from now (auto-purge via DDB TTL attribute).
 SENT_TTL_SECONDS = 30 * 86400
+
+# Canonical set of supported channels. s3_phi is retired.
+_SUPPORTED_CHANNELS = {"email", "sms"}
 
 
 def _now_iso() -> str:
@@ -193,7 +195,18 @@ def _process_row(table: Any, row: Dict[str, Any], now_iso: str) -> None:
     channel = row.get("channel", "")
     attempt_count = int(row.get("attempt_count", 0))
 
-    # Hard cap: after MAX_ATTEMPTS tries, force dead regardless of channel.
+    # Guard 1: channel must be a supported canonical value.
+    # s3_phi rows (legacy) and any unknown channel are marked dead immediately.
+    if channel not in _SUPPORTED_CHANNELS:
+        _mark_dead(table, row, f"channel_retired_or_unknown:{channel}")
+        log.warning(json.dumps({
+            "event": "row_dead_bad_channel",
+            "notification_id": nid,
+            "channel": channel,
+        }))
+        return
+
+    # Guard 2: hard cap — after MAX_ATTEMPTS tries, force dead.
     if attempt_count >= MAX_ATTEMPTS:
         _mark_dead(table, row, f"max_attempts={MAX_ATTEMPTS} exceeded")
         log.info(json.dumps({
@@ -204,9 +217,22 @@ def _process_row(table: Any, row: Dict[str, Any], now_iso: str) -> None:
         }))
         return
 
-    # Decrypt payload. KMS errors here are terminal (key policy / permissions).
+    # Guard 3: both payload_ciphertext and recipient must be present and non-empty.
+    # Use .get() — never bracket-access — so missing keys never raise KeyError.
+    payload_ciphertext = row.get("payload_ciphertext") or ""
+    recipient = row.get("recipient") or ""
+    if not payload_ciphertext or not recipient:
+        _mark_dead(table, row, "malformed_row_missing_payload_or_recipient")
+        log.warning(json.dumps({
+            "event": "row_dead_malformed",
+            "notification_id": nid,
+            "channel": channel,
+        }))
+        return
+
+    # Guard 4: decrypt payload. KMS ClientError here is terminal (key policy / permissions).
     try:
-        payload = decrypt_payload(row["payload_ciphertext"])
+        payload = decrypt_payload(payload_ciphertext)
     except ClientError as exc:
         code = exc.response["Error"]["Code"]
         _mark_dead(table, row, f"kms_error:{code}")
@@ -218,16 +244,13 @@ def _process_row(table: Any, row: Dict[str, Any], now_iso: str) -> None:
         }))
         return
 
+    # Guard 5: dispatch by channel and handle send-level outcomes.
     try:
         if channel == "sms":
             send_sms(row, payload)
         elif channel == "email":
             send_email(row, payload)
-        elif channel == "s3_phi":
-            send_s3_phi(row, payload)
-        else:
-            _mark_dead(table, row, f"unknown_channel:{channel}")
-            return
+        # No else branch needed — channel was validated in Guard 1.
 
         # Success path — optimistic lock may raise ConditionalCheckFailed
         # (another worker already marked it sent).  Silently ignore.
@@ -299,6 +322,19 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     log.info(json.dumps({"event": "scan_complete", "rows_found": len(rows), "at": now_iso}))
 
     for row in rows:
-        _process_row(table, row, now_iso)
+        # Belt-and-suspenders: any unhandled exception from _process_row
+        # (including failures inside _mark_dead/_mark_retry) must never
+        # propagate out of the loop and abort the remaining batch.
+        try:
+            _process_row(table, row, now_iso)
+        except Exception as exc:
+            # Log only safe identifiers — NO PHI, no full exception message.
+            log.error(json.dumps({
+                "event": "row_processing_unhandled",
+                "notification_id": row.get("notification_id", "?"),
+                "channel": row.get("channel", "?"),
+                "error": type(exc).__name__,
+            }))
+            # Continue draining the rest of the batch.
 
     return {"statusCode": 200, "processed": len(rows)}

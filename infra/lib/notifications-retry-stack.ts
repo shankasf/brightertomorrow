@@ -82,13 +82,15 @@ export class NotificationsRetryStack extends Stack {
         //   aws lambda update-function-configuration \
         //     --function-name bt-notifications-retry \
         //     --environment Variables='{..., "SES_FROM_EMAIL":"noreply@brightertomorrowtherapy.cloud"}'
-        SES_FROM_EMAIL: "noreply@brightertomorrowtherapy.cloud",
-        // Twilio + SES are intentionally disabled until provisioned. Rows
-        // for those channels are marked status="service_unavailable" so
-        // admins can manually follow up — no API calls attempted. Flip
-        // these to "false" once the providers are live.
+        // From a verified SES domain identity (mail. subdomain isolates
+        // deliverability/DMARC from the website apex). See bt.ts sesFromIdentityArn.
+        SES_FROM_EMAIL: "noreply@mail.brightertomorrowtherapy.cloud",
+        // SES is LIVE (domain mail.brightertomorrowtherapy.cloud verified +
+        // DKIM in Hostinger DNS, account out of sandbox). Twilio/SMS stays
+        // disabled until A2P 10DLC registration completes — those rows are
+        // marked status="service_unavailable" for manual follow-up.
         DISABLE_TWILIO: "true",
-        DISABLE_SES: "true",
+        DISABLE_SES: "false",
         LOG_LEVEL: "INFO",
       },
     });

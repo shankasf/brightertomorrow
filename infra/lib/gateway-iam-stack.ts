@@ -3,7 +3,6 @@ import { Construct } from "constructs";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as sm from "aws-cdk-lib/aws-secretsmanager";
-import { DDB_GSI1 } from "./constants";
 
 export interface GatewayIamStackProps extends StackProps {
   phiKey: kms.IKey;
@@ -44,7 +43,10 @@ export class GatewayIamStack extends Stack {
       userName: "bt-gateway-vm",
     });
 
-    const tableGsiArn = `${props.tableArn}/index/${DDB_GSI1}`;
+    // Cover GSI1 and every other bt-main GSI (e.g. byPhoneHash for appointment
+    // lookup). Mirrors the /index/* grants used for the other tables below so a
+    // newly-added index doesn't silently break with AccessDeniedException.
+    const tableGsiArn = `${props.tableArn}/index/*`;
 
     // All policy statements collected here, then attached via a single
     // ManagedPolicy below. SIDs are stable so policy diffs stay readable.
@@ -150,6 +152,30 @@ export class GatewayIamStack extends Stack {
             ],
           },
         },
+      }),
+
+      // Invoke the notifications-retry Lambda synchronously right after the
+      // gateway writes an outbox row — enables truly-immediate delivery without
+      // waiting for the next EventBridge tick (≤1 min).
+      new iam.PolicyStatement({
+        sid: "InvokeNotificationsRetryLambda",
+        effect: iam.Effect.ALLOW,
+        actions: ["lambda:InvokeFunction"],
+        resources: ["arn:aws:lambda:us-east-1:689517798275:function:bt-notifications-retry"],
+      }),
+
+      // Direct (non-ViaService) CMK encrypt for the notifications outbox.
+      // phi.NotificationStore.EnqueueNotification calls kms:Encrypt itself to
+      // wrap the patient-notification payload BEFORE the PutItem to
+      // bt-notifications-outbox, so the encrypt is NOT performed "via" the
+      // DynamoDB service and the ViaService-scoped grant above denies it.
+      // Encrypt-only (no Decrypt): the gateway never reads payloads back —
+      // the notifications-retry Lambda owns decryption.
+      new iam.PolicyStatement({
+        sid: "CmkEncryptForNotificationsOutbox",
+        effect: iam.Effect.ALLOW,
+        actions: ["kms:Encrypt", "kms:GenerateDataKey*", "kms:DescribeKey"],
+        resources: [props.phiKey.keyArn],
       }),
     ];
 

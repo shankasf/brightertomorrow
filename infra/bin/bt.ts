@@ -84,7 +84,7 @@ new ApiStack(app, "BtApi", {
 const phiLogsBucketArn = app.node.tryGetContext("phiLogsBucketArn")
   || `arn:aws:s3:::bt-phi-logs`;
 const sesFromIdentityArn = app.node.tryGetContext("sesFromIdentityArn")
-  || `arn:aws:ses:us-east-1:${ACCOUNT}:identity/brightertomorrowtherapy.cloud`;
+  || `arn:aws:ses:us-east-1:${ACCOUNT}:identity/mail.brightertomorrowtherapy.cloud`;
 
 const notificationsRetry = new NotificationsRetryStack(app, "BtNotificationsRetry", {
   env,
