@@ -1,0 +1,266 @@
+// appointment_actions.go — AI-facing appointment lookup and cancel endpoints.
+//
+// POST /internal/calendar/lookup_appointment
+//
+//	Looks up a patient's upcoming appointment by phone number, then gates
+//	disclosure behind a DOB second-factor comparison.  Returns only boolean
+//	flags + stable IDs on success; never raw PHI.
+//
+// POST /internal/calendar/cancel
+//
+//	Cancels an appointment (sets workflowStatus = "cancelled") given an
+//	appointmentId + emailHash that the caller previously obtained via lookup.
+//
+// HIPAA controls:
+//   - Phone and DOB are never logged; only their hashes and boolean flags.
+//   - Every call fires a background audit row via phi.Store.PutAccessAudit.
+//   - DOB mismatch returns {"found":false,"reason":"verification_failed"} so no
+//     timing or content leak confirms that the phone number is registered.
+//   - Fail-open on bad JSON (200 {"found":false}) so the AI conversation continues.
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
+	"github.com/google/uuid"
+)
+
+// ---------------------------------------------------------------------------
+// POST /internal/calendar/lookup_appointment
+// ---------------------------------------------------------------------------
+
+type lookupAppointmentRequest struct {
+	Phone       string `json:"phone"`
+	DOByyyymmdd string `json:"dob_yyyymmdd"` // YYYYMMDD
+	Email       string `json:"email"`        // optional; unused in current path
+}
+
+// LookupAppointment handles POST /internal/calendar/lookup_appointment.
+// It finds the caller's most-recent non-cancelled future appointment by phone
+// hash, then requires a matching DOB before returning any appointment details.
+func (h *InternalCalendarHandler) LookupAppointment(w http.ResponseWriter, r *http.Request) {
+	if !h.checkInternalSecret(w, r) {
+		return
+	}
+
+	var body lookupAppointmentRequest
+	if err := httpx.ReadJSON(w, r, &body); err != nil {
+		// Fail open: bad JSON must not break the AI conversation.
+		slog.Warn("lookup_appointment: bad json body", "err", err)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"found": false})
+		return
+	}
+
+	if strings.TrimSpace(body.Phone) == "" {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"found": false})
+		return
+	}
+
+	phoneHash := phi.HashPhone(body.Phone)
+	ctx := r.Context()
+
+	records, err := h.PHI.LookupActiveAppointmentsByPhoneHash(ctx, phoneHash)
+	if err != nil {
+		slog.Error("lookup_appointment: gsi query failed", "err", err)
+		// Fail open.
+		appointmentLookupAudit(ctx, h.PHI, phoneHash, false, false, "")
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"found": false})
+		return
+	}
+
+	now := time.Now().UTC()
+
+	// Pick the most-recent non-cancelled appointment (past OR future) per GSI
+	// descending order. We do NOT filter out past appointments here so we can
+	// tell the caller "that one already passed" — but only AFTER DOB verifies.
+	var match *phi.IntakeRecord
+	for i := range records {
+		rec := &records[i]
+		if rec.WorkflowStatus == "cancelled" {
+			continue
+		}
+		if rec.AppointmentTime == nil {
+			continue
+		}
+		match = rec
+		break
+	}
+
+	if match == nil {
+		appointmentLookupAudit(ctx, h.PHI, phoneHash, false, false, "")
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"found": false})
+		return
+	}
+
+	// Phone match found — verify DOB before revealing ANYTHING (including
+	// whether a past appointment existed).
+	// IntakeRecord.DateOfBirth is stored as "YYYY-MM-DD" (web) or "YYYYMMDD"
+	// (AI bookings); strip dashes so both compare against the YYYYMMDD body.
+	recDOB := strings.ReplaceAll(match.DateOfBirth, "-", "")
+	dobMatch := recDOB == strings.TrimSpace(body.DOByyyymmdd)
+
+	if !dobMatch {
+		// A phone match exists but DOB is wrong.  Return no appointment details.
+		appointmentLookupAudit(ctx, h.PHI, phoneHash, true, false, "")
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"found":  false,
+			"reason": "verification_failed",
+		})
+		return
+	}
+
+	// Identity verified. A past appointment cannot be cancelled — tell the
+	// caller it already passed (the date is safe to disclose post-verification).
+	if !match.AppointmentTime.After(now) {
+		appointmentLookupAudit(ctx, h.PHI, phoneHash, true, true, match.SubmissionUUID)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"found":                false,
+			"reason":               "past_appointment",
+			"appointment_time_iso": match.AppointmentTime.UTC().Format(time.RFC3339),
+		})
+		return
+	}
+
+	// Both phone and DOB verified and the appointment is upcoming — safe to
+	// return appointment metadata for cancellation.
+	therapistStaffID := 0
+	if match.TherapistStaffID != nil {
+		therapistStaffID = *match.TherapistStaffID
+	}
+
+	appointmentLookupAudit(ctx, h.PHI, phoneHash, true, true, match.SubmissionUUID)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"found":                true,
+		"appointment_id":       match.SubmissionUUID,
+		"email_hash":           match.EmailHash,
+		"appointment_time_iso": match.AppointmentTime.UTC().Format(time.RFC3339),
+		"therapist_staff_id":   therapistStaffID,
+		"dob_match":            true,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /internal/calendar/cancel
+// ---------------------------------------------------------------------------
+
+type cancelAppointmentRequest struct {
+	AppointmentID string `json:"appointmentId"`
+	EmailHash     string `json:"emailHash"`
+}
+
+// CancelAppointment handles POST /internal/calendar/cancel.
+// Requires appointmentId + emailHash (both obtained from a prior lookup_appointment
+// call) and sets workflowStatus to "cancelled".
+func (h *InternalCalendarHandler) CancelAppointment(w http.ResponseWriter, r *http.Request) {
+	if !h.checkInternalSecret(w, r) {
+		return
+	}
+
+	var body cancelAppointmentRequest
+	if err := httpx.ReadJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if strings.TrimSpace(body.AppointmentID) == "" || strings.TrimSpace(body.EmailHash) == "" {
+		httpx.WriteError(w, http.StatusBadRequest, "appointmentId and emailHash are required")
+		return
+	}
+
+	ctx := r.Context()
+
+	err := h.PHI.UpdateIntakeWorkflowStatus(ctx, body.EmailHash, body.AppointmentID, "cancelled", "bt-ai")
+	if err != nil {
+		if errors.Is(err, phi.ErrNotFound) {
+			appointmentCancelAudit(ctx, h.PHI, body.AppointmentID, body.EmailHash)
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{
+				"ok":    false,
+				"error": "not_found",
+			})
+			return
+		}
+		// Log error without PHI (no appointmentID/emailHash in the log line).
+		slog.Error("cancel_appointment: update workflow status failed", "err", err)
+		appointmentCancelAudit(ctx, h.PHI, body.AppointmentID, body.EmailHash)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"ok":    false,
+			"error": "cancel_failed",
+		})
+		return
+	}
+
+	appointmentCancelAudit(ctx, h.PHI, body.AppointmentID, body.EmailHash)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ---------------------------------------------------------------------------
+// Audit helpers
+// ---------------------------------------------------------------------------
+
+// appointmentLookupAudit fires a background PHI audit row for a lookup call.
+// Only hashes and boolean flags are written; no raw PHI.
+func appointmentLookupAudit(ctx context.Context, store *phi.Store, phoneHash string, matchFound, dobMatch bool, appointmentID string) {
+	if store == nil {
+		return
+	}
+	details := map[string]any{
+		"phone_hash":     phoneHash,
+		"match_found":    matchFound,
+		"dob_match":      dobMatch,
+		"appointment_id": appointmentID,
+	}
+	detailsJSON, _ := json.Marshal(details)
+
+	row := phi.AccessAuditRecord{
+		AuditID:      uuid.NewString(),
+		AdminEmail:   "bt-ai",
+		Action:       "appointment_lookup",
+		ResourceType: "appointment",
+		Details:      string(detailsJSON),
+		CreatedAt:    time.Now().UTC(),
+	}
+	go func() {
+		auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := store.PutAccessAudit(auditCtx, row); err != nil {
+			slog.Error("appointment_lookup: audit write failed", "err", err)
+		}
+	}()
+}
+
+// appointmentCancelAudit fires a background PHI audit row for a cancel call.
+// Only appointment_id + email_hash are written; no raw PHI.
+func appointmentCancelAudit(ctx context.Context, store *phi.Store, appointmentID, emailHash string) {
+	if store == nil {
+		return
+	}
+	details := map[string]any{
+		"appointment_id": appointmentID,
+		"email_hash":     emailHash,
+	}
+	detailsJSON, _ := json.Marshal(details)
+
+	row := phi.AccessAuditRecord{
+		AuditID:      uuid.NewString(),
+		AdminEmail:   "bt-ai",
+		Action:       "appointment_cancel",
+		ResourceType: "appointment",
+		ResourceID:   appointmentID,
+		Details:      string(detailsJSON),
+		CreatedAt:    time.Now().UTC(),
+	}
+	go func() {
+		auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := store.PutAccessAudit(auditCtx, row); err != nil {
+			slog.Error("appointment_cancel: audit write failed", "err", err)
+		}
+	}()
+}

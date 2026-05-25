@@ -29,7 +29,15 @@ type Config struct {
 	PendingRequestsTable string // bt-pending-requests — returning-patient lookup
 	AdminQueueTable      string // bt-admin-queue — routine handoff notifications
 	SafetyQueueTable     string // bt-safety-queue — urgent safety escalations
-	SNSAlertTopicARN     string // ARN of bt-alerts SNS topic; safety_queue publishes here
+	SNSAlertTopicARN            string // ARN of bt-alerts SNS topic; safety_queue publishes here
+	NotificationsOutboxTable    string // bt-notifications-outbox — patient notification queue
+	NotificationsRetryLambda    string // bt-notifications-retry Lambda function name (BT_NOTIFICATIONS_RETRY_LAMBDA)
+	// AppointmentNotifyEnabled gates the patient notification enqueue in
+	// UpdateStatus. Default FALSE — the gateway IAM role's kms:Encrypt grant
+	// is conditioned on kms:ViaService=dynamodb/sns only, so a direct KMS
+	// encrypt from the gateway will fail with AccessDenied until infra is
+	// provisioned. Set BT_APPOINTMENT_NOTIFY_ENABLED=true to enable.
+	AppointmentNotifyEnabled bool
 	// Shared secret for /internal/calendar/* endpoints. When empty the check
 	// is skipped (dev mode); in production this must be set.
 	InternalAPISecret string
@@ -87,8 +95,11 @@ func Load() (*Config, error) {
 		PendingRequestsTable: envOr("BT_PENDING_REQUESTS_TABLE", "bt-pending-requests"),
 		AdminQueueTable:      envOr("BT_ADMIN_QUEUE_TABLE", "bt-admin-queue"),
 		SafetyQueueTable:     envOr("BT_SAFETY_QUEUE_TABLE", "bt-safety-queue"),
-		SNSAlertTopicARN:     os.Getenv("SNS_ALERT_TOPIC_ARN"),
-		InternalAPISecret:    os.Getenv("INTERNAL_API_SECRET"),
+		SNSAlertTopicARN:            os.Getenv("SNS_ALERT_TOPIC_ARN"),
+		NotificationsOutboxTable:    envOr("BT_NOTIFICATIONS_OUTBOX_TABLE", "bt-notifications-outbox"),
+		NotificationsRetryLambda:    envOr("BT_NOTIFICATIONS_RETRY_LAMBDA", "bt-notifications-retry"),
+		AppointmentNotifyEnabled: parseBool(os.Getenv("BT_APPOINTMENT_NOTIFY_ENABLED")),
+		InternalAPISecret:        os.Getenv("INTERNAL_API_SECRET"),
 		TwilioAuthToken:      os.Getenv("TWILIO_AUTH_TOKEN"),
 		TwilioPublicHost:     envOr("TWILIO_PUBLIC_HOST", "brightertomorrowtherapy.cloud"),
 		TwilioAccountSid:     os.Getenv("TWILIO_ACCOUNT_SID"),
@@ -102,6 +113,16 @@ func envOr(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// parseBool returns true for "1", "true", "yes", "on" (case-insensitive).
+// All other values, including the empty string, return false.
+func parseBool(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func splitTrimmed(s, sep string) []string {

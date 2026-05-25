@@ -202,6 +202,7 @@ var staticActions = []actionEntry{
 	// Appointments.
 	{method: "GET", pathSuffix: "/admin/api/appointments.csv", action: "export_appointments_csv", resourceType: "appointments"},
 	{method: "GET", pathPrefix: "/admin/api/appointments", action: "view_appointments_list", resourceType: "appointments"},
+	{method: "POST", pathSuffix: "/admin/api/appointments/status", action: "update_appointment_status", resourceType: "appointments"},
 
 	// Insurance checks.
 	{method: "GET", pathSuffix: "/admin/api/insurance-checks.csv", action: "export_insurance_checks_csv", resourceType: "insurance_checks"},

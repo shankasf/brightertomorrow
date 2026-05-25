@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"log/slog"
@@ -23,8 +24,10 @@ import (
 // Pool stays on the handler only for any non-PHI legacy queries; PHI list
 // + audit writes both target DDB via phi.Store.
 type AdminAppointmentsHandler struct {
-	Pool *pgxpool.Pool
-	PHI  *phi.Store
+	Pool          *pgxpool.Pool
+	PHI           *phi.Store
+	Notify        *phi.NotificationStore // optional; nil → notifications silently skipped
+	NotifyEnabled bool                   // gates the enqueue block; default false (see BT_APPOINTMENT_NOTIFY_ENABLED)
 }
 
 // appointmentRow is the merged DDB record shape returned to admins.
@@ -32,13 +35,15 @@ type AdminAppointmentsHandler struct {
 type appointmentRow struct {
 	ID                string `json:"id"`
 	SubmissionUUID    string `json:"submission_uuid"`
+	EmailHash         string `json:"email_hash"`
 	CreatedAt         string `json:"created_at"`
 	AppointmentTime   string `json:"appointment_time,omitempty"`
 	TherapistStaffID  int    `json:"therapist_staff_id,omitempty"`
 	Source            string `json:"source"`
 	SourceLabel       string `json:"source_label"`
 	Flow              string `json:"flow"`
-	Status            string `json:"status"`
+	Status            string `json:"status"`          // coverage/insurance status — do NOT repurpose
+	WorkflowStatus    string `json:"workflow_status"` // admin workflow status (new/approved/cancelled/…)
 	PaymentMethod     string `json:"payment_method"`
 	FirstName         string `json:"first_name"`
 	LastName          string `json:"last_name"`
@@ -51,13 +56,19 @@ type appointmentRow struct {
 	InsuranceMemberID string `json:"insurance_member_id"`
 }
 
+// workflowStatusFilter is the parsed ?workflow_status= query param.
+type workflowStatusFilter struct {
+	raw string // "", "all", or a valid enum value
+}
+
 type appointmentFilters struct {
-	From   *time.Time
-	To     *time.Time
-	Source string // friendly: chatbot | voice | phone | website
-	Q      string
-	Limit  int
-	Offset int
+	From           *time.Time
+	To             *time.Time
+	Source         string // friendly: chatbot | voice | phone | website
+	Q              string
+	WorkflowStatus workflowStatusFilter
+	Limit          int
+	Offset         int
 }
 
 func parseAppointmentFilters(r *http.Request, defaultLimit, maxLimit int) (appointmentFilters, error) {
@@ -85,6 +96,17 @@ func parseAppointmentFilters(r *http.Request, defaultLimit, maxLimit int) (appoi
 		return f, fmt.Errorf("invalid 'source' — expected chatbot, voice, phone, website, or all")
 	}
 	f.Q = strings.TrimSpace(q.Get("q"))
+
+	// workflow_status filter:
+	//   ""    → exclude archived (default working list)
+	//   "all" → include everything
+	//   valid enum value → exact match
+	if ws := strings.TrimSpace(q.Get("workflow_status")); ws != "" {
+		if ws != "all" && !phi.IsValidWorkflowStatus(ws) {
+			return f, fmt.Errorf("invalid 'workflow_status' — must be a valid status value or 'all'")
+		}
+		f.WorkflowStatus = workflowStatusFilter{raw: ws}
+	}
 
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	page, _ := strconv.Atoi(q.Get("page"))
@@ -142,6 +164,36 @@ func sourceLabel(s string) string {
 	}
 }
 
+// applyWorkflowFilter filters rows in-memory based on the workflow_status param:
+//   - empty raw → exclude rows whose effective status is "archived"
+//   - "all"     → include everything
+//   - specific  → only rows whose effective status equals that value
+func applyWorkflowFilter(rows []appointmentRow, wf workflowStatusFilter) []appointmentRow {
+	if wf.raw == "all" {
+		return rows
+	}
+	out := rows[:0]
+	for _, row := range rows {
+		effective := row.WorkflowStatus
+		if effective == "" {
+			effective = "new"
+		}
+		if wf.raw == "" {
+			// Default: exclude archived.
+			if effective == "archived" {
+				continue
+			}
+			out = append(out, row)
+			continue
+		}
+		// Specific value: exact match.
+		if effective == wf.raw {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // fetchAppointments queries DDB for intake records and applies the
 // requested filters in-memory. Returns the full filtered set (caller
 // paginates the slice).
@@ -178,14 +230,21 @@ func (h *AdminAppointmentsHandler) fetchAppointments(r *http.Request, f appointm
 			}
 		}
 
+		wfStatus := rec.WorkflowStatus
+		if wfStatus == "" {
+			wfStatus = "new"
+		}
+
 		row := appointmentRow{
 			ID:                rec.SubmissionUUID,
 			SubmissionUUID:    rec.SubmissionUUID,
+			EmailHash:         rec.EmailHash,
 			CreatedAt:         rec.CreatedAt.UTC().Format(time.RFC3339),
 			Source:            rec.Source,
 			SourceLabel:       sourceLabel(rec.Source),
 			Flow:              rec.Flow,
 			Status:            rec.CoverageStatus,
+			WorkflowStatus:    wfStatus,
 			PaymentMethod:     rec.PaymentMethod,
 			FirstName:         rec.FirstName,
 			LastName:          rec.LastName,
@@ -205,6 +264,10 @@ func (h *AdminAppointmentsHandler) fetchAppointments(r *http.Request, f appointm
 		}
 		rows = append(rows, row)
 	}
+
+	// Apply workflow status filter in-memory.
+	rows = applyWorkflowFilter(rows, f.WorkflowStatus)
+
 	return rows, nil
 }
 
@@ -296,18 +359,223 @@ func (h *AdminAppointmentsHandler) ExportCSV(w http.ResponseWriter, r *http.Requ
 		"Source", "Flow", "Status", "Payment Method",
 		"First Name", "Last Name", "Date of Birth", "Phone", "Email", "Home Address", "Sex",
 		"Insurance Name", "Insurance ID Number",
+		// New columns appended — existing consumers unaffected.
+		"Email Hash", "Workflow Status",
 	})
 	for _, r := range rows {
 		staffID := ""
 		if r.TherapistStaffID != 0 {
 			staffID = strconv.Itoa(r.TherapistStaffID)
 		}
+		wfStatus := r.WorkflowStatus
+		if wfStatus == "" {
+			wfStatus = "new"
+		}
 		_ = cw.Write([]string{
 			r.SubmissionUUID, r.CreatedAt, r.AppointmentTime, staffID,
 			r.SourceLabel, r.Flow, r.Status, r.PaymentMethod,
 			r.FirstName, r.LastName, r.DateOfBirth, r.Phone, r.Email, r.HomeAddress, r.Sex,
 			r.InsuranceName, r.InsuranceMemberID,
+			r.EmailHash, wfStatus,
 		})
 	}
 	cw.Flush()
+}
+
+// ---------------------------------------------------------------------------
+// UpdateStatus — POST /admin/api/appointments/status
+// ---------------------------------------------------------------------------
+
+// updateStatusRequest is the JSON body for the bulk workflow-status update.
+type updateStatusRequest struct {
+	Status string             `json:"status"`
+	Notify bool               `json:"notify"`
+	Items  []statusUpdateItem `json:"items"`
+}
+
+type statusUpdateItem struct {
+	SubmissionUUID string `json:"submission_uuid"`
+	EmailHash      string `json:"email_hash"`
+}
+
+// statusUpdateFailure captures per-item errors for the response.
+type statusUpdateFailure struct {
+	SubmissionUUID string `json:"submission_uuid"`
+	Error          string `json:"error"`
+}
+
+// notifyStatuses is the set of workflow statuses that trigger patient notifications.
+var notifyStatuses = map[string]struct{}{
+	"approved":             {},
+	"scheduled":            {},
+	"cancelled":            {},
+	"reschedule_requested": {},
+	"cancel_requested":     {},
+	"completed":            {},
+}
+
+// UpdateStatus handles POST /admin/api/appointments/status.
+// Updates the workflow status for one or more appointment records, optionally
+// enqueuing patient notifications via the outbox.
+func (h *AdminAppointmentsHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
+	if h.PHI == nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "phi store not configured")
+		return
+	}
+
+	var body updateStatusRequest
+	if err := httpx.ReadJSON(w, r, &body); err != nil {
+		httpx.WriteValidationError(w, "invalid JSON body")
+		return
+	}
+
+	if !phi.IsValidWorkflowStatus(body.Status) {
+		httpx.WriteValidationError(w, fmt.Sprintf("invalid status %q", body.Status))
+		return
+	}
+	if len(body.Items) == 0 || len(body.Items) > 100 {
+		httpx.WriteValidationError(w, "items must contain between 1 and 100 entries")
+		return
+	}
+	for i, item := range body.Items {
+		if item.SubmissionUUID == "" || item.EmailHash == "" {
+			httpx.WriteValidationError(w, fmt.Sprintf("items[%d]: submission_uuid and email_hash are required", i))
+			return
+		}
+	}
+
+	u, ok := appmw.AdminFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "admin identity not found")
+		return
+	}
+	adminBy := u.Email
+	if adminBy == "" {
+		adminBy = strconv.FormatInt(u.ID, 10)
+	}
+
+	ctx := r.Context()
+	_, doNotify := notifyStatuses[body.Status]
+	doNotify = doNotify && body.Notify
+
+	var (
+		successIDs []string
+		failures   []statusUpdateFailure
+		notified   int
+	)
+
+	for _, item := range body.Items {
+		err := h.PHI.UpdateIntakeWorkflowStatus(ctx, item.EmailHash, item.SubmissionUUID, body.Status, adminBy)
+		if err != nil {
+			failures = append(failures, statusUpdateFailure{
+				SubmissionUUID: item.SubmissionUUID,
+				Error:          friendlyUpdateError(err),
+			})
+			continue
+		}
+		successIDs = append(successIDs, item.SubmissionUUID)
+
+		// Best-effort notification enqueue for approved/cancelled.
+		// Gated by NotifyEnabled: the gateway IAM kms:Encrypt grant is
+		// conditioned on kms:ViaService=dynamodb/sns until infra is
+		// provisioned; skip the block entirely so prod logs stay clean.
+		if doNotify && h.NotifyEnabled && h.Notify != nil {
+			rec, getErr := h.PHI.GetIntake(ctx, item.EmailHash, item.SubmissionUUID)
+			if getErr != nil {
+				slog.Warn("appointments update_status: get intake for notify failed",
+					"submission_uuid", item.SubmissionUUID, "err", getErr)
+			} else {
+				// Audit the PHI read for notification purposes.
+				admin.LogPHIAccess(ctx, h.PHI, r, u,
+					"update_appointment_status_notify_read",
+					"intake_pointers_phi_access", item.SubmissionUUID)
+
+				n := enqueuePatientNotifications(ctx, h.Notify, rec, body.Status, item.SubmissionUUID)
+				notified += n
+			}
+		}
+	}
+
+	// Audit successful updates (one row per submission_uuid).
+	if len(successIDs) > 0 {
+		admin.LogPHIAccessBatch(ctx, h.PHI, r, u,
+			"update_appointment_status:"+body.Status,
+			"intake_pointers_phi_access",
+			successIDs)
+	}
+
+	// Always emit an array (not null) so clients can safely read `.length`.
+	if failures == nil {
+		failures = []statusUpdateFailure{}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"updated":  len(successIDs),
+		"failed":   failures,
+		"notified": notified,
+	})
+}
+
+// friendlyUpdateError converts phi-level errors to client-safe strings.
+// Never leaks internal error text with PHI.
+func friendlyUpdateError(err error) string {
+	if err == phi.ErrNotFound {
+		return "record not found"
+	}
+	return "update failed"
+}
+
+// enqueuePatientNotifications enqueues email notifications for the given intake
+// record and workflow status. Returns the number of notifications enqueued.
+// All errors are logged and swallowed — callers must never fail over this.
+//
+// SMS is intentionally skipped for now (Twilio outbound not yet provisioned).
+func enqueuePatientNotifications(
+	ctx context.Context,
+	store *phi.NotificationStore,
+	rec *phi.IntakeRecord,
+	status, submissionUUID string,
+) int {
+	greeting := notifyGreeting(strings.TrimSpace(rec.FirstName))
+
+	var emailSubject, emailHeading string
+	var emailParagraphs []string
+	var emailDetails [][2]string
+
+	switch status {
+	case "approved":
+		emailSubject, emailHeading, emailParagraphs, emailDetails = buildApprovedContent(greeting)
+	case "cancelled":
+		emailSubject, emailHeading, emailParagraphs, emailDetails = buildCancelledContent(greeting)
+	case "scheduled":
+		var apptFormatted string
+		if rec.AppointmentTime != nil {
+			apptFormatted = formatApptTime(rec.AppointmentTime.UTC().Format(time.RFC3339))
+		}
+		var staffID int
+		if rec.TherapistStaffID != nil {
+			staffID = *rec.TherapistStaffID
+		}
+		therapistName := therapistDisplayName(staffID)
+		emailSubject, emailHeading, emailParagraphs, emailDetails = buildScheduledContent(greeting, therapistName, apptFormatted)
+	case "reschedule_requested":
+		emailSubject, emailHeading, emailParagraphs, emailDetails = buildRescheduleRequestedContent(greeting)
+	case "cancel_requested":
+		emailSubject, emailHeading, emailParagraphs, emailDetails = buildCancelRequestedContent(greeting)
+	case "completed":
+		emailSubject, emailHeading, emailParagraphs, emailDetails = buildCompletedContent(greeting)
+	default:
+		return 0
+	}
+
+	count := 0
+
+	// Email — structured content payload; the Lambda renders the branded HTML.
+	if email := strings.TrimSpace(rec.Email); email != "" {
+		dedupeKey := fmt.Sprintf("apptstatus:%s:%s:email", submissionUUID, status)
+		if enqueueEmail(ctx, store, email, emailSubject, emailHeading, emailParagraphs, emailDetails, dedupeKey, submissionUUID) {
+			count++
+		}
+	}
+
+	return count
 }

@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ type IntakeRecord struct {
 	LastName               string            `dynamodbav:"lastName"`
 	DateOfBirth            string            `dynamodbav:"dateOfBirth"` // ISO YYYY-MM-DD
 	Phone                  string            `dynamodbav:"phone"`
+	PhoneHash              string            `dynamodbav:"phoneHash,omitempty"`
 	Email                  string            `dynamodbav:"email"`
 	HomeAddress            string            `dynamodbav:"homeAddress"`
 	Sex                    string            `dynamodbav:"sex"`
@@ -71,8 +73,14 @@ type IntakeRecord struct {
 	// intakes that were confirmed via the calendar agent. Pointer semantics
 	// so the attributevalue marshaller emits omitempty — non-booking records
 	// do not write these attributes at all.
-	AppointmentTime    *time.Time `dynamodbav:"appointmentTime,omitempty"`
-	TherapistStaffID   *int       `dynamodbav:"therapistStaffId,omitempty"`
+	AppointmentTime  *time.Time `dynamodbav:"appointmentTime,omitempty"`
+	TherapistStaffID *int       `dynamodbav:"therapistStaffId,omitempty"`
+	// WorkflowStatus tracks admin-side appointment workflow state. Not required;
+	// missing on existing records means "new". See WorkflowStatuses for the
+	// canonical enum. Written by UpdateIntakeWorkflowStatus.
+	WorkflowStatus          string     `dynamodbav:"workflowStatus,omitempty"`
+	WorkflowStatusUpdatedAt *time.Time `dynamodbav:"workflowStatusUpdatedAt,omitempty"`
+	WorkflowStatusBy        string     `dynamodbav:"workflowStatusBy,omitempty"`
 }
 
 // Pointer is a non-PHI summary suitable for admin list views.
@@ -100,8 +108,8 @@ type DDBClient interface {
 // so we can Query a session in chronological order without an extra index.
 type ChatTurn struct {
 	SessionID   string    `dynamodbav:"sessionId"`
-	Role        string    `dynamodbav:"role"`        // 'user' | 'assistant' | 'system' | 'tool'
-	Content     string    `dynamodbav:"content"`     // plaintext message body
+	Role        string    `dynamodbav:"role"`    // 'user' | 'assistant' | 'system' | 'tool'
+	Content     string    `dynamodbav:"content"` // plaintext message body
 	CreatedAt   time.Time `dynamodbav:"createdAt"`
 	RetainUntil time.Time `dynamodbav:"retainUntil"` // 10y from CreatedAt
 }
@@ -150,6 +158,29 @@ func New(cfg Config) (*Store, error) {
 // and Postgres pointer rows. Lowercases + trims whitespace before hashing.
 func HashEmail(email string) string {
 	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
+	return hex.EncodeToString(sum[:])
+}
+
+// reNonDigit matches every character that is not an ASCII digit.
+var reNonDigit = regexp.MustCompile(`\D`)
+
+// HashPhone returns the deterministic phone_hash used for the byPhoneHash GSI.
+// Normalization: strip all non-digits, keep the last 10 digits (drops country
+// code), then return lowercase hex SHA-256 of the result.
+//
+// The algorithm deliberately matches the Python backfill:
+//
+//	import re, hashlib
+//	normalized = re.sub(r"\D", "", phone)
+//	if len(normalized) > 10:
+//	    normalized = normalized[-10:]
+//	hashlib.sha256(normalized.encode()).hexdigest()
+func HashPhone(phone string) string {
+	normalized := reNonDigit.ReplaceAllString(phone, "")
+	if len(normalized) > 10 {
+		normalized = normalized[len(normalized)-10:]
+	}
+	sum := sha256.Sum256([]byte(normalized))
 	return hex.EncodeToString(sum[:])
 }
 

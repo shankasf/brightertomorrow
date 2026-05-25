@@ -61,6 +61,13 @@ func TestDeriveAction(t *testing.T) {
 			wantResourceID:   "12",
 		},
 		{
+			method:           "POST",
+			path:             "/admin/api/appointments/status",
+			wantAction:       "update_appointment_status",
+			wantResourceType: "appointments",
+			wantResourceID:   "",
+		},
+		{
 			// Unmapped path falls back to <method>_<last_segment>.
 			method:           "GET",
 			path:             "/admin/api/some-new-feature",

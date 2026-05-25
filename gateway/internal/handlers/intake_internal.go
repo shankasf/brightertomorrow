@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 )
 
 // validInternalSources lists the source values accepted from trusted callers.
@@ -27,9 +30,12 @@ var errIntakeSource = errors.New("source must be chat-agent, voice-agent, voice-
 // logic. The only differences from the public endpoint:
 //   - No rate limit (applied at the router level, not here).
 //   - Source is taken from the request body rather than derived from flow.
+//   - Enqueues a best-effort patient ACK email after successful persistence.
 type IntakeInternalHandler struct {
 	// Embed gives us access to submit() and all shared state.
 	*IntakeHandler
+	Notify        *phi.NotificationStore // optional; nil → notifications silently skipped
+	NotifyEnabled bool                   // gates enqueue; default false (BT_APPOINTMENT_NOTIFY_ENABLED)
 }
 
 // ServeHTTP handles POST /internal/intake/submit.
@@ -59,5 +65,20 @@ func (h *IntakeInternalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		httpx.WriteError(w, status, err.Error())
 		return
 	}
+
+	// Best-effort ACK email — never fail the intake over a missed notification.
+	// No PHI in logs: only submission_uuid and channel.
+	// TODO(sms): enqueue sms channel when Twilio is enabled.
+	if h.NotifyEnabled && h.Notify != nil {
+		if email := strings.TrimSpace(body.Email); email != "" {
+			greeting := notifyGreeting(strings.TrimSpace(body.FirstName))
+			subj, heading, paragraphs, details := buildRequestAckContent(greeting)
+			dedupeKey := fmt.Sprintf("intakeack:%s:email", resp.SubmissionUUID)
+			enqueueEmail(r.Context(), h.Notify, email, subj, heading, paragraphs, details, dedupeKey, resp.SubmissionUUID)
+			slog.Info("intake internal: ACK email enqueued",
+				"submission_uuid", resp.SubmissionUUID, "channel", "email")
+		}
+	}
+
 	httpx.WriteJSON(w, status, resp)
 }

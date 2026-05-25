@@ -79,6 +79,8 @@ type IntakeHandler struct {
 	Pool            intakeDB
 	PHI             phiStorer
 	CoverageChecker CoverageChecker
+	Notify          *phi.NotificationStore // optional; nil → notifications silently skipped
+	NotifyEnabled   bool                   // gates enqueue; default false (BT_APPOINTMENT_NOTIFY_ENABLED)
 }
 
 var (
@@ -211,6 +213,23 @@ func (h *IntakeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, status, err.Error())
 		return
 	}
+
+	// Best-effort ACK email — never fail the request over a missed notification.
+	// No PHI in logs: only submission_uuid, channel, and enqueued bool.
+	// No coverage/insurance info is included in the ack email.
+	if h.NotifyEnabled && h.Notify != nil && strings.TrimSpace(body.Email) != "" {
+		greeting := notifyGreeting(strings.TrimSpace(body.FirstName))
+		subj, heading, paragraphs, details := buildRequestAckContent(greeting)
+		dedupeKey := fmt.Sprintf("intakeack:%s:email", resp.SubmissionUUID)
+		enqueued := enqueueEmail(r.Context(), h.Notify, strings.TrimSpace(body.Email),
+			subj, heading, paragraphs, details, dedupeKey, resp.SubmissionUUID)
+		slog.Info("intake: ACK email enqueue",
+			"submission_uuid", resp.SubmissionUUID, "channel", "email", "enqueued", enqueued)
+		if enqueued {
+			resp.NextStep = resp.NextStep + " " + notifyEmailSentLine
+		}
+	}
+
 	httpx.WriteJSON(w, status, resp)
 }
 

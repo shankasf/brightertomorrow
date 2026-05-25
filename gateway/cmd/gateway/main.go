@@ -14,6 +14,8 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
@@ -122,6 +124,26 @@ func main() {
 		slog.Warn("safety queue SNS alerts disabled — SNS_ALERT_TOPIC_ARN not set")
 	}
 
+	// Notification outbox store — enqueues encrypted patient notifications to
+	// bt-notifications-outbox for the notifications-retry Lambda to deliver.
+	// The Lambda client triggers the function asynchronously after each enqueue
+	// so emails arrive in seconds rather than waiting for the polling floor.
+	kmsClient := kms.NewFromConfig(awsCfg)
+	lambdaClient := lambda.NewFromConfig(awsCfg)
+	notifyStore, err := phi.NewNotificationStore(phi.NotificationStoreConfig{
+		DDB:          ddbClient,
+		KMS:          kmsClient,
+		Lambda:       lambdaClient,
+		LambdaFnName: cfg.NotificationsRetryLambda,
+		TableName:    cfg.NotificationsOutboxTable,
+		CMKKeyID:     "alias/bt-phi",
+		Timeout:      5 * time.Second,
+	})
+	if err != nil {
+		slog.Error("notification store init failed", "err", err)
+		os.Exit(1)
+	}
+
 	// Bootstrap initial superadmin if no admin users exist yet.
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	admin.Bootstrap(bootstrapCtx, pool, cfg.AdminInitialEmail, cfg.AdminInitialPassword)
@@ -144,7 +166,7 @@ func main() {
 	adminNewsletterH := &handlers.AdminNewsletterHandler{Pool: pool}
 	adminAuditH := &handlers.AdminAuditHandler{Pool: pool, PHI: phiStore}
 	adminContentH := &handlers.AdminContentHandler{Pool: pool, AIClient: ai}
-	adminAppointmentsH := &handlers.AdminAppointmentsHandler{Pool: pool, PHI: phiStore}
+	adminAppointmentsH := &handlers.AdminAppointmentsHandler{Pool: pool, PHI: phiStore, Notify: notifyStore, NotifyEnabled: cfg.AppointmentNotifyEnabled}
 	adminInsuranceChecksH := &handlers.AdminInsuranceChecksHandler{Pool: pool, PHI: phiStore}
 	adminCallbacksH := &handlers.AdminCallbacksHandler{Pool: pool, PHI: phiStore}
 	adminLogsH := &handlers.AdminLogsHandler{Pool: pool, PHI: phiStore, AIServiceURL: cfg.AIServiceURL, Athena: athenaClient}
@@ -155,11 +177,27 @@ func main() {
 		Pool:           pool,
 		PHI:            phiStore,
 		InternalSecret: cfg.InternalAPISecret,
+		Notify:         notifyStore,
+		NotifyEnabled:  cfg.AppointmentNotifyEnabled,
 	}
 
-	intakeH := &handlers.IntakeHandler{Pool: pool, PHI: phiStore, CoverageChecker: ai}
-	intakeInternalH := &handlers.IntakeInternalHandler{IntakeHandler: intakeH}
-	callbackInternalH := &handlers.CallbackInternalHandler{PHI: phiStore}
+	intakeH := &handlers.IntakeHandler{
+		Pool:            pool,
+		PHI:             phiStore,
+		CoverageChecker: ai,
+		Notify:          notifyStore,
+		NotifyEnabled:   cfg.AppointmentNotifyEnabled,
+	}
+	intakeInternalH := &handlers.IntakeInternalHandler{
+		IntakeHandler: intakeH,
+		Notify:        notifyStore,
+		NotifyEnabled: cfg.AppointmentNotifyEnabled,
+	}
+	callbackInternalH := &handlers.CallbackInternalHandler{
+		PHI:           phiStore,
+		Notify:        notifyStore,
+		NotifyEnabled: cfg.AppointmentNotifyEnabled,
+	}
 	coverageInternalH := &handlers.CoverageInternalHandler{PHI: phiStore}
 	chatInternalH := &handlers.ChatInternalHandler{Pool: pool, PHI: phiStore}
 
@@ -257,6 +295,8 @@ func main() {
 		r.Post("/calendar/free-slots", internalCalendarH.FreeSlots)
 		r.Post("/calendar/book", internalCalendarH.Book)
 		r.Post("/calendar/confirm", internalCalendarH.Confirm)
+		r.With(httprate.LimitByIP(300, time.Minute)).Post("/calendar/lookup_appointment", internalCalendarH.LookupAppointment)
+		r.With(httprate.LimitByIP(300, time.Minute)).Post("/calendar/cancel", internalCalendarH.CancelAppointment)
 
 		// Clinical-intake gate endpoints — called by LangGraph gate nodes.
 		// Rate-limited to 5 req/s burst (300/min per source) — gates fire at most
@@ -301,6 +341,7 @@ func main() {
 			// List + CSV export both audit each row read in admin_access_log.
 			r.Get("/appointments", adminAppointmentsH.List)
 			r.Get("/appointments.csv", adminAppointmentsH.ExportCSV)
+			r.Post("/appointments/status", adminAppointmentsH.UpdateStatus)
 
 			// PHI: insurance eligibility-check history.
 			// Same audit pattern: every PHI row hydrated is logged.

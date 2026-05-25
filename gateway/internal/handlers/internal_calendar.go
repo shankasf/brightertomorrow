@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/calendar"
@@ -15,6 +17,7 @@ import (
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
 )
 
 // InternalCalendarStore is the interface the internal calendar handler
@@ -37,7 +40,9 @@ type InternalCalendarHandler struct {
 	Cal            InternalCalendarStore
 	Pool           *pgxpool.Pool
 	PHI            *phi.Store
-	InternalSecret string // empty disables the check (dev-only)
+	InternalSecret string                 // empty disables the check (dev-only)
+	Notify         *phi.NotificationStore // optional; nil → notifications silently skipped
+	NotifyEnabled  bool                   // gates enqueue; default false (BT_APPOINTMENT_NOTIFY_ENABLED)
 }
 
 // appointmentDraftJSON is the PHI JSON stored inside a soft-hold.
@@ -82,7 +87,25 @@ type freeSlotsRequest struct {
 	SlotMinutes int    `json:"slotMinutes"`
 }
 
+// slotWithStaff is the response shape for both single-staff and any-therapist
+// modes. Defined here in the handler package so the calendar package stays clean.
+type slotWithStaff struct {
+	StaffID   int    `json:"staffId"`
+	StaffName string `json:"staffName"`
+	StartISO  string `json:"startISO"`
+	EndISO    string `json:"endISO"`
+}
+
+// freeSlotsMaxResults caps the any-therapist fan-out response.
+const freeSlotsMaxResults = 60
+
 // FreeSlots handles POST /internal/calendar/free-slots.
+//
+// staffId == 0 (or omitted): fan-out mode — queries every feed-connected
+// therapist concurrently, merges slots sorted by start time, and caps at 60.
+// staffId > 0: single-therapist mode (existing behaviour, response shape unchanged).
+//
+// Both modes return: {"slots": [{"staffId":int,"staffName":str,"startISO":str,"endISO":str}]}
 func (h *InternalCalendarHandler) FreeSlots(w http.ResponseWriter, r *http.Request) {
 	if !h.checkInternalSecret(w, r) {
 		return
@@ -93,10 +116,6 @@ func (h *InternalCalendarHandler) FreeSlots(w http.ResponseWriter, r *http.Reque
 		httpx.WriteValidationError(w, "invalid JSON")
 		return
 	}
-	if body.StaffID <= 0 {
-		httpx.WriteValidationError(w, "staffId is required and must be positive")
-		return
-	}
 	if body.FromISO == "" || body.ToISO == "" {
 		httpx.WriteValidationError(w, "fromISO and toISO are required")
 		return
@@ -105,29 +124,106 @@ func (h *InternalCalendarHandler) FreeSlots(w http.ResponseWriter, r *http.Reque
 		httpx.WriteValidationError(w, "slotMinutes must be positive")
 		return
 	}
-	if _, found := calendar.ByID(body.StaffID); !found {
+
+	ctx := r.Context()
+
+	if body.StaffID <= 0 {
+		// ── Any-therapist fan-out mode ──────────────────────────────────────
+		ids := calendarStaffIDs(0) // all feed-connected staff IDs
+
+		var mu sync.Mutex
+		var merged []slotWithStaff
+
+		g, gctx := errgroup.WithContext(ctx)
+		for _, id := range ids {
+			id := id // capture loop var
+			g.Go(func() error {
+				therapist, ok := calendar.ByID(id)
+				if !ok {
+					// Roster and calendarStaffIDs are derived from the same
+					// source; this branch should never fire.
+					slog.Warn("internal calendar free-slots: staff id not in roster, skipping",
+						"staff_id", id)
+					return nil
+				}
+				slots, err := h.Cal.FreeSlots(gctx, id, body.FromISO, body.ToISO, body.SlotMinutes)
+				if err != nil {
+					// A single therapist erroring must not fail the whole
+					// request — log and skip so callers still get partial results.
+					slog.Error("internal calendar free-slots: staff query failed, skipping",
+						"staff_id", id, "err", err)
+					return nil
+				}
+				tagged := make([]slotWithStaff, 0, len(slots))
+				for _, s := range slots {
+					tagged = append(tagged, slotWithStaff{
+						StaffID:   id,
+						StaffName: therapist.Name,
+						StartISO:  s.StartISO,
+						EndISO:    s.EndISO,
+					})
+				}
+				mu.Lock()
+				merged = append(merged, tagged...)
+				mu.Unlock()
+				return nil
+			})
+		}
+		// errgroup.Wait only returns non-nil if a goroutine returned non-nil;
+		// our goroutines always return nil (errors are logged and skipped).
+		_ = g.Wait()
+
+		sort.Slice(merged, func(i, j int) bool {
+			return merged[i].StartISO < merged[j].StartISO
+		})
+		if len(merged) > freeSlotsMaxResults {
+			merged = merged[:freeSlotsMaxResults]
+		}
+		if merged == nil {
+			merged = []slotWithStaff{}
+		}
+
+		slog.Info("internal calendar free-slots",
+			"mode", "any",
+			"staff_id", "any",
+			"slot_count", len(merged),
+		)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"slots": merged})
+		return
+	}
+
+	// ── Single-therapist mode ───────────────────────────────────────────────
+	therapist, found := calendar.ByID(body.StaffID)
+	if !found {
 		httpx.WriteValidationError(w, "staffId not found in roster")
 		return
 	}
 
-	slots, err := h.Cal.FreeSlots(r.Context(), body.StaffID, body.FromISO, body.ToISO, body.SlotMinutes)
+	raw, err := h.Cal.FreeSlots(ctx, body.StaffID, body.FromISO, body.ToISO, body.SlotMinutes)
 	if err != nil {
 		slog.Error("internal calendar free-slots", "err", err, "staff_id", body.StaffID)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
+	slots := make([]slotWithStaff, 0, len(raw))
+	for _, s := range raw {
+		slots = append(slots, slotWithStaff{
+			StaffID:   body.StaffID,
+			StaffName: therapist.Name,
+			StartISO:  s.StartISO,
+			EndISO:    s.EndISO,
+		})
+	}
 	if slots == nil {
-		slots = []calendar.Slot{}
+		slots = []slotWithStaff{}
 	}
 
 	slog.Info("internal calendar free-slots",
+		"mode", "single",
 		"staff_id", body.StaffID,
-		"from", body.FromISO,
-		"to", body.ToISO,
 		"slot_count", len(slots),
 	)
-
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"slots": slots})
 }
 
@@ -333,9 +429,32 @@ func (h *InternalCalendarHandler) Confirm(w http.ResponseWriter, r *http.Request
 		"staff_id", body.StaffID,
 	)
 
+	// Best-effort confirmation email — never fail the booking over a missed
+	// notification. No PHI in logs: only appointment_id and channel.
+	// TODO(sms): enqueue sms channel when Twilio is enabled.
+	emailSent := false
+	if h.NotifyEnabled && h.Notify != nil {
+		if email := strings.TrimSpace(draft.Email); email != "" {
+			greeting := notifyGreeting(strings.TrimSpace(draft.FirstName))
+			subj, heading, paragraphs, details := buildBookingRequestAckContent(greeting)
+			dedupeKey := fmt.Sprintf("apptconfirm:%s:email", appointmentID)
+			emailSent = enqueueEmail(r.Context(), h.Notify, email, subj, heading, paragraphs, details, dedupeKey, appointmentID)
+			slog.Info("internal calendar confirm: request ack email enqueue",
+				"appointment_id", appointmentID, "channel", "email", "enqueued", emailSent)
+		}
+	}
+
+	// The voice/chat agent speaks `nextStep` verbatim (triage STEP 6). Only
+	// claim the email when it was actually enqueued, so we never promise a
+	// message that won't arrive.
+	nextStep := "Thanks! We've got your request and our care team will reach out shortly to confirm the details."
+	if emailSent {
+		nextStep = "Thanks! We've got your request and our care team will reach out shortly to confirm the details. " + notifyEmailSentLine
+	}
+
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"appointmentId": appointmentID,
-		"nextStep":      "You're all set! Your appointment has been confirmed. We'll be in touch with details shortly.",
+		"nextStep":      nextStep,
 	})
 }
 
@@ -420,6 +539,10 @@ func (h *InternalCalendarHandler) persistAppointment(
 	if apptTime.IsZero() {
 		apptTimePtr = nil
 	}
+	var phoneHash string
+	if draft.Phone != "" {
+		phoneHash = phi.HashPhone(draft.Phone)
+	}
 	rec := phi.IntakeRecord{
 		SubmissionUUID:    submissionUUID,
 		EmailHash:         emailHash,
@@ -430,6 +553,7 @@ func (h *InternalCalendarHandler) persistAppointment(
 		LastName:          draft.LastName,
 		DateOfBirth:       draft.DOByyyymmdd,
 		Phone:             draft.Phone,
+		PhoneHash:         phoneHash,
 		Email:             draft.Email,
 		HomeAddress:       draft.HomeAddress,
 		Sex:               draft.Sex,

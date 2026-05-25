@@ -158,6 +158,86 @@ func sortIntakeDesc(rows []IntakeRecord) {
 	}
 }
 
+// WorkflowStatuses is the canonical closed set of workflow status values.
+// The zero value (absent on old records) is treated as "new" at the read layer.
+var WorkflowStatuses = map[string]struct{}{
+	"new":                  {},
+	"in_review":            {},
+	"approved":             {},
+	"scheduled":            {},
+	"reschedule_requested": {},
+	"cancel_requested":     {},
+	"cancelled":            {},
+	"no_show":              {},
+	"completed":            {},
+	"rejected":             {},
+	"archived":             {},
+}
+
+// IsValidWorkflowStatus reports whether s is a member of the canonical enum.
+func IsValidWorkflowStatus(s string) bool {
+	_, ok := WorkflowStatuses[s]
+	return ok
+}
+
+// UpdateIntakeWorkflowStatus sets the workflow status on an existing DDB intake
+// record. Mirrors UpdateIntakeAppointment: keyed by PK/SK with a
+// ConditionExpression so callers get ErrNotFound on a missing record rather than
+// a silent no-op. `by` is the admin identity (email or ID) for the audit trail.
+func (s *Store) UpdateIntakeWorkflowStatus(
+	ctx context.Context,
+	emailHash, submissionUUID, status, by string,
+) error {
+	if emailHash == "" || submissionUUID == "" {
+		return fmt.Errorf("phi: emailHash and submissionUUID are required")
+	}
+	if !IsValidWorkflowStatus(status) {
+		return fmt.Errorf("phi: invalid workflow status %q", status)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	now := time.Now().UTC()
+	attrStatus, err := attributevalue.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("phi: marshal workflow_status: %w", err)
+	}
+	attrTime, err := attributevalue.Marshal(now)
+	if err != nil {
+		return fmt.Errorf("phi: marshal workflow_status_updated_at: %w", err)
+	}
+	attrBy, err := attributevalue.Marshal(by)
+	if err != nil {
+		return fmt.Errorf("phi: marshal workflow_status_by: %w", err)
+	}
+
+	_, err = s.ddb.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]ddbtypes.AttributeValue{
+			"PK": &ddbtypes.AttributeValueMemberS{Value: patientPK(emailHash)},
+			"SK": &ddbtypes.AttributeValueMemberS{Value: intakeSK(submissionUUID)},
+		},
+		UpdateExpression: aws.String(
+			"SET workflowStatus = :s, workflowStatusUpdatedAt = :t, workflowStatusBy = :b",
+		),
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{
+			":s": attrStatus,
+			":t": attrTime,
+			":b": attrBy,
+		},
+		ConditionExpression: aws.String("attribute_exists(PK) AND attribute_exists(SK)"),
+	})
+	if err != nil {
+		var cond *ddbtypes.ConditionalCheckFailedException
+		if errors.As(err, &cond) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("phi: update intake workflow status: %w", err)
+	}
+	return nil
+}
+
 // UpdateIntakeAppointment sets AppointmentTime and TherapistStaffID on an
 // existing DDB intake record. Used by the migration tool to backfill data
 // from the Postgres intake_pointers table into pre-existing DDB items.

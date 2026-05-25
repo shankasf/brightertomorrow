@@ -71,7 +71,9 @@ func (b *callbackRequest) validate() error {
 // this data — the Hostinger VPS is not BAA-covered and cannot legally
 // hold raw patient PHI. See project_hostinger_not_hipaa memory.
 type CallbackInternalHandler struct {
-	PHI *phi.Store
+	PHI           *phi.Store
+	Notify        *phi.NotificationStore // optional; nil → notifications silently skipped
+	NotifyEnabled bool                   // gates enqueue; default false (BT_APPOINTMENT_NOTIFY_ENABLED)
 }
 
 func (h *CallbackInternalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +117,11 @@ func (h *CallbackInternalHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		httpx.WriteError(w, http.StatusServiceUnavailable, "phi store unavailable")
 		return
 	}
+
+	// Best-effort ACK email. CallbackRecord has no email field — the caller
+	// only supplies name + phone + reason. Email is required to enqueue;
+	// skip silently. The patient will receive a phone callback instead.
+	// TODO(sms): enqueue sms channel when Twilio is enabled.
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": true,
