@@ -75,7 +75,9 @@ JOIN (VALUES
   ('Specialties','Trauma & PTSD Therapy','/specialties/trauma-ptsd',10),
   ('Specialties','Relationship Counseling','/specialties/relationship',11),
   ('Rates','Affordable Therapy','/rates',1),
-  ('Contact','Contact Us','/contact',1)
+  ('Contact','Contact','/contact',1),
+  ('Contact','Careers','/careers',2),
+  ('Contact','Quick Appointment request','/contact/quick-appointment',3)
 ) AS c(parent_label, label, href, position) ON c.parent_label = p.label;
 
 -- Footer nav (grouped to match the live site: Services / Specialties / Important Links / Information)

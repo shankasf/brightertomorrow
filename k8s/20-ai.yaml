@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: ai
-          image: bt-ai:prod-b880338-1779581168
+          image: bt-ai:prod-85b1f04-1779743406
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
           env:
@@ -50,8 +50,16 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: TWILIO_API_KEY_SID, optional: true } }
             - name: TWILIO_API_KEY_SECRET
               valueFrom: { secretKeyRef: { name: bt-config, key: TWILIO_API_KEY_SECRET, optional: true } }
+            # Relaxed 1700 -> 900: with server_vad threshold raised to 0.85,
+            # OpenAI's own VAD rejects PSTN echo, so the app-side gate only
+            # needs to catch the loudest echo tail (2026-05-24).
             - name: TWILIO_ECHO_GATE_RMS
-              value: "1700"
+              value: "900"
+            # Phone bridge selector: raw_ws = new raw-WebSocket bridge
+            # (app/voice_rt, explicit response control, urackit_v2-style);
+            # sdk = legacy Agents-SDK bridge (app/twilio_voice.py). 2026-05-24.
+            - name: VOICE_BRIDGE
+              value: "raw_ws"
             # --- LangSmith (agent tracing for the new LangGraph stack) ----
             - name: LANGSMITH_TRACING
               valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_TRACING, optional: true } }

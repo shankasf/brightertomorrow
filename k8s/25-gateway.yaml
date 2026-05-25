@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: bt-gateway:prod-b880338-1779581168
+          image: bt-gateway:prod-85b1f04-1779742283
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -89,6 +89,17 @@ spec:
             # ARN is stable and provisioned by BtObservability CDK stack.
             - name: SNS_ALERT_TOPIC_ARN
               value: "arn:aws:sns:us-east-1:689517798275:bt-alerts"
+            # Patient appointment notifications (email via SES, queued to
+            # bt-notifications-outbox → bt-notifications-retry Lambda).
+            # Enabled 2026-05-25: SES domain mail.brightertomorrowtherapy.cloud
+            # verified, bt-gateway-vm has unconditional kms:Encrypt for the
+            # outbox payload. SMS stays off until Twilio A2P 10DLC is live.
+            - name: BT_APPOINTMENT_NOTIFY_ENABLED
+              value: "true"
+            # Lambda to invoke synchronously after writing an outbox row for
+            # truly-immediate notification delivery (no EventBridge tick wait).
+            - name: BT_NOTIFICATIONS_RETRY_LAMBDA
+              value: "bt-notifications-retry"
             # Twilio Voice webhook signature verification + future outbound.
             - name: TWILIO_AUTH_TOKEN
               valueFrom:
