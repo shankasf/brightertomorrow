@@ -23,6 +23,7 @@ install_log_broadcast()
 
 from .integrations.aws_signer import signed_post
 from .data.payers import resolve_payer_id
+from .data.identifiers import normalize_member_id
 from .core.db import conn
 from .ingestion.embed_faqs import embed_all_faqs
 from .caching.info_cache import detect_intent, get_cached_reply, cache_stats
@@ -512,7 +513,7 @@ async def internal_check_coverage(req: CoverageCheckRequest) -> CoverageCheckRes
                 "last_name": req.last_name.strip(),
                 "dob": valid_dob,
                 "payer_id": payer.id,
-                "member_id": req.member_id.strip(),
+                "member_id": normalize_member_id(req.member_id),
             },
         )
     except Exception as exc:
@@ -609,7 +610,19 @@ async def twilio_media_ws(ws: WebSocket) -> None:
     from .integrations.tools import agent_source
     agent_source.set("voice-phone")
     t0 = time.perf_counter()
-    from .twilio_voice import run_twilio_session
+    # VOICE_BRIDGE selects the phone bridge implementation:
+    #   * "raw_ws" → app.voice_rt.twilio_bridge (raw OpenAI Realtime WS, explicit
+    #     response control — fixes server-VAD create_response misfires + post-tool
+    #     silent stalls).
+    #   * "sdk" (default) → app.twilio_voice (OpenAI Agents SDK RealtimeRunner).
+    # Default to "sdk" so prod is unchanged until we flip the env.
+    bridge = (os.environ.get("VOICE_BRIDGE") or "sdk").strip().lower()
+    if bridge == "raw_ws":
+        from .voice_rt.twilio_bridge import run_twilio_session
+        logger.info("twilio_bridge_selected bridge=raw_ws")
+    else:
+        from .twilio_voice import run_twilio_session
+        logger.info("twilio_bridge_selected bridge=sdk")
     try:
         await run_twilio_session(ws)
     except WebSocketDisconnect:

@@ -158,16 +158,28 @@ def _format_slot_display(start_iso: str) -> str:
     return dt_pt.strftime("%A, %B %-d at %-I:%M %p") + " PT"
 
 
-def _fetch_free_slots(staff_id: int, days_ahead: int = 7, slot_minutes: int = 50) -> dict:
-    """Return free 50-min slots for `staff_id` over the next `days_ahead` days."""
+def _fetch_free_slots(
+    staff_id: int | None,
+    days_ahead: int = 7,
+    slot_minutes: int = 50,
+) -> dict:
+    """Return free 50-min slots over the next `days_ahead` days.
+
+    staff_id == 0 or None  →  any-therapist mode: gateway fans out, each slot
+        is tagged with staffId + staffName.
+    staff_id > 0           →  single-therapist mode for that clinician.
+    """
+    any_mode = not staff_id
+    gateway_staff_id: int = 0 if any_mode else staff_id  # type: ignore[assignment]
+
     now = datetime.datetime.now(tz=datetime.timezone.utc)
     from_iso = now.isoformat(timespec="seconds").replace("+00:00", "Z")
     to_dt = now + datetime.timedelta(days=days_ahead)
     to_iso = to_dt.isoformat(timespec="seconds").replace("+00:00", "Z")
 
-    with _log_call("get_free_slots", staff_id=staff_id, days_ahead=days_ahead):
+    with _log_call("get_free_slots", staff_id=gateway_staff_id, days_ahead=days_ahead):
         resp = gateway_post("/internal/calendar/free-slots", {
-            "staffId": staff_id,
+            "staffId": gateway_staff_id,
             "fromISO": from_iso,
             "toISO": to_iso,
             "slotMinutes": slot_minutes,
@@ -177,11 +189,16 @@ def _fetch_free_slots(staff_id: int, days_ahead: int = 7, slot_minutes: int = 50
     enriched = []
     for s in raw_slots:
         enriched.append({
+            "staffId": s.get("staffId", gateway_staff_id),
+            "staffName": s.get("staffName", ""),
             "startISO": s["startISO"],
             "endISO": s["endISO"],
             "displayPT": _format_slot_display(s["startISO"]),
         })
-    logger.debug("tool_result tool=get_free_slots staff_id=%d count=%d", staff_id, len(enriched))
+    logger.debug(
+        "tool_result tool=get_free_slots staff_id=%s any_mode=%s count=%d",
+        gateway_staff_id, any_mode, len(enriched),
+    )
     return {"slots": enriched}
 
 

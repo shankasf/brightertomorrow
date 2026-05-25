@@ -204,7 +204,9 @@ DOCS: tuple[Doc, ...] = (
             "Clinicians are licensed in Nevada; telehealth across state lines is a "
             "licensure violation, so sessions are limited to clients physically located in "
             "Nevada at the time of the appointment. Mid-session moves out of state require "
-            "us to pause care."
+            "us to pause care. You can book from any state and while traveling — the only "
+            "requirement is that you are physically in Nevada at the time of your visit, "
+            "whether it is in person or by video."
         ),
     ),
     Doc(
