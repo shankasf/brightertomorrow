@@ -35,14 +35,35 @@ DEFAULT_TRANSCRIPTION_LANGUAGE = "en"
 DEFAULT_TRANSCRIPTION_PROMPT = ""
 
 # Logprob-based confidence filter. Real speech on PSTN typically averages
-# logprob ≥ −0.5 per token; whisper-style hallucinations on silence/noise
-# average below −1.0. We drop the turn before it reaches Triage. Tuned
-# conservatively — better to ask the caller to repeat than to act on a
-# hallucinated transcript. Override via env if tuning shows drift.
+# logprob ≥ −0.5 per token; whisper-style hallucinations on pure silence/noise
+# average well below −2.0 (observed −2.9 to −5.7 on real calls). We drop the
+# turn before it reaches Triage. The earlier −1.0 cut was far too aggressive:
+# genuine spelled member IDs / phone digits / DOBs on narrowband PSTN land at
+# −1.0 to −1.9 and were being dropped, so the caller could never get a member
+# ID through (calls CA4d16293f / CA9b79867f, 2026-05-24). −2.0 lets that real
+# spelled input pass while still catching the egregious silence hallucinations.
+# Override via env REALTIME_LOW_CONFIDENCE_LOGPROB if tuning shows drift.
 TRANSCRIPTION_LOGPROB_INCLUDE: tuple[str, ...] = (
     "item.input_audio_transcription.logprobs",
 )
-DEFAULT_LOW_CONFIDENCE_LOGPROB_THRESHOLD = -1.0
+DEFAULT_LOW_CONFIDENCE_LOGPROB_THRESHOLD = -2.0
+
+
+# Per-response output cap (runaway guard + TPM-reservation trim). 1500 is
+# generous — a 1–2 sentence spoken reply is a few hundred audio tokens, and
+# verbatim insurance read-backs fit comfortably; this only stops a pathological
+# multi-paragraph response. Override via env REALTIME_MAX_OUTPUT_TOKENS.
+DEFAULT_MAX_OUTPUT_TOKENS = 1500
+
+
+def realtime_max_output_tokens() -> int:
+    raw = os.environ.get("REALTIME_MAX_OUTPUT_TOKENS")
+    if not raw:
+        return DEFAULT_MAX_OUTPUT_TOKENS
+    try:
+        return int(raw)
+    except ValueError:
+        return DEFAULT_MAX_OUTPUT_TOKENS
 
 
 def low_confidence_logprob_threshold() -> float:
@@ -147,19 +168,18 @@ def build_telephony_model_settings() -> RealtimeSessionModelSettings:
         eagerness=high — our prior setting — kept firing on PSTN noise and
         treating it as caller barge-in, which made the realtime model
         generate phantom turns and (in worst cases) hand off to Crisis on
-        silence (call CA7d21a72a, 2026-05-15). server_vad with threshold=0.6
-        and a 700ms silence window is the documented noisy-environment
-        config per OpenAI's realtime VAD guide:
-        https://developers.openai.com/api/docs/guides/realtime-vad
-        - threshold 0.6: a touch above default 0.5 so line hiss / hold-music
-          doesn't cross the activation floor on g711_ulaw narrowband
-        - prefix_padding_ms 300: default; captures the leading consonant
-          that triggered VAD so words don't get clipped
-        - silence_duration_ms 700: longer than the 500ms default so a
-          thinking caller mid-sentence isn't cut off and the model doesn't
-          fire on short noise bursts between syllables
-        - interrupt_response True: real barge-in still cancels assistant
-          audio mid-sentence
+        silence (call CA7d21a72a, 2026-05-15).
+        - threshold 0.85: HIGH on purpose — this is the value our previously
+          working agent (urackit_v2) used. A high VAD floor makes OpenAI ignore
+          PSTN echo / line hiss itself, so we don't need an aggressive app-side
+          echo gate (relaxed in tandem). Real caller speech easily clears 0.85.
+        - prefix_padding_ms 300: captures the leading consonant that triggered
+          VAD so words don't get clipped
+        - silence_duration_ms 800: a thinking caller mid-sentence isn't cut off
+          and the model doesn't fire on short noise bursts between syllables
+        - create_response/interrupt_response True: VAD owns turn-taking and
+          barge-in; we inject response.create only for greeting/handoff/tool/
+          goodbye (see [[project_voice_turn_taking]]).
     """
     settings = build_model_settings()
     settings["input_audio_format"] = "g711_ulaw"
@@ -167,11 +187,28 @@ def build_telephony_model_settings() -> RealtimeSessionModelSettings:
     settings["input_audio_noise_reduction"] = {"type": "far_field"}
     settings["turn_detection"] = {
         "type": "server_vad",
-        "threshold": 0.6,
+        # 0.85 (RESTORED from 0.6 — urackit_v2's proven value). The 0.6 experiment
+        # backfired badly: with create_response:true + interrupt_response:true, a
+        # low VAD floor lets PSTN echo of OUR OWN audio trip server VAD as "caller
+        # speech" mid-reply, which CANCELS the model's in-flight response →
+        # response.done with no audio → dead air, on nearly every turn of a
+        # speakerphone call (call CAe3c4ae 2026-05-24: every reply was empty and
+        # only the nudge salvaged it). 0.85 makes OpenAI ignore line echo itself.
+        # Short confirmations ("yes") still commit fine when spoken clearly; the
+        # earlier "0.85 dropped short turns" theory was actually this same empty-
+        # response bug misattributed to the threshold.
+        "threshold": 0.85,
         "prefix_padding_ms": 300,
-        "silence_duration_ms": 700,
+        "silence_duration_ms": 800,
         "create_response": True,
         "interrupt_response": True,
+        # Native silence handling (server_vad only): if the caller goes quiet
+        # for this long after our audio finishes, OpenAI commits an empty turn
+        # and auto-prompts ("still there?") — the market-standard replacement
+        # for app-side response.create polling, which collided with VAD-driven
+        # responses and caused dead air (2026-05-24). 8s feels attentive on a
+        # phone without nagging.
+        "idle_timeout_ms": 8000,
     }
     return settings
 

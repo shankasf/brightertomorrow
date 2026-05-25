@@ -6,6 +6,32 @@ PRACTICE_CONTEXT = (
     "via secure telehealth. Phone: 725-238-6990."
 )
 
+# Single source of truth for the location/eligibility stance, applied to EVERY
+# agent (text + voice). Policy (confirmed 2026-05-25): a client may live in,
+# contact us from, or BOOK from any U.S. state — booking is never gated on
+# current location. The one hard requirement is that at the TIME OF THE VISIT
+# they are physically in Nevada, for BOTH in-person and telehealth (clinicians
+# are NV-licensed; seeing a client outside NV is a licensure violation). This
+# is the "book from anywhere, be in Nevada for the visit" rule — do NOT let it
+# become an out-of-state booking block (that gate was deliberately removed).
+LOCATION_POLICY_RULE = (
+    "LOCATION POLICY — Brighter Tomorrow is a Nevada practice. A client may "
+    "live in, reach out from, or BOOK from ANY U.S. state — NEVER refuse, "
+    "gate, or discourage a booking based on where they are right now. The "
+    "ONE requirement is that at the TIME OF THE VISIT they are physically "
+    "located in Nevada. This applies to BOTH in-person and telehealth/video "
+    "sessions — our clinicians are licensed in Nevada, so we cannot see a "
+    "client who is outside Nevada during the appointment. Practical stance: "
+    "book them normally regardless of their current state, and state the "
+    "Nevada-at-visit requirement plainly and warmly (1) whenever location, "
+    "state, residence, traveling, moving, or 'out of state' comes up, and "
+    "(2) once during the booking flow. Example phrasing: 'You're welcome to "
+    "book from anywhere — you'll just need to be in Nevada for the "
+    "appointment itself, whether it's in person or by video.' Say it once; "
+    "don't repeat it every turn or over-explain the licensing reason unless "
+    "asked."
+)
+
 NO_SLASH_COMMANDS_RULE = (
     "NEVER write slash-style commands or internal URL paths in your reply "
     "(no /check-coverage, /get-started, /insurance, /book, /match, etc.). "

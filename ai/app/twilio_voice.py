@@ -98,35 +98,20 @@ _ECHO_GATE_HANGOVER_S = (
     float(os.environ.get("TWILIO_ECHO_GATE_HANGOVER_MS", "400")) / 1000.0
 )
 
-# Caller-silence thresholds — mirror voice.py. PSTN audio is the worst case
-# for ASR drift, so the check-back is the only way to keep an idle caller
-# from sitting on dead air.
-_SILENCE_CHECK_BACK_S = 10.0  # genuine caller silence → "are you still there?"
+# Caller-silence thresholds. Turn-taking + idle re-prompt are native to
+# server_vad (create_response + idle_timeout_ms); this watchdog adds a guarded
+# one-shot nudge (post-barge-in stall recovery) and the hard 120s cutoff.
 _SILENCE_HANGUP_S = 120.0
-_SILENCE_TICK_S = 1.0          # tick fast so the 3s response-nudge can fire on time
-# Response nudge: if the caller's turn landed and the model hasn't STARTED
-# replying within this many seconds, force a response.create. The realtime
-# model frequently fails to auto-respond after a short "yes" (its response gets
-# cancelled by a barge-in), leaving ~13s of dead air until the slow check-back.
-# 3s recovery (user-set 2026-05-23) makes it feel responsive.
-_RESPONSE_NUDGE_S = 3.0
+_SILENCE_TICK_S = 1.0
+# Guarded response nudge: if a caller turn landed and the model hasn't replied
+# within this long AND no response is active, fire one response.create. Covers
+# the realtime quirk where a barge-in cancels the reply and create_response
+# doesn't re-fire (call CA60ce74, 2026-05-24: clean DOB → 30s dead air).
+_RESPONSE_NUDGE_S = 3.5
 _RESPONSE_NUDGE_INSTRUCTIONS = (
-    "Continue the conversation now — respond to what the caller just said and "
-    "move to the next step. Do NOT repeat the HIPAA disclosure and do NOT say "
-    "you didn't catch anything unless you truly received no transcript."
-)
-
-_CHECK_BACK_INSTRUCTIONS = (
-    "The caller has gone quiet for several seconds since your last audio "
-    "finished — they may be thinking, stepped away, or the line dropped a "
-    "beat. Warmly check they're still there AND, in the same breath, move "
-    "things forward by restating the ONE specific thing you're waiting on "
-    "right now, drawn from the conversation so far (the exact question or "
-    "the single field you still need). E.g. right after verifying coverage: "
-    "'Still with me? Whenever you're ready, I just need your phone number "
-    "and email to finish booking.' Do NOT restart the call, re-introduce "
-    "yourself, repeat the HIPAA line, or re-ask anything the caller already "
-    "gave. Keep it brief — one short check-in plus the one thing you need."
+    "Continue now — reply to what the caller just said and move to the next "
+    "step. Do NOT repeat the HIPAA disclosure, and do NOT say you didn't catch "
+    "anything unless you truly received no transcript."
 )
 
 _HANGUP_GOODBYE_INSTRUCTIONS = (
@@ -182,9 +167,11 @@ _INTERNAL_PROMPT_PREFIX = "[[BT_INTERNAL]]"
 # naturally on turn two once they say why they called.
 _OPENING_GREETING_INSTRUCTIONS = (
     "A caller just dialed in on a HIPAA-secure phone line. Speak first; "
-    "do NOT wait, do NOT read these instructions aloud. One short sentence "
-    "only: greet them as the Brighter Tomorrow assistant, note the line is "
-    "HIPAA-secure, and ask how you can help. Speak slowly — phone audio is "
+    "do NOT wait, do NOT read these instructions aloud. Keep it to TWO "
+    "short sentences: (1) greet them as the Brighter Tomorrow assistant on "
+    "a HIPAA-secure line; (2) note we're a Nevada practice — they can book "
+    "from any state but need to be in Nevada for the visit, in person or by "
+    "video — then ask how you can help. Speak slowly — phone audio is "
     "narrowband."
 )
 
@@ -192,66 +179,6 @@ _OPENING_GREETING_INSTRUCTIONS = (
 def _is_internal_prompt(text: str) -> bool:
     s = (text or "").lstrip()
     return s.startswith(_INTERNAL_PROMPT_PREFIX) or s.startswith("[SYSTEM:")
-
-
-# ---------------------------------------------------------------------------
-# ASR-hallucination filter — phone audio is the worst case for this.
-#
-# Whisper / gpt-4o-transcribe will emit boilerplate ("subscribe to our
-# channel", "thanks for watching") when given silence, hold music, or speech
-# in a language it wasn't told to expect. Narrowband mulaw audio makes this
-# worse, not better. We drop these turns before they reach the agent and
-# interrupt any response they may have already triggered.
-# ---------------------------------------------------------------------------
-
-_HALLUCINATION_FRAGMENTS: tuple[str, ...] = (
-    "subscribe to the channel",
-    "subscribe to our channel",
-    "thanks for watching",
-    "thank you for watching",
-    "like and subscribe",
-    "please subscribe",
-    "chunky registration",
-    "bye bye",
-    "www.",
-    "http://",
-    "https://",
-    ".com",
-    ".net",
-    ".org",
-    "facebook",
-    "instagram",
-    "youtube",
-    "email at the rate",
-    "at the rate of",
-    "at rate",
-    "e-mail at",
-    # Defense-in-depth against the steering-prompt echo failure mode
-    # (call CA8bc6a40c…, 2026-05-15). The prompt is empty now so this
-    # should never fire, but if a future operator re-adds a long prompt
-    # these phrases catch the most common echo shapes before they reach
-    # the agent and trigger a bogus crisis handoff.
-    "english-only phone call",
-    "english only phone call",
-    "if nothing is said",
-    "return empty",
-    "intake details:",
-    "ignore background noise",
-)
-
-
-def _is_hallucinated_transcript(text: str) -> bool:
-    s = (text or "").strip()
-    if len(s) <= 1:
-        return True
-    # NOTE: we intentionally do NOT block on script/Unicode range — the
-    # practice serves callers in any language (Spanish, Hindi, Tamil,
-    # Mandarin, Arabic, etc.). Genuine non-English speech must pass.
-    # Junk detection is now handled by:
-    #   (a) the boilerplate blocklist below (whisper-on-silence artifacts)
-    #   (b) the per-token logprob filter in _maybe_drop_low_confidence
-    low = s.lower()
-    return any(needle in low for needle in _HALLUCINATION_FRAGMENTS)
 
 
 # ---------------------------------------------------------------------------
@@ -436,52 +363,53 @@ class _SilenceState:
         "last_caller_quiet_since",
         "assistant_speaking",
         "last_assistant_audio_ts",
-        "check_back_sent",
         "hangup_sent",
         "ended",
         "awaiting_response",
         "response_nudged",
+        "response_active",
     )
 
     def __init__(self) -> None:
         # Greeting is about to play — treat assistant as speaking so the
-        # 45s clock doesn't start before the model has said anything.
+        # silence clock doesn't start before the model has said anything.
         self.last_caller_quiet_since: float | None = None
         self.assistant_speaking: bool = True
         # Monotonic ts of the most recent assistant audio frame. Drives the
         # echo-gate hangover so the PSTN echo tail is suppressed for
         # _ECHO_GATE_HANGOVER_S after RealtimeAudioEnd, not just while speaking.
         self.last_assistant_audio_ts: float = time.monotonic()
-        self.check_back_sent: bool = False
         self.hangup_sent: bool = False
         self.ended: bool = False
-        # awaiting_response: the caller's turn landed and the model hasn't
-        # started replying yet → the 3s response-nudge is eligible to fire.
+        # GUARDED response nudge: a caller turn landed (awaiting_response) but
+        # the model never produced a reply — happens intermittently after a
+        # barge-in cancels the in-flight response and create_response doesn't
+        # re-fire. We nudge ONCE, but only when response_active is False, so we
+        # never collide with a VAD-driven response ("only one response at a
+        # time"). response_active tracks response.created→done/cancelled.
         self.awaiting_response: bool = False
         self.response_nudged: bool = False
+        self.response_active: bool = True   # greeting response is in flight
 
     def on_assistant_audio_frame(self) -> None:
         self.assistant_speaking = True
+        self.response_active = True
         self.last_assistant_audio_ts = time.monotonic()
         self.last_caller_quiet_since = None
-        self.check_back_sent = False
-        self.awaiting_response = False   # model is replying — nudge not needed
+        # Model is replying — the nudge is no longer needed for this turn.
+        self.awaiting_response = False
         self.response_nudged = False
 
     def on_assistant_audio_end(self) -> None:
         self.assistant_speaking = False
+        self.response_active = False
         self.last_caller_quiet_since = time.monotonic()
 
     def on_caller_turn(self) -> None:
-        # Arm both timers FROM the caller's turn (not None). If the model
-        # fails to auto-respond — e.g. its response was cancelled by a
-        # barge-in — the 3s response-nudge forces a reply, and the 10s
-        # check-back is the longer backstop, instead of deadlocking in
-        # silence. on_assistant_audio_frame() clears these once the reply
-        # starts so nothing fires mid-reply (2026-05-23 stuck-silence root
-        # cause + sluggish-recovery fix).
+        # Reset the silence clock and arm the guarded nudge: VAD owns the reply
+        # (create_response), but if it whiffs after a barge-in the watchdog will
+        # nudge once, only while no response is active.
         self.last_caller_quiet_since = time.monotonic()
-        self.check_back_sent = False
         self.awaiting_response = True
         self.response_nudged = False
 
@@ -717,46 +645,11 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
             if _is_internal_prompt(text):
                 persisted_item_ids.add(item_id)
                 return
-            if _is_hallucinated_transcript(text):
-                logger.info(
-                    "twilio_drop_hallucinated_user call_sid=%s item_id=%s text=%r",
-                    call_sid, item_id, text,
-                )
-                persisted_item_ids.add(item_id)
-                try:
-                    await session.interrupt()
-                except Exception:
-                    logger.debug(
-                        "twilio_hallucination_interrupt_failed call_sid=%s",
-                        call_sid, exc_info=True,
-                    )
-                # Delete the bad item from the OpenAI server-side
-                # conversation history so the model can't "remember" it
-                # on the next turn (otherwise the reprompt asks the
-                # caller to "repeat the last piece of information" and
-                # the model is referencing dropped noise). Mirrors what
-                # the logprob-drop path already does.
-                try:
-                    await session.model.send_event(
-                        RealtimeModelSendRawMessage(
-                            message={
-                                "type": "conversation.item.delete",
-                                "other_data": {"item_id": item_id},
-                            }
-                        )
-                    )
-                except Exception:
-                    logger.debug(
-                        "twilio_hallucination_delete_failed call_sid=%s",
-                        call_sid, exc_info=True,
-                    )
-                try:
-                    await _emit_response_create(session, _HALLUCINATED_REPROMPT_INSTRUCTIONS)
-                except Exception:
-                    logger.warning("twilio_hallucination_reprompt_failed call_sid=%s", call_sid, exc_info=True)
-                silence.last_caller_quiet_since = time.monotonic()
-                silence.check_back_sent = False
-                return
+            # (boilerplate ASR-hallucination filter removed — it false-positived
+            # on legitimate caller input, e.g. dropping every email address that
+            # contained ".com". The per-token logprob filter
+            # _maybe_drop_low_confidence remains the safety net for true
+            # silence/noise hallucinations.)
             silence.on_caller_turn()
             logger.info("twilio_turn call_sid=%s role=user text=%r", call_sid, text[:200])
             _schedule_persist(session_id, "user", text)
@@ -834,7 +727,6 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                 call_sid, exc_info=True,
             )
         silence.last_caller_quiet_since = time.monotonic()
-        silence.check_back_sent = False
 
     async def session_to_twilio() -> None:
         try:
@@ -971,12 +863,22 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                         and getattr(inner, "type", None) == "raw_server_event"
                     ):
                         srv = getattr(inner, "data", None) or {}
-                        if (
-                            isinstance(srv, dict)
-                            and srv.get("type")
-                            == "conversation.item.input_audio_transcription.completed"
-                        ):
-                            await _maybe_drop_low_confidence(srv)
+                        if isinstance(srv, dict):
+                            srv_type = srv.get("type")
+                            if srv_type == "conversation.item.input_audio_transcription.completed":
+                                await _maybe_drop_low_confidence(srv)
+                            # Track response lifecycle so the guarded nudge never
+                            # fires while a response is in flight (incl. the
+                            # pre-audio "thinking"/tool window before the first
+                            # audio frame).
+                            elif srv_type == "response.created":
+                                silence.response_active = True
+                            elif srv_type in (
+                                "response.done",
+                                "response.cancelled",
+                                "response.failed",
+                            ):
+                                silence.response_active = False
                     continue
 
                 if isinstance(event, RealtimeHistoryAdded):
@@ -1043,6 +945,20 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                         # in the tool function ran in an SDK-owned context
                         # where end_call_event was empty. Mirrors voice.py.
                         hangup_event.set()
+                        continue
+                    # A tool result OWES a spoken reply (announce coverage,
+                    # read slots, etc.). The SDK should auto-continue the
+                    # response, but it intermittently stalls and leaves the
+                    # line dead (call CAc13a47, 2026-05-24: verify_coverage
+                    # returned active, then 51s of silence). Arm the guarded
+                    # nudge: if no audio comes within _RESPONSE_NUDGE_S we fire
+                    # one response.create. response_active is set False so the
+                    # nudge is eligible; if the model DOES auto-continue, its
+                    # first audio frame disarms the nudge before it fires.
+                    silence.last_caller_quiet_since = time.monotonic()
+                    silence.awaiting_response = True
+                    silence.response_nudged = False
+                    silence.response_active = False
                     continue
 
                 if isinstance(event, RealtimeError):
@@ -1074,12 +990,12 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
             )
 
     async def silence_watchdog() -> None:
-        """Mirror voice.py: check-back at 45s, goodbye + hangup at 120s.
-
-        PSTN callers won't ask "are you still there?" — they assume the line
-        is broken and hang up. The check-back keeps the call alive; the
-        120s branch sets hangup_event so the run loop closes the WS after
-        the goodbye finishes playing.
+        """Turn-taking is owned by server_vad (create_response) + native
+        idle_timeout_ms. This watchdog adds two narrow safety nets: a GUARDED
+        one-shot response nudge (recovers the intermittent post-barge-in stall
+        where the model never replies to a landed caller turn), and the hard
+        120s hangup for a genuinely abandoned line. The nudge fires ONLY when
+        no response is active, so it can't collide with a VAD-driven response.
         """
         try:
             while not silence.ended:
@@ -1089,11 +1005,16 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                 if silence.assistant_speaking or silence.last_caller_quiet_since is None:
                     continue
                 idle = time.monotonic() - silence.last_caller_quiet_since
-                # 3s RESPONSE NUDGE — caller's turn landed but the model never
-                # started replying. Force a response.create so we don't sit in
-                # dead air waiting for the slow 10s check-back.
-                if (silence.awaiting_response and not silence.response_nudged
-                        and idle >= _RESPONSE_NUDGE_S):
+                # GUARDED response nudge: the caller's turn landed but the model
+                # produced no reply (barge-in cancelled its response and
+                # create_response didn't re-fire). Nudge once — but only if no
+                # response is currently active, so we never double-create.
+                if (
+                    silence.awaiting_response
+                    and not silence.response_nudged
+                    and not silence.response_active
+                    and idle >= _RESPONSE_NUDGE_S
+                ):
                     silence.response_nudged = True
                     logger.info(
                         "twilio_response_nudge call_sid=%s waited_s=%.1f",
@@ -1123,19 +1044,6 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                     await asyncio.sleep(6.0)
                     hangup_event.set()
                     return
-                if idle >= _SILENCE_CHECK_BACK_S and not silence.check_back_sent:
-                    silence.check_back_sent = True
-                    logger.info(
-                        "twilio_silence_check_back call_sid=%s idle_s=%.1f",
-                        call_sid, idle,
-                    )
-                    try:
-                        await _emit_response_create(session, _CHECK_BACK_INSTRUCTIONS)
-                    except Exception:
-                        logger.warning(
-                            "twilio_silence_check_back_emit_failed call_sid=%s",
-                            call_sid, exc_info=True,
-                        )
         except asyncio.CancelledError:
             raise
         except Exception:

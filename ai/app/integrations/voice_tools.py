@@ -9,6 +9,7 @@ import contextlib
 import contextvars
 import logging
 import os
+import re
 import time
 from functools import lru_cache
 from typing import Any
@@ -227,6 +228,10 @@ def _is_placeholder(val: str) -> bool:
     """Return True if `val` is empty or exactly a known placeholder phrase."""
     clean = (val or "").strip().lower()
     return clean in _PLACEHOLDER_VALUES
+
+
+# Shared normalizer (single source of truth) — see app/data/identifiers.py.
+from ..data.identifiers import normalize_member_id as _normalize_member_id
 
 
 def _is_fake_phone(val: str) -> bool:
@@ -498,7 +503,7 @@ def verify_insurance(
             "last_name": last_name,
             "dob": dob,
             "payer_id": payer_id,
-            "member_id": member_id,
+            "member_id": _normalize_member_id(member_id),
         })
 
 
@@ -796,7 +801,7 @@ def book_with_insurance(
     if payment_method == "insurance":
         submit_body.update({
             "insurance_name": payer.name,
-            "insurance_member_id": member_id,
+            "insurance_member_id": _normalize_member_id(member_id),
             "subscriber_name": full_name,           # assume self
             "subscriber_relationship": "self",
         })
@@ -932,7 +937,7 @@ def verify_coverage(
                 "last_name": last_name,
                 "dob": valid,
                 "payer_id": payer.id,
-                "member_id": member_id,
+                "member_id": _normalize_member_id(member_id),
             })
     except Exception as exc:
         logger.exception("verify_coverage_error")
@@ -1023,35 +1028,52 @@ def _format_slot_display(start_iso: str) -> str:
     return dt_pt.strftime("%A, %B %-d at %-I:%M %p") + " PT"
 
 
-def _fetch_free_slots(staff_id: int, days_ahead: int = 7, slot_minutes: int = 50) -> dict:
-    """Plain helper: free 50-min slots for `staff_id` over the next `days_ahead` days.
+def _fetch_free_slots(
+    staff_id: int | None,
+    days_ahead: int = 7,
+    slot_minutes: int = 50,
+) -> dict:
+    """Plain helper: free 50-min slots over the next `days_ahead` days.
 
     Split out of the @function_tool wrapper so other tools (e.g. propose_slots)
     can call it directly — invoking a @function_tool decorated function fails
     with `'FunctionTool' object is not callable`.
+
+    staff_id == 0 or None  →  ANY-therapist mode: the gateway fans out across
+        all feed-connected therapists and returns slots tagged with staffId +
+        staffName. Skip the local validity guard in this mode.
+    staff_id > 0            →  Single-therapist mode: validate against the
+        bookable roster first, reject fabricated IDs before they hit the gateway.
     """
-    # Guard against a fabricated/non-bookable staff_id (the realtime agent has
-    # been known to pass staff_id=2, a list index, → gateway 400 → retry loop).
-    # Reject it BEFORE the gateway with a self-correcting message listing the
-    # valid bookable therapists, so the model re-picks instead of looping.
-    from ..bt_agents.roster import ELIGIBLE_FOR_BOOKING
-    _bookable = {t["staffId"]: t["name"] for t in ELIGIBLE_FOR_BOOKING}
-    if staff_id not in _bookable:
-        valid = ", ".join(f"{n} (staffId {i})" for i, n in _bookable.items())
-        raise ValueError(
-            f"invalid_staff_id: {staff_id} is not a bookable therapist. Choose a "
-            f"staffId from this list and call again: {valid}. Do NOT reuse "
-            f"{staff_id}."
-        )
+    any_mode = not staff_id  # 0, None, or falsy → any-therapist
+
+    if any_mode:
+        # Fan-out: gateway handles the multi-staff query; send staffId 0.
+        gateway_staff_id: int = 0
+    else:
+        # Guard against a fabricated/non-bookable staff_id (the realtime agent
+        # has been known to pass staff_id=2, a list index, → gateway 400 →
+        # retry loop). Reject it BEFORE the gateway with a self-correcting
+        # message listing the valid bookable therapists.
+        from ..data.roster import ELIGIBLE_FOR_BOOKING
+        _bookable = {t["staffId"]: t["name"] for t in ELIGIBLE_FOR_BOOKING}
+        if staff_id not in _bookable:
+            valid = ", ".join(f"{n} (staffId {i})" for i, n in _bookable.items())
+            raise ValueError(
+                f"invalid_staff_id: {staff_id} is not a bookable therapist. Choose a "
+                f"staffId from this list and call again: {valid}. Do NOT reuse "
+                f"{staff_id}."
+            )
+        gateway_staff_id = staff_id  # type: ignore[assignment]
 
     now = datetime.datetime.now(tz=datetime.timezone.utc)
     from_iso = now.isoformat(timespec="seconds").replace("+00:00", "Z")
     to_dt = now + datetime.timedelta(days=days_ahead)
     to_iso = to_dt.isoformat(timespec="seconds").replace("+00:00", "Z")
 
-    with _log_call("get_free_slots", staff_id=staff_id, days_ahead=days_ahead):
+    with _log_call("get_free_slots", staff_id=gateway_staff_id, days_ahead=days_ahead):
         resp = gateway_post("/internal/calendar/free-slots", {
-            "staffId": staff_id,
+            "staffId": gateway_staff_id,
             "fromISO": from_iso,
             "toISO": to_iso,
             "slotMinutes": slot_minutes,
@@ -1061,41 +1083,65 @@ def _fetch_free_slots(staff_id: int, days_ahead: int = 7, slot_minutes: int = 50
     enriched = []
     for s in raw_slots:
         enriched.append({
+            "staffId": s.get("staffId", gateway_staff_id),
+            "staffName": s.get("staffName", ""),
             "startISO": s["startISO"],
             "endISO": s["endISO"],
             "displayPT": _format_slot_display(s["startISO"]),
         })
-    logger.debug("tool_result tool=get_free_slots staff_id=%d count=%d", staff_id, len(enriched))
+    logger.debug(
+        "tool_result tool=get_free_slots staff_id=%s any_mode=%s count=%d",
+        gateway_staff_id, any_mode, len(enriched),
+    )
     return {"slots": enriched}
 
 
 @function_tool
-def get_free_slots(staff_id: int, days_ahead: int = 7, slot_minutes: int = 50) -> dict:
-    """Returns free 50-min slots for the given therapist over the next N days (default 7).
+def get_free_slots(staff_id: int = 0, days_ahead: int = 7, slot_minutes: int = 50) -> dict:
+    """Returns free 50-min slots over the next N days (default 7).
 
-    Use this when the visitor has agreed on a therapist and you need raw
-    availability.
+    staff_id = 0 or omitted  →  any-therapist search: the gateway fans out
+        across ALL feed-connected therapists and returns the soonest available
+        slots each tagged with staffId + staffName.
+    staff_id > 0             →  single-therapist search for that specific clinician.
+
+    Use staff_id=0 (the default) when the caller has no therapist preference.
+    Pass a specific staffId only after the caller has named a therapist.
 
     Returns:
-      {"slots": [{"startISO": "...", "endISO": "...", "displayPT": "Tuesday, May 12 at 2:00 PM PT"}]}
+      {"slots": [{"staffId": 47, "staffName": "Elisia Danley",
+                  "startISO": "...", "endISO": "...",
+                  "displayPT": "Tuesday, May 12 at 2:00 PM PT"}]}
     """
-    return _fetch_free_slots(staff_id, days_ahead=days_ahead, slot_minutes=slot_minutes)
+    return _fetch_free_slots(staff_id or None, days_ahead=days_ahead, slot_minutes=slot_minutes)
 
 
 @function_tool
 def propose_slots(
-    staff_id: int,
+    staff_id: int = 0,
     time_of_day: str = "any",
     earliest_day_offset: int = 1,
     count: int = 3,
 ) -> dict:
     """Returns up to `count` best slots filtered by time-of-day preference.
 
+    staff_id = 0 or omitted  →  any-therapist search (use this when the caller
+        has no therapist preference, says "anyone", "whoever's soonest", etc.).
+        The gateway fans out and each returned slot includes staffId + staffName
+        so you can read back "Tuesday 2pm Pacific with Elisia Danley" and pass
+        THAT slot's staffId to book_appointment.
+    staff_id > 0             →  single-therapist search for that specific clinician.
+        Only pass a positive staffId after the caller has explicitly named a therapist.
+
     time_of_day must be one of: "morning", "afternoon", "evening", "any".
     earliest_day_offset = days from today to start considering (0 = today, 1 = tomorrow).
-    Calls get_free_slots internally; filters and picks the best `count`.
 
-    Returns same shape as get_free_slots, ready to read aloud to the visitor.
+    Returns:
+      {"slots": [{"staffId": 47, "staffName": "Elisia Danley",
+                  "startISO": "...", "endISO": "...",
+                  "displayPT": "Tuesday, May 12 at 2:00 PM PT"}]}
+    Each slot carries staffId + staffName so book_appointment can receive the
+    correct staffId even in any-therapist mode.
     """
     time_of_day = (time_of_day or "any").strip().lower()
     if time_of_day not in _SLOT_HOURS:
@@ -1105,7 +1151,7 @@ def propose_slots(
 
     # Fetch a wider window so we have enough candidates after filtering.
     # Call the plain helper — get_free_slots is a FunctionTool, not directly callable.
-    raw = _fetch_free_slots(staff_id, days_ahead=max(14, earliest_day_offset + 7))
+    raw = _fetch_free_slots(staff_id or None, days_ahead=max(14, earliest_day_offset + 7))
     all_slots: list[dict] = raw.get("slots", [])
 
     # Anchor the cutoff to local (PT) midnight so "tomorrow" means "any slot on
@@ -1127,8 +1173,8 @@ def propose_slots(
             break
 
     logger.debug(
-        "tool_result tool=propose_slots staff_id=%d time_of_day=%s picked=%d",
-        staff_id, time_of_day, len(filtered),
+        "tool_result tool=propose_slots staff_id=%s any_mode=%s time_of_day=%s picked=%d",
+        staff_id or 0, not staff_id, time_of_day, len(filtered),
     )
     return {"slots": filtered[:count]}
 
@@ -1227,7 +1273,7 @@ def book_appointment(
         "sex": sex.strip(),
         "reason": reason.strip()[:500],
         "payerName": payer.name,
-        "memberId": member_id.strip() if payer.id != "SELF" else "",
+        "memberId": _normalize_member_id(member_id) if payer.id != "SELF" else "",
     }
 
     # Step 1 — soft-hold via /internal/calendar/book. Log only staffId + slot times.

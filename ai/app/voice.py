@@ -47,29 +47,16 @@ logger = logging.getLogger(__name__)
 # Hard ceiling on a single voice session (cost guard).
 _MAX_SESSION_SECONDS = 600  # 10 minutes
 
-# Silence watchdog thresholds — measured from the end of the assistant's
-# last audio output (or session start) until the next caller turn.
-_SILENCE_CHECK_BACK_S = 10.0   # genuine caller silence → "are you still there?"
-_SILENCE_HANGUP_S = 120.0      # caller has been silent for 2 minutes → end call
-_SILENCE_TICK_S = 1.0          # tick fast so the 3s response-nudge fires on time
-_RESPONSE_NUDGE_S = 3.0        # caller spoke but model hasn't replied → force one
+# Silence watchdog. Turn-taking is owned by semantic_vad (create_response);
+# this watchdog adds a guarded one-shot nudge (post-barge-in stall recovery)
+# and the hard 120s cutoff for an abandoned session.
+_SILENCE_HANGUP_S = 120.0      # caller silent for 2 minutes → end call
+_SILENCE_TICK_S = 1.0
+_RESPONSE_NUDGE_S = 3.5         # caller turn landed but no reply + no active response → nudge once
 _RESPONSE_NUDGE_INSTRUCTIONS = (
-    "Continue the conversation now — respond to what the caller just said and "
-    "move to the next step. Do NOT repeat the disclosure and do NOT claim you "
-    "didn't catch anything unless you truly received no transcript."
-)
-
-_CHECK_BACK_INSTRUCTIONS = (
-    "The caller has gone quiet for several seconds since your last audio "
-    "finished — they may be thinking, stepped away, or the line dropped a "
-    "beat. Warmly check they're still there AND, in the same breath, move "
-    "things forward by restating the ONE specific thing you're waiting on "
-    "right now, drawn from the conversation so far (the exact question or "
-    "the single field you still need). E.g. right after verifying coverage: "
-    "'Still with me? Whenever you're ready, I just need your phone number "
-    "and email to finish booking.' Do NOT restart the call, re-introduce "
-    "yourself, repeat the HIPAA line, or re-ask anything the caller already "
-    "gave. Keep it brief — one short check-in plus the one thing you need."
+    "Continue now — reply to what the caller just said and move to the next "
+    "step. Do NOT repeat the disclosure, and do NOT claim you didn't catch "
+    "anything unless you truly received no transcript."
 )
 
 _HANGUP_GOODBYE_INSTRUCTIONS = (
@@ -102,11 +89,11 @@ _OPENING_GREETING_INSTRUCTIONS = (
     "Speak first — the caller just connected and has not said anything yet. "
     "In two short sentences, (1) greet them warmly as the Brighter Tomorrow "
     "assistant and briefly reassure them this conversation is HIPAA-compliant "
-    "and their information is secure; (2) offer concrete help — booking an "
-    "appointment, checking insurance coverage, finding a therapist, or "
-    "answering questions about the practice — and ask which one they'd like. "
-    "Match the warm, calm, soothing voice persona. Keep it under 6 seconds "
-    "of audio. Do not read these instructions aloud."
+    "and their information is secure; (2) note we're a Nevada practice — they "
+    "can book from any state but need to be in Nevada for the visit, in "
+    "person or by video — then ask how you can help (booking, insurance, or "
+    "finding a therapist). Match the warm, calm, soothing voice persona. "
+    "Keep it brief. Do not read these instructions aloud."
 )
 
 _HANDOFF_NUDGE_INSTRUCTIONS = (
@@ -133,54 +120,10 @@ _HALLUCINATED_REPROMPT_INSTRUCTIONS = (
     "Could you say it again, letter by letter?'"
 )
 
-# Whisper / gpt-4o-transcribe boilerplate hallucinations on silence/non-speech.
-# We drop these before the patient ever sees them and before the agent replies.
-_HALLUCINATION_FRAGMENTS: tuple[str, ...] = (
-    "subscribe to the channel",
-    "subscribe to our channel",
-    "thanks for watching",
-    "thank you for watching",
-    "like and subscribe",
-    "chunky registration",
-    "please subscribe",
-    "bye bye",
-    "www.",
-    "http://",
-    "https://",
-    ".com",
-    ".net",
-    ".org",
-    "facebook",
-    "instagram",
-    "youtube",
-    "email at the rate",
-    "at the rate of",
-    "at rate",
-    "e-mail at",
-    # Defense-in-depth against the steering-prompt echo failure mode
-    # (call CA8bc6a40c…, 2026-05-15). The prompt is empty now so this
-    # should never fire, but if a future operator re-adds a long prompt
-    # these phrases catch the most common echo shapes before they reach
-    # the agent and trigger a bogus crisis handoff.
-    "english-only phone call",
-    "english only phone call",
-    "if nothing is said",
-    "return empty",
-    "intake details:",
-    "ignore background noise",
-)
-
-
-def _is_hallucinated_transcript(text: str) -> bool:
-    s = (text or "").strip()
-    if len(s) <= 1:
-        return True
-    # NOTE: no script/Unicode-range filter — the practice serves callers
-    # in any language. Junk detection is handled by the boilerplate
-    # blocklist below and the per-token logprob filter
-    # (_maybe_drop_low_confidence).
-    low = s.lower()
-    return any(needle in low for needle in _HALLUCINATION_FRAGMENTS)
+# (boilerplate ASR-hallucination filter removed — it false-positived on
+# legitimate caller input, e.g. dropping every email containing ".com". The
+# per-token logprob filter (_maybe_drop_low_confidence) is the safety net for
+# true silence/noise hallucinations.)
 
 
 # ---------------------------------------------------------------------------
@@ -306,11 +249,11 @@ class _SilenceState:
     __slots__ = (
         "last_caller_quiet_since",
         "assistant_speaking",
-        "check_back_sent",
         "hangup_sent",
         "ended",
         "awaiting_response",
         "response_nudged",
+        "response_active",
     )
 
     def __init__(self) -> None:
@@ -319,33 +262,35 @@ class _SilenceState:
         # until its first audio_end event lands.
         self.last_caller_quiet_since: float | None = None
         self.assistant_speaking: bool = True
-        self.check_back_sent: bool = False
         self.hangup_sent: bool = False
         self.ended: bool = False
+        # GUARDED response nudge (mirror twilio_voice): recover the intermittent
+        # post-barge-in stall where a caller turn lands but the model never
+        # replies. Nudge once, only when response_active is False, so it never
+        # collides with a VAD-driven response. response_active tracks
+        # response.created → done/cancelled.
         self.awaiting_response: bool = False
         self.response_nudged: bool = False
+        self.response_active: bool = True   # greeting response is in flight
 
     def on_assistant_audio_frame(self) -> None:
-        # Assistant is producing audio → caller silence clock pauses; reset
-        # check-back so we re-arm after this response finishes.
+        # Assistant is producing audio → caller silence clock pauses.
         self.assistant_speaking = True
+        self.response_active = True
         self.last_caller_quiet_since = None
-        self.check_back_sent = False
         self.awaiting_response = False
         self.response_nudged = False
 
     def on_assistant_audio_end(self) -> None:
         # Assistant finished its turn → caller silence clock starts now.
         self.assistant_speaking = False
+        self.response_active = False
         self.last_caller_quiet_since = time.monotonic()
 
     def on_caller_turn(self) -> None:
-        # Arm both timers from the caller's turn: the 3s response-nudge forces a
-        # reply if the model whiffs, and the 10s check-back is the backstop —
-        # instead of deadlocking. on_assistant_audio_frame clears them once the
-        # reply starts (2026-05-23 stuck-silence + sluggish-recovery fix).
+        # Reset the silence clock and arm the guarded nudge. Turn-taking is
+        # semantic_vad's job (create_response); the nudge only recovers a stall.
         self.last_caller_quiet_since = time.monotonic()
-        self.check_back_sent = False
         self.awaiting_response = True
         self.response_nudged = False
 
@@ -431,45 +376,9 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                 )
                 persisted_item_ids.add(item_id)
                 return
-            if _is_hallucinated_transcript(text):
-                logger.info(
-                    "voice_drop_hallucinated_user session=%s item_id=%s text=%r",
-                    sid, item_id, text,
-                )
-                persisted_item_ids.add(item_id)
-                try:
-                    await session.interrupt()
-                except Exception:
-                    logger.debug(
-                        "voice_hallucination_interrupt_failed session=%s",
-                        sid, exc_info=True,
-                    )
-                # Delete from server-side history so the model doesn't
-                # treat the dropped junk as a real prior turn.
-                try:
-                    await session.model.send_event(
-                        RealtimeModelSendRawMessage(
-                            message={
-                                "type": "conversation.item.delete",
-                                "other_data": {"item_id": item_id},
-                            }
-                        )
-                    )
-                except Exception:
-                    logger.debug(
-                        "voice_hallucination_delete_failed session=%s",
-                        sid, exc_info=True,
-                    )
-                try:
-                    await _emit_response_create(session, _HALLUCINATED_REPROMPT_INSTRUCTIONS)
-                except Exception:
-                    logger.warning(
-                        "voice_hallucination_reprompt_failed session=%s",
-                        sid, exc_info=True,
-                    )
-                silence.last_caller_quiet_since = time.monotonic()
-                silence.check_back_sent = False
-                return
+            # (boilerplate ASR-hallucination filter removed — false-positived on
+            # legit input like emails containing ".com". The logprob filter
+            # _maybe_drop_low_confidence remains the safety net.)
             silence.on_caller_turn()
             logger.info("voice_turn session=%s role=user text=%r", session_id, text[:200])
             _schedule_persist(session_id, "user", text)
@@ -563,7 +472,6 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                 sid, exc_info=True,
             )
         silence.last_caller_quiet_since = time.monotonic()
-        silence.check_back_sent = False
 
     async def browser_to_session() -> None:
         try:
@@ -725,12 +633,18 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                         and getattr(inner, "type", None) == "raw_server_event"
                     ):
                         srv = getattr(inner, "data", None) or {}
-                        if (
-                            isinstance(srv, dict)
-                            and srv.get("type")
-                            == "conversation.item.input_audio_transcription.completed"
-                        ):
-                            await _maybe_drop_low_confidence(srv)
+                        if isinstance(srv, dict):
+                            srv_type = srv.get("type")
+                            if srv_type == "conversation.item.input_audio_transcription.completed":
+                                await _maybe_drop_low_confidence(srv)
+                            elif srv_type == "response.created":
+                                silence.response_active = True
+                            elif srv_type in (
+                                "response.done",
+                                "response.cancelled",
+                                "response.failed",
+                            ):
+                                silence.response_active = False
                     continue
 
                 if isinstance(event, RealtimeHandoffEvent):
@@ -768,6 +682,16 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                             logger.debug("voice_end_call_close_failed session=%s",
                                          sid, exc_info=True)
                         return
+                    # A tool result owes a spoken reply; the SDK should
+                    # auto-continue but intermittently stalls (mirror
+                    # twilio_voice). Arm the guarded nudge so a stalled
+                    # post-tool response is rescued within _RESPONSE_NUDGE_S;
+                    # if the model auto-continues, its first audio frame
+                    # disarms the nudge first.
+                    silence.last_caller_quiet_since = time.monotonic()
+                    silence.awaiting_response = True
+                    silence.response_nudged = False
+                    silence.response_active = False
                     continue
 
                 if isinstance(event, RealtimeError):
@@ -808,9 +732,16 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                 if silence.assistant_speaking or silence.last_caller_quiet_since is None:
                     continue
                 idle = time.monotonic() - silence.last_caller_quiet_since
-                # 3s response-nudge — caller spoke but the model never replied.
-                if (silence.awaiting_response and not silence.response_nudged
-                        and idle >= _RESPONSE_NUDGE_S):
+                # GUARDED response nudge (mirror twilio_voice): caller turn
+                # landed but the model produced no reply (barge-in cancelled it
+                # and create_response didn't re-fire). Nudge once, only when no
+                # response is active, so we never collide with a VAD response.
+                if (
+                    silence.awaiting_response
+                    and not silence.response_nudged
+                    and not silence.response_active
+                    and idle >= _RESPONSE_NUDGE_S
+                ):
                     silence.response_nudged = True
                     logger.info("voice_response_nudge session=%s waited_s=%.1f", sid, idle)
                     try:
@@ -835,19 +766,6 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                     await asyncio.sleep(6.0)
                     hangup_event.set()
                     return
-                if idle >= _SILENCE_CHECK_BACK_S and not silence.check_back_sent:
-                    silence.check_back_sent = True
-                    logger.info(
-                        "voice_silence_check_back session=%s idle_s=%.1f",
-                        sid, idle,
-                    )
-                    try:
-                        await _emit_response_create(session, _CHECK_BACK_INSTRUCTIONS)
-                    except Exception:
-                        logger.warning(
-                            "voice_silence_check_back_emit_failed session=%s",
-                            sid, exc_info=True,
-                        )
         except asyncio.CancelledError:
             raise
         except Exception:
