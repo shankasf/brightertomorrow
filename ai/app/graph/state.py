@@ -237,8 +237,9 @@ class State(TypedDict, total=False):
     insurance_fields: InsuranceFields
     booking_fields: BookingFields
     callback_fields: CallbackFields
-    staff_id: int | None             # therapist chosen by caller
+    staff_id: int | None             # therapist chosen by caller (pinned from the chosen slot in any-mode)
     staff_name: str | None           # for read-back
+    staff_any: bool                  # caller chose "Any therapist" — propose_slots fans out across ALL therapists (gateway staffId=0)
 
     # ----- Tool results --------------------------------------------------
     verify_result: VerifyResult | None
@@ -287,12 +288,18 @@ class State(TypedDict, total=False):
     _reuse_insurance_pending: bool    # caller said "check coverage" but full insurance fields are already on file — planner asks to confirm before re-verifying stale PHI
     _resume_offer_pending: bool       # widget reopened within the 30-min window with prior state on file — bot greets by name and offers continue-vs-fresh choice before reading anything else back
     _info_query: str | None           # info question to search the KB for
+    _info_this_turn: bool             # caller asked a KB/FAQ question THIS turn — answer it as a one-turn detour without flipping the sticky booking/callback intent
+    _asks_therapist_roster: bool      # caller asked WHO the therapists are (roster/names) — planner routes to the list_therapists scene
+    _asks_booking_availability: bool  # caller asked whether a/any therapist has open slots to book — planner checks the real calendar (propose_slots) before intake, then continues booking
+    _wants_therapist_match: bool      # caller wants help choosing a therapist — chat planner refers them to the matching form (never picks); voice never offers matching
     _time_of_day: str | None          # caller's slot pref: morning/afternoon/evening/any
     _earliest_day_offset: int | None  # caller's earliest day offset
     _payer_check: dict | None         # last check_insurance_support result
     _booking_error: str | None        # last book_appointment error code
     _callback_error: str | None       # last submit_callback error
     _cancel_error: str | None         # last cancel_appointment error
+    _appt_email_hash: str | None       # email_hash from lookup_appointment response
+    _appt_time_iso: str | None         # appointment_time_iso (RFC3339) from lookup_appointment
     verify_result_next_step: str | None  # post-booking message from Jane
     insurance_pending_admin: bool     # CLAIM.MD couldn't verify; admin team will follow up. Keeps the booking flow alive so the caller still books a slot.
 
@@ -338,6 +345,7 @@ def initial_state(channel: Channel, session_id: str, agent_source: str) -> State
         callback_fields=CallbackFields(),
         staff_id=None,
         staff_name=None,
+        staff_any=False,
         verify_result=None,
         proposed_slots=[],
         selected_slot=None,

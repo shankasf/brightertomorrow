@@ -9,23 +9,25 @@ writing non-PHI pointers.
 
 Atomicity
 ---------
-We use TransactWriteItems (up to 25 items) to write the pending_request row
-plus up to 3 outbox rows all-or-nothing. If the transaction is cancelled
-(duplicate request_id or table throttle) we return `scene="booking_failed_retry"`
-and do NOT promise anything to the caller. The voice layer will offer a retry.
+We use TransactWriteItems to write exactly 2 items all-or-nothing:
+  1. The pending_request item (PHI, CMK-encrypted fields).
+  2. One email outbox row in bt-notifications-outbox.
+If the transaction is cancelled (duplicate request_id or table throttle) we
+return `scene="booking_failed_retry"` and do NOT promise anything to the
+caller. The voice layer will offer a retry.
 
-KMS encryption
---------------
-PHI fields (name, DOB, phone, email, member_id) are encrypted with
-`alias/bt-phi` (CMK ID from infra/lib/security-stack.ts) BEFORE writing to
-DDB. The CMK is managed by the bt security stack and the bt-ai pod's IAM role
-already has `kms:GenerateDataKey` + `kms:Decrypt` grants.
+KMS encryption — two separate helpers
+--------------------------------------
+_kms_encrypt(plaintext, purpose, request_id)
+    Used for pending_request PHI fields (name, DOB, phone, email, member_id).
+    Passes EncryptionContext={"purpose": ..., "request_id": ...} as a
+    defence-in-depth guard — the ciphertext is bound to its purpose.
 
-We use boto3's KMS client directly (`kms.encrypt`) rather than any
-application-layer wrapper because:
-  1. This avoids the dependency on a helper that doesn't exist yet.
-  2. The encryption context ties the ciphertext to its purpose — if an
-     outbox row is re-read with the wrong context the decrypt fails.
+_kms_encrypt_payload(plaintext)
+    Used for outbox row payload_ciphertext ONLY.
+    Passes NO EncryptionContext, matching the Go EnqueueNotification call
+    and the Lambda kms.decrypt() call (which also passes no context).
+    If you add EncryptionContext here the Lambda decrypt will fail.
 
 Hash fields (phone_hash, email_hash) use SHA-256 lowercase for consistent
 cross-table lookups (mirrors Go's phi.HashEmail).
@@ -37,6 +39,7 @@ Every log line contains only: session_id, request_id, outcome code, channel.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import time
@@ -71,11 +74,14 @@ def _kms_client():
 
 
 def _kms_encrypt(plaintext: str, purpose: str, request_id: str) -> str:
-    """Encrypt `plaintext` under the bt-phi CMK.
+    """Encrypt `plaintext` under the bt-phi CMK for pending_request PHI fields.
 
     Encryption context ties the blob to (purpose, request_id) so that
     decryption fails if either changes — defence-in-depth against confused
     deputy.
+
+    DO NOT use this for outbox payload_ciphertext — the Lambda decrypts
+    without EncryptionContext. Use _kms_encrypt_payload() for that.
 
     Returns base64-encoded ciphertext (safe for DDB String attribute).
     """
@@ -86,6 +92,29 @@ def _kms_encrypt(plaintext: str, purpose: str, request_id: str) -> str:
         KeyId=_KMS_ALIAS,
         Plaintext=plaintext.encode("utf-8"),
         EncryptionContext={"purpose": purpose, "request_id": request_id},
+    )
+    return b64encode(resp["CiphertextBlob"]).decode("ascii")
+
+
+def _kms_encrypt_payload(plaintext: str) -> str:
+    """Encrypt an outbox notification payload under the bt-phi CMK.
+
+    Context-free encrypt — matches the Go EnqueueNotification call and the
+    Lambda kms.decrypt() call (neither passes EncryptionContext). If you add
+    EncryptionContext here the Lambda decrypt will fail.
+
+    plaintext for email rows is a JSON string:
+        {"subject": "...", "heading": "...", "paragraphs": [...]}
+
+    Returns base64-encoded ciphertext (safe for DDB String attribute).
+    """
+    if not plaintext:
+        return ""
+    kms = _kms_client()
+    resp = kms.encrypt(
+        KeyId=_KMS_ALIAS,
+        Plaintext=plaintext.encode("utf-8"),
+        # NO EncryptionContext — intentional. See module docstring.
     )
     return b64encode(resp["CiphertextBlob"]).decode("ascii")
 
@@ -122,28 +151,41 @@ def _first_missing(state: State) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Outbox row builder
+# Outbox row builder — canonical schema matches Go EnqueueNotification
 # ---------------------------------------------------------------------------
 
-def _outbox_row(
-    request_id: str,
-    channel: str,
-    payload_ref: Any,
-    dedupe_suffix: str,
+def _build_email_outbox_row(
+    recipient: str,
+    payload_ciphertext: str,
+    dedupe_key: str,
 ) -> dict[str, Any]:
-    now_iso   = _now_iso()
+    """Build one canonical outbox row for the bt-notifications-outbox table.
+
+    Schema matches gateway/internal/phi/outbox.go EnqueueNotification exactly:
+      notification_id    (S) PK — fresh uuid4
+      created_at         (S) SK — ISO8601 %Y-%m-%dT%H:%M:%SZ
+      channel            (S) — "email"
+      recipient          (S) — patient email address (table is CMK-encrypted)
+      payload_ciphertext (S) — base64(KMS.Encrypt(alias/bt-phi, json_payload))
+      status             (S) — "pending"  (GSI1-retry-scan PK)
+      next_retry_at      (S) — ISO8601, initially == created_at (GSI1 SK)
+      attempt_count      (N) — 0
+      dedupe_key         (S) — stable caller-supplied string
+      ttl                (N) — epoch seconds, now + 30 days
+    """
+    now_iso   = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     now_epoch = _now_epoch()
     return {
-        "notification_id": str(uuid.uuid4()),
-        "created_at": now_iso,
-        "request_id": request_id,
-        "channel": channel,
-        "payload_ref": payload_ref,
-        "dedupe_key": f"{request_id}:{channel}:{dedupe_suffix}",
-        "status": "pending",
-        "attempt_count": 0,
-        "next_retry_at": now_iso,
-        "ttl": now_epoch + 30 * 86400,
+        "notification_id":    str(uuid.uuid4()),
+        "created_at":         now_iso,
+        "channel":            "email",
+        "recipient":          recipient,
+        "payload_ciphertext": payload_ciphertext,
+        "status":             "pending",
+        "next_retry_at":      now_iso,
+        "attempt_count":      0,
+        "dedupe_key":         dedupe_key,
+        "ttl":                now_epoch + 30 * 86400,
     }
 
 
@@ -153,20 +195,44 @@ def _outbox_row(
 
 @traced(run_type="tool", name="create_pending_request")
 def create_pending_request(state: State) -> dict[str, Any]:
-    """Write pending_request + 3 outbox rows in a single DDB transaction.
+    """Write pending_request (always) + optionally 1 email outbox row.
+
+    When a real calendar booking already completed (appointment_id set AND
+    booking_status=="booked") the gateway already sent the patient a
+    confirmation email via /internal/calendar/confirm.  In that case we write
+    ONLY the pending_request item so that the returning-patient GSI lookup
+    (gateway returning_lookup.go) works, but we skip the acknowledgement outbox
+    row to prevent a duplicate email.
+
+    When no calendar booking exists yet (the normal "pending admin confirm"
+    path) we write both items in a single TransactWriteItems call, exactly as
+    before.
 
     Step-by-step:
       1. Validate all required fields are present (fails fast, no writes).
-      2. Allocate a request_id (UUID4, deterministic retry guard).
-      3. KMS-encrypt PHI field values with per-purpose encryption contexts.
-      4. Build the pending_request item with encrypted attributes.
-      5. Build 3 outbox rows: SMS ack, email ack, S3 PHI log.
-      6. TransactWriteItems — all-or-nothing. On TransactionCanceledException
-         return scene="booking_failed_retry" so the caller is not promised
-         anything that hasn't been confirmed.
-      7. On success emit audit_event and set scene="booking_pending_ack".
+      2. Detect already_booked (appointment_id + booking_status=="booked").
+      3. Allocate a request_id (UUID5 from session_id — deterministic retry guard).
+      4. KMS-encrypt PHI field values with per-purpose encryption contexts.
+      5. Build the pending_request item with encrypted attributes.
+      6. If NOT already_booked: build 1 email outbox row (canonical schema,
+         payload_ciphertext) and KMS-encrypt its payload.
+         # TODO(sms): enqueue channel="sms" row when SMS is enabled.
+      7. TransactWriteItems:
+           - already_booked: 1 Put (pending_request only).
+           - not already_booked: 2 Puts (pending_request + email outbox) — all-or-nothing.
+         On TransactionCanceledException return scene="booking_failed_retry".
+      8. On success emit audit_event and set scene="booking_pending_ack".
+         notification_id is "" when no outbox row was written.
     """
     session_id = state.get("session_id", "?")
+
+    # --- 2. Detect already-booked path -----------------------------------
+    # When book_appointment already completed via /internal/calendar/confirm
+    # the gateway sent exactly one patient email.  Skip the outbox row here.
+    already_booked: bool = (
+        bool(state.get("appointment_id"))
+        and state.get("booking_status") == "booked"
+    )
 
     # --- 1. Validate required fields -------------------------------------
     missing = _first_missing(state)
@@ -184,7 +250,10 @@ def create_pending_request(state: State) -> dict[str, Any]:
     last_name  = (ins.get("last_name") or "").strip()
     dob        = (ins.get("dob_yyyymmdd") or "").strip()
     payer_name = (ins.get("payer_name") or "").strip()
-    member_id  = (ins.get("member_id") or "").strip()
+    # Defensive: ensure the booked appointment stores the clean card ID even if
+    # state was seeded outside the extract boundary.
+    from ....data.identifiers import normalize_member_id
+    member_id  = normalize_member_id(ins.get("member_id"))
     outcome    = ins.get("outcome", "unknown")
     phone      = (bk.get("phone") or "").strip()
     email      = (bk.get("email") or "").strip()
@@ -238,18 +307,50 @@ def create_pending_request(state: State) -> dict[str, Any]:
         "ttl":            _now_epoch() + 90 * 86400,  # 90-day retention
     }
 
-    # --- 5. Build 3 outbox rows ------------------------------------------
-    # S3 PHI log: key format phi/{session_id}/{request_id}.json (deterministic)
-    s3_key   = f"phi/{session_id}/{request_id}.json"
-    sms_row  = _outbox_row(request_id, "sms",   phone,   "ack")
-    email_row = _outbox_row(request_id, "email", email,  "ack")
-    s3_row   = _outbox_row(request_id, "s3_phi", s3_key, "phi_log")
+    # --- 5. Build email outbox row (conditional) -------------------------
+    # Skip when already_booked — the gateway already sent the patient email
+    # via /internal/calendar/confirm.  Always write when this is a new
+    # "pending admin confirm" request so the patient gets the ack email.
+    email_outbox_row: dict[str, Any] | None = None
+    if not already_booked:
+        # No date/time/therapist exists yet — acknowledgement content only.
+        # Minimum-necessary: first_name only (plain text). No insurance/financial
+        # detail, no diagnosis, no slot. The Lambda wraps in branded HTML template.
+        greeting = f"Hi {first_name}" if first_name else "Hi there"
 
-    # --- 6. TransactWriteItems -------------------------------------------
+        email_payload_json = json.dumps({
+            "subject":    "We received your appointment request — Brighter Tomorrow Therapy",
+            "heading":    "We’ve received your request",
+            "paragraphs": [
+                f"{greeting}, we’ve received your appointment request and our care team "
+                "will reach out shortly to confirm the details.",
+                "If anything’s urgent, just call us using the button below.",
+            ],
+        })
+
+        try:
+            payload_ciphertext = _kms_encrypt_payload(email_payload_json)
+        except Exception:
+            logger.exception("create_pending_request session=%s kms_encrypt_payload_failed", session_id)
+            return {
+                "scene": "booking_failed_retry",
+                "last_action": "create_pending_request_kms_payload_error",
+            }
+
+        email_outbox_row = _build_email_outbox_row(
+            recipient=email,
+            payload_ciphertext=payload_ciphertext,
+            dedupe_key=f"{request_id}:email:ack",
+        )
+
+    # --- 6. TransactWriteItems (1 or 2 Puts) -----------------------------
+    # already_booked → 1 Put (pending_request only).
+    # not already_booked → 2 Puts (pending_request + email outbox),
+    #   all-or-nothing so a failed outbox write never orphans the request.
     try:
         ddb = boto3.client("dynamodb", region_name=_AWS_REGION)
 
-        transact_items = [
+        transact_items: list[dict[str, Any]] = [
             {
                 "Put": {
                     "TableName": _REQUESTS_TABLE,
@@ -258,28 +359,17 @@ def create_pending_request(state: State) -> dict[str, Any]:
                     "ConditionExpression": "attribute_not_exists(request_id)",
                 }
             },
-            {
-                "Put": {
-                    "TableName": _OUTBOX_TABLE,
-                    "Item": _to_ddb_item(sms_row),
-                    "ConditionExpression": "attribute_not_exists(dedupe_key)",
-                }
-            },
-            {
-                "Put": {
-                    "TableName": _OUTBOX_TABLE,
-                    "Item": _to_ddb_item(email_row),
-                    "ConditionExpression": "attribute_not_exists(dedupe_key)",
-                }
-            },
-            {
-                "Put": {
-                    "TableName": _OUTBOX_TABLE,
-                    "Item": _to_ddb_item(s3_row),
-                    "ConditionExpression": "attribute_not_exists(dedupe_key)",
-                }
-            },
         ]
+        if email_outbox_row is not None:
+            transact_items.append(
+                {
+                    "Put": {
+                        "TableName": _OUTBOX_TABLE,
+                        "Item": _to_ddb_item(email_outbox_row),
+                        "ConditionExpression": "attribute_not_exists(notification_id)",
+                    }
+                }
+            )
 
         ddb.transact_write_items(TransactItems=transact_items)
 
@@ -322,8 +412,22 @@ def create_pending_request(state: State) -> dict[str, Any]:
         }
 
     # --- 7. Success -------------------------------------------------------
-    logger.info("create_pending_request session=%s request_id=%s outcome=%s",
-                session_id, request_id, outcome)
+    email_enqueued = email_outbox_row is not None
+    notif_id = email_outbox_row["notification_id"] if email_enqueued else ""
+    logger.info(
+        "create_pending_request session=%s request_id=%s outcome=%s "
+        "email_enqueued=%s notification_id=%s",
+        session_id, request_id, outcome, email_enqueued, notif_id or "none",
+    )
+
+    audit_kwargs: dict[str, Any] = {
+        "request_id": request_id,
+        "outcome": outcome,
+        "email_enqueued": email_enqueued,
+    }
+    if email_enqueued:
+        audit_kwargs["notification_id"] = notif_id
+        audit_kwargs["channel"] = "email"
 
     return {
         "request_id":    request_id,
@@ -331,7 +435,7 @@ def create_pending_request(state: State) -> dict[str, Any]:
         "last_action":   "create_pending_request",
         "audit_event":   _build_audit_event(
             "create_pending_request", session_id,
-            request_id=request_id, outcome=outcome,
+            **audit_kwargs,
         ),
     }
 

@@ -60,7 +60,6 @@ def _post_admin_notification(
 # Re-export all handoff functions for clean imports by the graph wiring module
 # ---------------------------------------------------------------------------
 
-from .out_of_state import handoff_out_of_state          # noqa: E402
 from .roi_required import handoff_roi_required          # noqa: E402
 from .mandatory_report import handoff_mandatory_report  # noqa: E402
 from .crisis import handoff_crisis                      # noqa: E402
@@ -69,7 +68,6 @@ from .admin_verification import handoff_admin_verification  # noqa: E402
 from .admin_callback import handoff_admin_callback      # noqa: E402
 
 __all__ = [
-    "handoff_out_of_state",
     "handoff_roi_required",
     "handoff_mandatory_report",
     "handoff_crisis",

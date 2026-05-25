@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ._constants import (
     CRISIS_RULE,
+    LOCATION_POLICY_RULE,
     NO_SLASH_COMMANDS_RULE,  # noqa: F401 — re-exported for callers
     PRACTICE_CONTEXT,
     SCOPE_RULE,
@@ -27,6 +28,10 @@ def persona_block(channel: str, scene: str | None = None) -> str:
     parts = [PRACTICE_CONTEXT, style, CRISIS_RULE]
     if scene != "crisis":
         parts.append(SCOPE_RULE)
+        # Location/Nevada stance — every non-crisis turn so it's applied
+        # consistently whenever location comes up; dropped for crisis so the
+        # 988/911 response is never diluted.
+        parts.append(LOCATION_POLICY_RULE)
     parts.append(NO_SLASH_COMMANDS_RULE)
     if channel.startswith("voice"):
         parts.extend([VOICE_CONFIRMATION_RULE, VOICE_PACING_RULE])

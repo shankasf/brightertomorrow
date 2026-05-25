@@ -24,11 +24,12 @@ logger = logging.getLogger(__name__)
 
 @traced(run_type="tool", name="send_acknowledgement")
 def send_acknowledgement(state: State) -> dict[str, Any]:
-    """Set scene so respond says 'Confirmation sent to your phone and email.'
+    """Set scene so respond delivers the booking-received acknowledgement.
 
-    The actual SMS/email was already queued atomically by create_pending_request.
-    This node only advances the scene so the respond node renders the right
-    script — it has no side effects of its own.
+    The actual email was already queued atomically by create_pending_request
+    (one email outbox row, channel="email"). No SMS row is written (SMS is
+    currently disabled). This node only advances the scene so the respond node
+    renders the right script — it has no side effects of its own.
     """
     return {
         "scene": "send_ack_confirmation",
@@ -44,8 +45,11 @@ def send_acknowledgement(state: State) -> dict[str, Any]:
 def log_phi(state: State) -> dict[str, Any]:
     """Mark intake complete and emit the final audit event.
 
-    The S3 PHI log row was queued by create_pending_request in the same
-    TransactWriteItems call. This node sets done=True so the graph terminates
+    The pending_request PHI is already written (CMK-encrypted fields in
+    bt-pending-requests) by create_pending_request. The s3_phi row has been
+    removed: the PHI of record is the pending_request item itself, which is
+    already CMK-encrypted and audited — a separate S3 archive row was
+    redundant PHI sprawl. This node sets done=True so the graph terminates
     cleanly and emits a final audit_event for compliance tracing.
 
     No external calls — pure state mutation.

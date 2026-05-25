@@ -276,18 +276,26 @@ def _try_deterministic_fast_path(state: State, user_text: str) -> TurnExtraction
     # use this when the next missing name field is unambiguous so we
     # don't accidentally label a therapist name as patient first_name.
     if _SINGLE_NAME_RE.match(text):
-        if intent == "callback":
-            if not (cb.get("first_name") or "").strip():
-                return _synth_extraction({"first_name": text.title()})
-            if not (cb.get("last_name") or "").strip():
-                return _synth_extraction({"last_name": text.title()})
-        else:
-            # booking / insurance_check flow uses the insurance_fields bag
-            # for identity (first/last/dob/payer/member_id).
-            if not (ins.get("first_name") or "").strip():
-                return _synth_extraction({"first_name": text.title()})
-            if not (ins.get("last_name") or "").strip():
-                return _synth_extraction({"last_name": text.title()})
+        # callback uses its own field bag; booking / insurance_check share
+        # the insurance_fields bag for identity (first/last/dob/...).
+        bag = cb if intent == "callback" else ins
+        parts = text.split()
+        first_present = bool((bag.get("first_name") or "").strip())
+        last_present = bool((bag.get("last_name") or "").strip())
+        if not first_present:
+            if len(parts) == 2:
+                # "First Last" volunteered in one go — split into BOTH so we
+                # don't dump the whole string into first_name and then loop
+                # forever asking for a last name that was already given.
+                return _synth_extraction({
+                    "first_name": parts[0].title(),
+                    "last_name": parts[1].title(),
+                })
+            return _synth_extraction({"first_name": text.title()})
+        if not last_present and len(parts) == 1:
+            return _synth_extraction({"last_name": text.title()})
+        # Ambiguous (e.g. a two-word reply when only last_name is missing) —
+        # defer to the LLM rather than guess.
 
     return None
 
@@ -398,13 +406,14 @@ def _resolve_staff(state: State, deltas) -> dict[str, Any]:
     robust paraphrase coverage and a single NL->state boundary:
 
       1) Extractor named a therapist  -> roster match by first/last/full.
-      2) Extractor flagged `no_therapist_preference` -> deterministic
-         roster pick by session_id (stable across refreshes).
+      2) Extractor flagged `no_therapist_preference` ("Any therapist") ->
+         set `staff_any` so propose_slots fans out across ALL therapists
+         via the gateway (staffId=0) and returns the soonest opening.
+         We deliberately do NOT pick a single clinician here — that would
+         dead-end on one therapist's empty calendar.
       3) Otherwise: do nothing; let the LLM ask again. Don't overwrite
          a valid prior choice.
     """
-    from ...data.roster import ELIGIBLE_FOR_BOOKING
-
     out: dict[str, Any] = {}
     name = (getattr(deltas, "staff_name", None) or "").strip()
     if name:
@@ -412,6 +421,7 @@ def _resolve_staff(state: State, deltas) -> dict[str, Any]:
         if match:
             out["staff_id"] = match["staffId"]
             out["staff_name"] = match["name"]
+            out["staff_any"] = False  # a concrete pick overrides any prior "any"
             return out
         # Roster miss — keep the raw name visible so respond can apologise
         # and re-prompt, but never set staff_id from an unverified string.
@@ -422,18 +432,12 @@ def _resolve_staff(state: State, deltas) -> dict[str, Any]:
         getattr(deltas, "no_therapist_preference", False)
         and not state.get("staff_id")
         and state.get("intent") == "booking"
-        and ELIGIBLE_FOR_BOOKING
     ):
-        sid = state.get("session_id") or ""
-        idx = (abs(hash(sid)) % len(ELIGIBLE_FOR_BOOKING)) if sid else 0
-        choice = ELIGIBLE_FOR_BOOKING[idx]
-        out["staff_id"] = choice["staffId"]
-        out["staff_name"] = choice["name"]
-        # Mark the pick as "open to alternatives" so propose_slots can
-        # fall back to other therapists if this one has no Jane
-        # availability. Without this, a hash-picked therapist with an
-        # empty calendar dead-ends the booking flow.
-        out["_staff_open_to_alternatives"] = True
+        # "Any therapist" — leave staff_id unset so propose_slots runs the
+        # gateway fan-out (soonest slot across the whole roster). staff_any
+        # lets the planner leave the ask_therapist gate without pinning a
+        # single clinician; staff_id is pinned later from the chosen slot.
+        out["staff_any"] = True
     return out
 
 
@@ -459,7 +463,10 @@ def _merge_field_deltas(state: State, deltas) -> dict[str, Any]:
     if deltas.payer_name:
         insurance["payer_name"] = deltas.payer_name.strip()
     if deltas.member_id:
-        insurance["member_id"] = deltas.member_id.strip()
+        # Normalize at the capture boundary so verify AND the booking write
+        # both get the clean, card-matching ID (CLAIM.MD is space-sensitive).
+        from ...data.identifiers import normalize_member_id
+        insurance["member_id"] = normalize_member_id(deltas.member_id)
 
     # Booking-only fields.
     if deltas.reason:
@@ -515,8 +522,16 @@ def _merge_field_deltas(state: State, deltas) -> dict[str, Any]:
         slots = state.get("proposed_slots") or []
         update["_selected_slot_index"] = idx
         if 0 <= idx < len(slots):
-            update["selected_slot"] = slots[idx]
+            chosen = slots[idx]
+            update["selected_slot"] = chosen
             update["booking_status"] = "slot_selected"
+            # In any-therapist mode each slot carries its own clinician.
+            # Pin staff_id/staff_name from the chosen slot so book_appointment
+            # (which reads staff_id from state) can place the hold, and the
+            # confirm/post-booking recap names the right therapist.
+            if chosen.get("staffId"):
+                update["staff_id"] = chosen["staffId"]
+                update["staff_name"] = chosen.get("staffName") or state.get("staff_name")
 
     return update
 
@@ -675,8 +690,20 @@ def extract(state: State) -> dict[str, Any]:
     elif delta == "self_pay":
         update["payment_path"] = "self_pay"
         # Keep prior intent (likely "booking" or "insurance_check").
+    elif delta == "info":
+        # Info is a TRANSIENT detour, never a goal change. When the caller
+        # is mid-booking / insurance / callback, KEEP that intent so the
+        # flow resumes the moment the question is answered; only adopt
+        # "info" as the sticky intent when there's no active goal to return
+        # to. `_info_this_turn` (set below) tells the planner + respond to
+        # answer THIS turn's question regardless of the sticky intent.
+        # Without this, a mid-booking "what are your hours?" flipped intent
+        # to info permanently and the next field answer (DOB, member ID)
+        # was swallowed by the info path (chat session 2026-05-24).
+        if state.get("intent") not in ("booking", "insurance_check", "callback"):
+            update["intent"] = "info"
     elif delta in {
-        "greeting", "info", "insurance_check", "booking",
+        "greeting", "insurance_check", "booking",
         "callback", "cancel", "keep", "out_of_scope",
     }:
         update["intent"] = delta
@@ -703,6 +730,44 @@ def extract(state: State) -> dict[str, Any]:
     # subsequent reply routes to the clarify scene, even when the next
     # field was captured cleanly.
     update["_low_confidence"] = (result.confidence == "low")
+
+    # Therapist-roster question signal — always overwrite (don't let a
+    # True from a prior turn route the next, unrelated turn into the
+    # list_therapists scene). Read by planner.py + respond._pick_scene.
+    update["_asks_therapist_roster"] = bool(
+        getattr(result, "asks_for_therapist_roster", False)
+    )
+
+    # Booking-availability question signal — caller asked whether a/any
+    # therapist has open slots they could book. The planner uses this to
+    # check the real calendar (propose_slots) BEFORE collecting intake, so
+    # the caller gets actual openings, then falls into the booking flow.
+    # Always overwrite (transient, this-turn-only). Force intent=booking so
+    # the rest of the flow treats them as a booker even if the model left
+    # intent_delta on "none".
+    update["_asks_booking_availability"] = bool(
+        getattr(result, "asks_booking_availability", False)
+    )
+    if update["_asks_booking_availability"] and update.get("intent") not in (
+        "cancel", "out_of_scope",
+    ):
+        update["intent"] = "booking"
+
+    # Therapist-matching signal — caller wants help choosing a therapist.
+    # The chat planner refers them to the matching form (never picks). Always
+    # overwrite (transient, this-turn-only).
+    update["_wants_therapist_match"] = bool(
+        getattr(result, "wants_therapist_match", False)
+    )
+
+    # Info-question-this-turn signal. Lets the planner answer a mid-flow
+    # KB/FAQ question without the sticky intent having to flip to "info"
+    # (which would hijack the next field answer and abandon a booking).
+    # Always overwrite so a True from a prior turn never leaks forward and
+    # pins later field-answer turns to the info_answer scene.
+    update["_info_this_turn"] = bool(
+        result.intent_delta == "info" or result.field_deltas.info_query
+    )
 
     # ------------------------------------------------------------------
     # Pending-flag lifecycle (resume_offer + reuse_insurance)
@@ -766,6 +831,7 @@ def extract(state: State) -> dict[str, Any]:
                 update["callback_status"] = "none"
                 update["staff_id"] = None
                 update["staff_name"] = None
+                update["staff_any"] = False
                 update["selected_slot"] = None
                 update["proposed_slots"] = []
                 update["affirmation"] = "no"

@@ -20,7 +20,7 @@ routing, add_conditional_edges with mapping dict for dynamic routing).
     │ gate_resume_offer                                               │
     │                                                                 │
     │ HANDOFFS (terminal — set done=True, end turn after respond)     │
-    │ handoff_out_of_state, handoff_roi_required,                     │
+    │ handoff_roi_required,                                           │
     │ handoff_mandatory_report, handoff_crisis,                       │
     │ handoff_admin_with_note, handoff_admin_verification,            │
     │ handoff_admin_callback                                          │
@@ -71,6 +71,7 @@ from .nodes.actions import (
     check_payer,
     create_pending_request,
     log_phi,
+    lookup_appointment,
     offer_self_pay,
     propose_slots,
     search_kb,
@@ -87,7 +88,6 @@ from .nodes.handoffs import (
     handoff_admin_with_note,
     handoff_crisis,
     handoff_mandatory_report,
-    handoff_out_of_state,
     handoff_roi_required,
 )
 from .nodes.planner import N, planner
@@ -120,7 +120,6 @@ _PLANNER_TARGETS: dict[str, str] = {
     # short-circuit checks the planner does inline and routes to handoffs)
     N.GATE_RESUME_OFFER: N.GATE_RESUME_OFFER,
     # Handoff terminals
-    N.HANDOFF_OUT_OF_STATE: N.HANDOFF_OUT_OF_STATE,
     N.HANDOFF_ROI_REQUIRED: N.HANDOFF_ROI_REQUIRED,
     N.HANDOFF_MANDATORY_REPORT: N.HANDOFF_MANDATORY_REPORT,
     N.HANDOFF_CRISIS: N.HANDOFF_CRISIS,
@@ -134,6 +133,8 @@ _PLANNER_TARGETS: dict[str, str] = {
     # Terminal booking-chain entry point (rarely planner-routed; usually
     # reached via static edge from book_appointment)
     N.CREATE_PENDING_REQUEST: N.CREATE_PENDING_REQUEST,
+    # Cancel lookup — prior-session appointment lookup by phone+DOB
+    N.LOOKUP_APPOINTMENT: N.LOOKUP_APPOINTMENT,
 }
 
 
@@ -158,6 +159,7 @@ def build_graph():
     g.add_node(N.PROPOSE, propose_slots)
     g.add_node(N.BOOK, book_appointment)
     g.add_node(N.CANCEL, cancel_appointment)
+    g.add_node(N.LOOKUP_APPOINTMENT, lookup_appointment)
     g.add_node(N.SUBMIT_CALLBACK, submit_callback)
     g.add_node(N.SEARCH_KB, search_kb)
     g.add_node(N.ROLLBACK, rollback)
@@ -169,7 +171,6 @@ def build_graph():
     g.add_node(N.GATE_RESUME_OFFER, gate_resume_offer)
 
     # Handoff terminals
-    g.add_node(N.HANDOFF_OUT_OF_STATE, handoff_out_of_state)
     g.add_node(N.HANDOFF_ROI_REQUIRED, handoff_roi_required)
     g.add_node(N.HANDOFF_MANDATORY_REPORT, handoff_mandatory_report)
     g.add_node(N.HANDOFF_CRISIS, handoff_crisis)
@@ -218,6 +219,7 @@ def build_graph():
     for n in (
         N.PROPOSE,
         N.CANCEL,
+        N.LOOKUP_APPOINTMENT,
         N.SUBMIT_CALLBACK,
         N.SEARCH_KB,
         N.ROLLBACK,
@@ -232,7 +234,6 @@ def build_graph():
     # All handoff terminals hand off to respond (which then ends the turn
     # because each handoff sets done=True / gates.terminal=True).
     for h in (
-        N.HANDOFF_OUT_OF_STATE,
         N.HANDOFF_ROI_REQUIRED,
         N.HANDOFF_MANDATORY_REPORT,
         N.HANDOFF_CRISIS,

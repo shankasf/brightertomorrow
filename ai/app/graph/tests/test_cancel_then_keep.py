@@ -48,7 +48,7 @@ def _stubs():
         PAYERS=[_P("BCBS", "BCBS")], resolve_payer_id=lambda n: _P("BCBS", "BCBS"),
     )
     sys.modules["app.bt_agents"] = types.SimpleNamespace()
-    sys.modules["app.bt_agents.roster"] = types.SimpleNamespace(
+    sys.modules["app.data.roster"] = types.SimpleNamespace(
         ELIGIBLE_FOR_BOOKING=[{"staffId": 47, "name": "Elisia"}],
         THERAPISTS_WITHOUT_FEEDS=[], THERAPISTS_WITH_FEEDS=[{"staffId": 47, "name": "Elisia"}],
     )
@@ -118,6 +118,7 @@ async def main() -> int:
     # Seed state mid-booking — caller has already confirmed booking, so
     # we're at booking_status=booked with an appointment id.
     seed = initial_state("chat", sid, "test")
+    seed["gates"] = {"disclosure_done": True}  # type: ignore[typeddict-item]
     seed["booking_status"] = "booked"
     seed["appointment_id"] = "APT-001"
     seed["selected_slot"] = {"startISO": "2026-05-27T14:00Z", "endISO": "...",

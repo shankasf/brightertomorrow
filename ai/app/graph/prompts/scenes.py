@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from typing import Literal
 
+from ._constants import THERAPIST_MATCH_FORM_URL
+
 Scene = Literal[
     "greeting",
     # ----- Pre-classify gates (new) -----------------------------------------
     "disclosure_prompt",
-    "ask_physical_presence",
     "ask_caller_relationship",
     "ask_dob_for_verify",
     "resume_offer_prompt",
@@ -25,10 +26,16 @@ Scene = Literal[
     "ask_booking_field",
     "ask_callback_field",
     "ask_therapist",
+    "list_therapists",
+    "matching_referral",
     # ----- Booking / cancel / callback --------------------------------------
     "present_slots",
+    "no_availability",
     "confirm_booking",
     "post_booking",
+    "ask_cancel_identifiers",
+    "cancel_not_found",
+    "cancel_past_appointment",
     "confirm_cancel",
     "post_cancel",
     "post_verify_offer_booking",
@@ -41,8 +48,8 @@ Scene = Literal[
     "out_of_scope",
     "clarify",
     "open_question",
-    # ----- Handoffs (7) -----------------------------------------------------
-    "handoff_out_of_state",
+    "post_booking_followup",
+    # ----- Handoffs (6) -----------------------------------------------------
     "handoff_roi_required",
     "handoff_mandatory_report",
     "handoff_crisis",
@@ -129,7 +136,12 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "fields populated yet), briefly acknowledge the self-pay path "
         "first — e.g. 'No problem, we accept self-pay (our standard "
         "rate is on the rates page) — what's a short reason for the "
-        "visit?'"
+        "visit?'\n"
+        "On the FIRST booking-field question of the session only (no booking "
+        "fields populated yet), add ONE brief clause per the LOCATION POLICY "
+        "so they know up front: they can book from any state, but need to be "
+        "in Nevada for the visit (in person or video). Say it once — do not "
+        "repeat it on later fields."
     ),
 
     "ask_callback_field": (
@@ -156,11 +168,58 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "spoken output. Do NOT type the therapist list yourself."
     ),
 
+    "list_therapists": (
+        "The caller asked who our therapists are / which providers are "
+        "available (see `user_just_said`). List the therapists by name "
+        "from `available_therapists` in the context — every name, in a "
+        "clean readable list. Keep it warm and brief: a one-line intro, "
+        "the names, then ONE short offer that covers the two ways forward: "
+        "(1) if they already have someone in mind, you'll book them; (2) if "
+        "they're not sure who's the right fit, they can use our quick "
+        "matching form, then come back and you'll get them booked. Include "
+        "the matching form link from `matching_form_url` in the context "
+        "EXACTLY as given (a plain https:// URL — the chat renders it). "
+        "Do NOT claim you will match them or pick a 'best fit' yourself, "
+        "and do NOT invent specialties, credentials, or availability — you "
+        "only have the names. If `booking_status` shows a booking is "
+        "already in progress, list the names and then in ONE short clause "
+        "offer to pick the booking back up."
+    ),
+
+    "matching_referral": (
+        "The caller wants help choosing the right therapist (to be matched, "
+        "or asked who's 'best' for a need — see `user_just_said`). You do "
+        "NOT match or recommend a clinician yourself. Warmly hand them the "
+        "self-service matching form: include the link from `matching_form_"
+        "url` in the context EXACTLY as given (a plain https:// URL — the "
+        "chat renders it). In ONE short, friendly message: (1) acknowledge "
+        "what they're looking for; (2) give the link as the way to get "
+        "matched; (3) tell them to come back here afterward with the "
+        "therapist it suggests and you'll get them booked. Do NOT name or "
+        "rank any clinician, do NOT invent specialties, and do NOT pull up "
+        "the roster. If they'd rather not use the form, offer to book with "
+        "anyone they already have in mind or take a callback. Keep it to "
+        "2–3 sentences and end with a gentle next-step question."
+    ),
+
     "present_slots": (
         "Read the proposed appointment slots aloud, ONE per line, exactly as "
         "provided in the context. For voice channel: always include 'Pacific "
         "Time' on every slot. End with a single short question: 'Which works "
         "best for you?'"
+    ),
+
+    "no_availability": (
+        "We checked the calendar and there are NO open appointment slots in "
+        "the search window. Say so warmly and briefly. If `availability_for` "
+        "names a specific therapist, say that therapist has no openings in "
+        "the next couple of weeks and offer to check OTHER therapists or have "
+        "the team reach out; otherwise say none of our therapists show "
+        "openings in that window. Then give ONE clear next step: offer to "
+        "have someone from the team call them back with more options, or "
+        "share the practice number 725-238-6990. Do NOT invent slots, dates, "
+        "or a waitlist. End with a single short question (e.g. 'Want me to "
+        "have someone reach out?')."
     ),
 
     "confirm_booking": (
@@ -183,11 +242,41 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "us anytime at 725-238-6990.'"
     ),
 
+    "ask_cancel_identifiers": (
+        "We need to locate the caller's appointment before we can cancel it. "
+        "In ONE concise, friendly sentence ask them for the phone number and "
+        "date of birth associated with the appointment. Example: 'To find "
+        "your appointment, could I get the phone number and date of birth "
+        "we have on file?' Do not ask for anything else."
+    ),
+
+    "cancel_not_found": (
+        "We were unable to find an upcoming appointment matching the details "
+        "provided. In TWO short sentences: (1) let the caller know we "
+        "couldn't find a matching appointment — do NOT say whether the phone "
+        "number matched or not; (2) offer two next steps: they can double-"
+        "check the details and try again, or leave a callback request and a "
+        "team member will sort it out. Do NOT apologise excessively. Do NOT "
+        "reveal any partial match information."
+    ),
+
+    "cancel_past_appointment": (
+        "The caller is verified, but the appointment we found "
+        "(`appt_time_friendly`) is in the PAST and cannot be cancelled. Be "
+        "clear and brief, NO confusion, in TWO short sentences: (1) 'I'm "
+        "sorry, but the appointment I found was on {appt_time_friendly}, which "
+        "has already passed, so there's nothing to cancel.' (2) Offer to book "
+        "a new appointment or help with anything else. Name the date plainly; "
+        "do NOT imply a future appointment exists."
+    ),
+
     "confirm_cancel": (
         "Confirm the caller wants to cancel their existing appointment. Read "
-        "back the appointment slot + therapist. End with a single yes/no "
-        "question: 'Are you sure you'd like to cancel?'. The state will be "
-        "flipped to cancel_pending_confirm in this turn."
+        "back the appointment using `appt_time_friendly` (already formatted "
+        "as a friendly Pacific Time date/time from the context) and the "
+        "therapist name from `therapist`. End with a single yes/no question: "
+        "'Are you sure you'd like to cancel?'. The state will be flipped to "
+        "cancel_pending_confirm in this turn."
     ),
 
     "post_cancel": (
@@ -285,7 +374,11 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "and offer the practice number 725-238-6990 so they can get an "
         "exact answer. Do NOT fall back to a generic 'what can I help "
         "you with?' menu — directly address the question or explicitly "
-        "acknowledge you don't have the answer. Keep it to 2-4 sentences."
+        "acknowledge you don't have the answer. Keep it to 2-4 sentences. "
+        "If `booking_status` shows a booking is already in progress, answer "
+        "the question and then in ONE short clause offer to pick the booking "
+        "back up (e.g. '…want to keep going with your appointment?') so the "
+        "caller isn't stranded — do NOT restart intake from scratch."
     ),
 
     "crisis": (
@@ -321,6 +414,19 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "based on what's in state. Never re-ask a field already collected."
     ),
 
+    "post_booking_followup": (
+        "The caller's appointment is ALREADY booked and confirmation has "
+        "been sent — intake is complete. They've now said something else "
+        "(see `user_just_said`). Reply warmly and naturally in 1-2 "
+        "sentences. If it's a thank-you or sign-off, acknowledge it kindly "
+        "and let them know they can ask anything else or reach the office "
+        "at 725-238-6990. If they ask a question you can answer from the KB "
+        "snippets in context, answer it directly; otherwise offer the "
+        "office number for specifics. NEVER read back the appointment "
+        "details again, NEVER ask them to confirm anything, and NEVER "
+        "re-collect a field — the booking is done."
+    ),
+
     # =====================================================================
     # PRE-CLASSIFY GATES — these scenes run BEFORE intent classification.
     # =====================================================================
@@ -333,15 +439,6 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "help you today?'. For voice channels, speak naturally with a calm "
         "pace; do NOT add 'um' or 'so' filler. Stop speaking immediately "
         "after the closing question."
-    ),
-
-    "ask_physical_presence": (
-        "We need to confirm the caller is physically located in Nevada right "
-        "now (the practice is licensed in Nevada only; telehealth across "
-        "state lines is a licensure violation). Ask in ONE short, warm "
-        "sentence: 'Just to confirm — are you currently located in Nevada?'. "
-        "Do NOT explain licensure or use legal jargon; if they ask why, the "
-        "next turn can explain briefly. Stop speaking after the question."
     ),
 
     "ask_caller_relationship": (
@@ -376,17 +473,6 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
     # never say 'transferring', 'handing over', 'booking specialist'.
     # Phrase the next step as the action itself, not the routing.
     # =====================================================================
-
-    "handoff_out_of_state": (
-        "The caller is physically outside Nevada. Brighter Tomorrow is "
-        "licensed in Nevada only — we cannot start care out of state. "
-        "TWO sentences maximum: (1) acknowledge warmly that they reached "
-        "out and explain our therapists are licensed in Nevada only; "
-        "(2) offer 725-238-6990 or say a team member can follow up when "
-        "they return. No more than two sentences — do not add extra "
-        "empathy clauses or elaborations. NEVER say 'transferring' or "
-        "'handing off'."
-    ),
 
     "handoff_roi_required": (
         "The caller is a guardian / third party acting on behalf of "
@@ -574,10 +660,11 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
     ),
 
     "send_ack_confirmation": (
-        "Tell the caller their request (callback / booking / cancel) "
-        "has been saved and a confirmation will arrive shortly. ONE "
-        "sentence — for voice 'You'll get a text confirmation in a "
-        "minute or two'; for chat 'A confirmation email is on its "
-        "way to {email}'. End with the practice line 725-238-6990."
+        "Tell the caller their appointment request has been saved and "
+        "our care team will follow up to confirm. In the SAME short "
+        "reply, let them know a confirmation email is on its way to "
+        "{email} (only mention the email if {email} is present). "
+        "Do NOT promise a text/SMS — texting is not enabled, only "
+        "email. End with the practice line 725-238-6990."
     ),
 }

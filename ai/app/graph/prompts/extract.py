@@ -246,6 +246,62 @@ class TurnExtraction(BaseModel):
         ),
     )
 
+    asks_for_therapist_roster: bool = Field(
+        default=False,
+        description=(
+            "True when the caller asks WHO the therapists/clinicians/"
+            "providers are, asks to see the team, or asks which therapists "
+            "we have in general (a roster question) — e.g. 'which "
+            "therapists do you have?', 'who are your therapists?', 'can I "
+            "see the team?', 'who could I see?', 'which therapists are "
+            "available?', 'who's available?'. A BARE 'available' with no "
+            "booking/scheduling cue is a roster ask (list of names), NOT a "
+            "calendar lookup. ALSO set intent_delta='info'. This is "
+            "distinct from PICKING a therapist during booking (use "
+            "staff_name), from asking about ONE named therapist's "
+            "background (use info_query), and from asking whether someone "
+            "is free to BOOK (use asks_booking_availability). Leave False "
+            "otherwise."
+        ),
+    )
+
+    asks_booking_availability: bool = Field(
+        default=False,
+        description=(
+            "True when the caller wants to know whether a therapist (any "
+            "or a named one) has OPEN APPOINTMENT TIMES they could book — "
+            "i.e. a real calendar/scheduling question, not just the roster. "
+            "Cues: the words book/booking/appointment/opening(s)/slot/"
+            "schedule/soonest/earliest/this week/next week, or a named "
+            "therapist + availability — e.g. 'is anyone available to "
+            "book?', 'do you have any openings?', 'when's the soonest I "
+            "can come in?', 'can I book with someone this week?', 'is "
+            "Christie available to book?', 'what times does Janelle have?'. "
+            "ALSO set intent_delta='booking' (they intend to book). If they "
+            "named a specific therapist, ALSO fill staff_name. Leave False "
+            "for a bare roster question ('who are your therapists?' -> use "
+            "asks_for_therapist_roster instead)."
+        ),
+    )
+
+    wants_therapist_match: bool = Field(
+        default=False,
+        description=(
+            "True when the caller wants help figuring out WHICH therapist is "
+            "right for them — asks to be matched, asks who is 'best' for a "
+            "need/condition, or says they don't know who to pick — e.g. "
+            "'can you match me with someone?', 'who's the best therapist for "
+            "anxiety / for my teen / for trauma?', 'I don't know who to "
+            "choose', 'help me find the right fit', 'who do you recommend?'. "
+            "This is the MATCHING intent (the assistant hands off to a "
+            "matching form, it never picks for them). Distinct from: a bare "
+            "roster list ('who are your therapists?' -> asks_for_therapist_"
+            "roster), open-slot lookups ('any openings to book?' -> asks_"
+            "booking_availability), and naming a specific therapist to book "
+            "(use staff_name). Leave False otherwise."
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # System prompt — short and surgical
@@ -353,6 +409,38 @@ Rules:
    booking. Only set intent="booking" when the caller has decided
    to book and is giving you booking inputs ("I'd like to book",
    "schedule me", "let's set it up", "I want an appointment").
+
+8a. `asks_for_therapist_roster`: set TRUE when the caller asks WHO the
+    therapists are or which providers we have in general ("which
+    therapists do you have?", "who are your therapists?", "can I see the
+    team?", "who could I see?", "which therapists are available?",
+    "who's available?"). A BARE "available" with no booking/scheduling
+    cue is a roster ask (we just list the names). ALSO set
+    intent_delta="info". Do NOT set it when they NAME a specific therapist
+    to book with (use staff_name), ask about one therapist's background
+    (use info_query), or ask whether someone is free to BOOK (use 8b).
+
+8b. `asks_booking_availability`: set TRUE when the caller asks whether a
+    therapist — anyone, or a named one — has OPEN APPOINTMENT TIMES they
+    could book (a real calendar question). Cues: book / booking /
+    appointment / opening(s) / slot / schedule / soonest / earliest /
+    "this week" / "next week", or a named therapist + availability —
+    e.g. "is anyone available to book?", "do you have any openings?",
+    "when's the soonest I can come in?", "can I book with someone this
+    week?", "is Christie available to book?", "what times does Janelle
+    have?". ALSO set intent_delta="booking" (they intend to book). If a
+    specific therapist is named, ALSO fill staff_name. The split vs 8a:
+    "who are your therapists?" = roster (8a, names); "is anyone free to
+    book?" = calendar (8b, real openings).
+
+8c. `wants_therapist_match`: set TRUE when the caller wants help deciding
+    WHICH therapist is right for them — asks to be matched, asks who is
+    "best" for a need/condition, or says they don't know who to pick
+    ("can you match me?", "who's the best therapist for anxiety / my
+    teen / trauma?", "I don't know who to choose", "help me find the
+    right fit", "who do you recommend?"). The assistant NEVER picks for
+    them — it refers them to a matching form. Distinct from 8a (bare
+    roster), 8b (open slots), and naming a therapist to book (staff_name).
 
 9. `safety_signal`: set TRUE for any uncaught crisis indicator, INCLUDING
    hedged or future-tense phrasings like "thinking about hurting

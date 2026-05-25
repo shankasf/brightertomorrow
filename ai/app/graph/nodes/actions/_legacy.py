@@ -25,12 +25,20 @@ logger = logging.getLogger(__name__)
 
 @traced(run_type="tool", name="propose_slots")
 def propose_slots(state: State) -> dict[str, Any]:
+    """Propose up to 3 slots for the caller.
+
+    staff_id == 0 or None, OR staff_any set → any-therapist mode: pass 0 to
+        the gateway which fans out across the WHOLE roster and returns the
+        soonest slots tagged with staffId + staffName. Each returned slot
+        already carries the correct staffId, which extract pins onto state
+        when the caller picks one (so book_appointment can place the hold).
+    staff_id > 0                   → single-therapist mode for that clinician.
+    """
     staff_id = state.get("staff_id")
-    if not staff_id:
-        return {"last_action": "propose_slots_blocked_no_staff"}
+    any_mode = bool(state.get("staff_any")) or not staff_id  # fan-out via gateway
+
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
-    from ....data.roster import ELIGIBLE_FOR_BOOKING
 
     time_of_day = state.get("_time_of_day") or "any"
     earliest = state.get("_earliest_day_offset") or 1
@@ -41,8 +49,9 @@ def propose_slots(state: State) -> dict[str, Any]:
     earliest_pt = now_pt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=earliest)
     earliest_dt = earliest_pt.astimezone(timezone.utc)
 
-    def _pick_for(sid: int) -> list[dict]:
-        raw = _fetch_free_slots(sid, days_ahead=max(14, earliest + 7))
+    def _pick_for(sid: int | None) -> list[dict]:
+        """Fetch and time-filter slots; sid=0/None means any-therapist."""
+        raw = _fetch_free_slots(sid if sid else None, days_ahead=max(14, earliest + 7))
         out: list[dict] = []
         for s in raw.get("slots", []):
             start = datetime.fromisoformat(s["startISO"].replace("Z", "+00:00"))
@@ -54,34 +63,20 @@ def propose_slots(state: State) -> dict[str, Any]:
                 break
         return out
 
-    picked = _pick_for(staff_id)
-    final_staff_id = staff_id
-    final_staff_name = state.get("staff_name")
-
-    # If the user said "first available / no preference" and the
-    # hash-picked therapist has no slots, try the rest of the roster
-    # in roster order. The first therapist with availability wins.
-    if not picked and state.get("_staff_open_to_alternatives"):
-        tried = {staff_id}
-        for t in ELIGIBLE_FOR_BOOKING:
-            tid = t["staffId"]
-            if tid in tried:
-                continue
-            tried.add(tid)
-            alt = _pick_for(tid)
-            if alt:
-                picked = alt
-                final_staff_id = tid
-                final_staff_name = t["name"]
-                logger.info(
-                    "propose_slots fallback session=%s original=%s -> %s (%s)",
-                    state.get("session_id", "?"), staff_id, tid, t["name"],
-                )
-                break
+    if any_mode:
+        # Gateway fans out across the whole roster; slots already carry
+        # staffId + staffName, sorted soonest-first.
+        picked = _pick_for(None)
+        final_staff_id = staff_id  # stays None/0 until caller picks a slot
+        final_staff_name = state.get("staff_name")
+    else:
+        picked = _pick_for(staff_id)
+        final_staff_id = staff_id
+        final_staff_name = state.get("staff_name")
 
     logger.info(
-        "action propose_slots session=%s staff_id=%s picked=%d",
-        state.get("session_id", "?"), final_staff_id, len(picked),
+        "action propose_slots session=%s staff_id=%s any_mode=%s picked=%d",
+        state.get("session_id", "?"), final_staff_id, any_mode, len(picked),
     )
 
     update: dict[str, Any] = {
@@ -92,8 +87,8 @@ def propose_slots(state: State) -> dict[str, Any]:
     if final_staff_id != staff_id:
         update["staff_id"] = final_staff_id
         update["staff_name"] = final_staff_name
-    # Empty result after a full roster sweep — surface so respond can
-    # offer a callback instead of looping on propose_slots forever.
+    # No openings (single therapist, or the whole-roster fan-out came back
+    # empty) — surface so respond offers a callback instead of looping.
     if not picked:
         update["last_action"] = "propose_slots_no_availability"
     return update
@@ -207,11 +202,12 @@ def cancel_appointment(state: State) -> dict[str, Any]:
     appointment_id = state.get("appointment_id")
     if not appointment_id:
         return {"last_action": "cancel_appointment_blocked_no_appt"}
+    email_hash = state.get("_appt_email_hash") or ""
     try:
         from ...integrations.aws_signer import gateway_post
         resp = gateway_post(
             "/internal/calendar/cancel",
-            {"appointmentId": appointment_id},
+            {"appointmentId": appointment_id, "emailHash": email_hash},
         )
         ok = bool(resp.get("ok"))
     except Exception as exc:
@@ -228,6 +224,88 @@ def cancel_appointment(state: State) -> dict[str, Any]:
         "last_action": "cancel_appointment_error",
         "_cancel_error": resp.get("error", "cancel_failed"),
     }
+
+
+# ---------------------------------------------------------------------------
+# lookup_appointment — verify-then-lookup for cancel of a prior-session appt
+# ---------------------------------------------------------------------------
+
+@traced(run_type="tool", name="lookup_appointment")
+def lookup_appointment(state: State) -> dict[str, Any]:
+    """Look up a previously-booked appointment by phone + DOB.
+
+    Calls the gateway's /internal/calendar/lookup_appointment endpoint.
+    Phone and DOB are consumed from existing state buckets (no new NL
+    parsing — extract is the only NL boundary).
+
+    Results:
+      - found + dob_match: sets appointment_id, _appt_email_hash,
+        _appt_time_iso, staff_id, staff_name, booking_status="booked".
+      - reason=="verification_failed": last_action="lookup_appointment_verify_failed".
+      - else: last_action="lookup_appointment_not_found".
+
+    HIPAA: logs only session_id + found/dob_match booleans. Never phone or DOB.
+    """
+    from ....data.roster import THERAPISTS_WITH_FEEDS
+
+    # Build the staff_id -> name lookup map from the roster.
+    _staff_map: dict[int, str] = {t["staffId"]: t["name"] for t in THERAPISTS_WITH_FEEDS}
+
+    session_id = state.get("session_id", "?")
+
+    # Read phone from booking_fields first, then callback_fields fallback.
+    bk = state.get("booking_fields") or {}
+    cb = state.get("callback_fields") or {}
+    phone = (bk.get("phone") or cb.get("phone") or "").strip()
+
+    ins = state.get("insurance_fields") or {}
+    dob = (ins.get("dob_yyyymmdd") or "").strip()
+    email = (bk.get("email") or "").strip() or None
+
+    body: dict[str, Any] = {"phone": phone, "dob_yyyymmdd": dob}
+    if email:
+        body["email"] = email
+
+    try:
+        resp = gateway_post("/internal/calendar/lookup_appointment", body)
+    except Exception:
+        logger.exception("lookup_appointment_error session=%s", session_id)
+        return {"last_action": "lookup_appointment_not_found"}
+
+    found: bool = bool(resp.get("found"))
+    dob_match: bool = bool(resp.get("dob_match"))
+
+    logger.info(
+        "action lookup_appointment session=%s found=%s dob_match=%s",
+        session_id, found, dob_match,
+    )
+
+    if found and dob_match:
+        staff_id_raw = resp.get("therapist_staff_id")
+        staff_id = int(staff_id_raw) if staff_id_raw is not None else None
+        staff_name = _staff_map.get(staff_id, f"therapist #{staff_id}") if staff_id else None
+        return {
+            "appointment_id": resp.get("appointment_id"),
+            "_appt_email_hash": resp.get("email_hash", ""),
+            "_appt_time_iso": resp.get("appointment_time_iso", ""),
+            "staff_id": staff_id,
+            "staff_name": staff_name,
+            "booking_status": "booked",
+            "last_action": "lookup_appointment_found",
+        }
+
+    reason = resp.get("reason", "")
+    if reason == "verification_failed":
+        return {"last_action": "lookup_appointment_verify_failed"}
+    if reason == "past_appointment":
+        # Identity verified but the appointment already passed — can't cancel.
+        # Carry the date so respond can name it plainly.
+        return {
+            "_appt_time_iso": resp.get("appointment_time_iso", ""),
+            "last_action": "lookup_appointment_past",
+        }
+
+    return {"last_action": "lookup_appointment_not_found"}
 
 
 # ---------------------------------------------------------------------------
@@ -280,11 +358,20 @@ def search_kb(state: State) -> dict[str, Any]:
         resp = OpenAI().embeddings.create(model=embed_model, input=query)
         vec = "[" + ",".join(f"{x:.7f}" for x in resp.data[0].embedding) + "]"
         with conn() as c, c.cursor() as cur:
+            # Dedupe by title (DISTINCT ON keeps the best-scoring chunk per
+            # doc) before taking the top 5. The legacy blog is heavily
+            # chunked — one popular post ("How Childhood Trauma Affects
+            # You…") otherwise floods all 5 slots and buries the curated
+            # therapist / rates / insurance docs that answer the question.
             cur.execute(
                 """
-                SELECT title, content, 1 - (embedding <=> %s::vector) AS score
-                FROM kb_documents
-                ORDER BY embedding <=> %s::vector
+                SELECT title, content, score FROM (
+                    SELECT DISTINCT ON (title)
+                           title, content, 1 - (embedding <=> %s::vector) AS score
+                    FROM kb_documents
+                    ORDER BY title, embedding <=> %s::vector
+                ) d
+                ORDER BY score DESC
                 LIMIT 5
                 """, (vec, vec),
             )

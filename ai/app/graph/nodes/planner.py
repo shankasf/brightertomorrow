@@ -7,7 +7,6 @@ Routing priority (top wins):
   0. Max-turns hard exit                    -> handoff_admin_callback
   1. Crisis — safety_signal or intent=crisis -> respond(crisis)
   2. Gate 1: disclosure not done            -> respond(disclosure_prompt)
-  3. Gate 2: caller confirmed non-NV        -> handoff_out_of_state
   4. Gate 3: third_party_for_adult + no ROI -> handoff_roi_required
   5. Gate 4a: returning + not verified      -> respond(ask_dob_for_verify)
   6. Gate 4b: returning + verified + no resume decision
@@ -63,7 +62,6 @@ class N:
 
     # Gate / handoff nodes (wired by graph.py)
     GATE_RESUME_OFFER = "gate_resume_offer"
-    HANDOFF_OUT_OF_STATE = "handoff_out_of_state"
     HANDOFF_ROI_REQUIRED = "handoff_roi_required"
     HANDOFF_MANDATORY_REPORT = "handoff_mandatory_report"
     HANDOFF_CRISIS = "handoff_crisis"
@@ -80,6 +78,9 @@ class N:
     CREATE_PENDING_REQUEST = "create_pending_request"
     SEND_ACKNOWLEDGEMENT = "send_acknowledgement"
     LOG_PHI = "log_phi"
+
+    # Cancel lookup — finds a prior-session appointment by phone+DOB
+    LOOKUP_APPOINTMENT = "lookup_appointment"
 
 
 def _route(state: State, target: str, reason: str) -> str:
@@ -165,6 +166,16 @@ def planner(state: State) -> str:
     gates: dict = state.get("gates") or {}
     turn_count: int = state.get("turn_count") or 0
 
+    # Mid-booking? When the booking flow is actively collecting/confirming we
+    # treat the turn as booking regardless of what the LLM extractor most
+    # recently labelled it. Computed up here (not just at step 14) so the
+    # info / out-of-scope fast-paths below can DEFER to an active booking —
+    # otherwise an address-shaped answer ("my address is 6955 N Durango Dr")
+    # gets misread as a "where are your offices?" locations FAQ and the caller
+    # loops on the office list instead of finishing their booking
+    # (chat session 2026-05-24).
+    mid_booking = bs in ("collecting", "ready_for_slots", "slot_selected", "pending_confirm")
+
     # ---- 0. Hard turn-count ceiling — anti-infinite-loop ---------------
     if turn_count > _MAX_TURNS:
         return _route(state, N.HANDOFF_ADMIN_CALLBACK, "max_turns_reached")
@@ -206,12 +217,10 @@ def planner(state: State) -> str:
     if not gates.get("disclosure_done"):
         return _route(state, N.RESPOND, "disclosure_prompt")
 
-    # ---- 3. Gate 2: Nevada physical presence ---------------------------
-    # Only route out-of-state when we KNOW they are NOT in NV.
-    # If physical_presence_state is null we don't yet know — ask later.
-    presence = state.get("physical_presence_state")
-    if presence and presence != "NV" and not gates.get("nv_presence_ok"):
-        return _route(state, N.HANDOFF_OUT_OF_STATE, "caller_not_in_nv")
+    # ---- (removed) Nevada physical-presence gate -----------------------
+    # The practice now accepts anyone in the USA to book — patients travel
+    # to Nevada for treatment — so location no longer gates the flow.
+    # Booking is open on every channel (chat, voice, call).
 
     # ---- 4. Gate 3: third-party caller without ROI ---------------------
     rel = state.get("caller_relationship")
@@ -329,19 +338,89 @@ def planner(state: State) -> str:
     ):
         return _route(state, N.RESPOND, "post_verify_declined")
 
-    # ---- 10. Cancel intent on booked appointment -----------------------
+    # ---- 10. Cancel intent -----------------------------------------------
+    # Post-lookup outcome routing — before the booked-appointment branch so
+    # we can handle the case where lookup ran but found nothing / failed DOB.
+    la = state.get("last_action") or ""
+    if la in ("lookup_appointment_verify_failed", "lookup_appointment_not_found"):
+        return _route(state, N.RESPOND, "cancel_not_found")
+    if la == "lookup_appointment_past":
+        return _route(state, N.RESPOND, "cancel_past_appointment")
+
     if intent == "cancel" and bs == "booked":
         return _route(state, N.RESPOND, "ask_cancel_confirm")
+
+    # Cancel intent but no active booking in this session — try to look up
+    # a prior appointment by phone + DOB if we have them.
+    if intent == "cancel" and bs not in ("booked", "cancel_pending_confirm", "cancelled"):
+        bk = state.get("booking_fields") or {}
+        cb = state.get("callback_fields") or {}
+        phone = (bk.get("phone") or cb.get("phone") or "").strip()
+        dob = (state.get("insurance_fields") or {}).get("dob_yyyymmdd") or ""
+        if phone and dob:
+            return _route(state, N.LOOKUP_APPOINTMENT, "cancel_needs_lookup")
+        return _route(state, N.RESPOND, "ask_cancel_identifiers")
+
     if intent == "keep" and bs == "cancel_pending_confirm":
         return _route(state, N.ROLLBACK, "keep_after_cancel_pending")
 
     # ---- 11. Out-of-scope ---------------------------------------------
-    if intent == "out_of_scope":
+    # Defer to an active booking: a stray out-of-scope/info-shaped turn must
+    # not abandon a half-finished booking.
+    if intent == "out_of_scope" and not mid_booking:
         return _route(state, N.RESPOND, "out_of_scope")
 
     # ---- 12. Info path ------------------------------------------------
-    if intent == "info":
-        if not state.get("kb_snippets"):
+    # On CHAT we answer KB/FAQ questions at ANY point — even mid-booking —
+    # then the booking resumes on the next turn (booking_status is preserved
+    # and step 14 still owns booking when intent isn't "info"). A caller who
+    # asks "how much is a session?" while booking must get the price, not a
+    # deflection (chat session 2026-05-24).
+    #
+    # On VOICE we still defer to an active booking so a field-shaped answer
+    # ("my address is 6955 N Durango Dr") isn't misread as a "where are your
+    # offices?" FAQ and loop the caller on the office list.
+    is_chat = state.get("channel") == "chat"
+
+    # ---- 12-pre. "Which therapist is right for me?" -------------------
+    # The assistant NEVER matches a therapist itself — it refers the caller
+    # to the self-service matching form and invites them back to book. Takes
+    # precedence over the roster/availability branches so "who's best for X?"
+    # routes to the referral, not a name list. Chat only (the form URL is a
+    # link); on voice this signal never fires into a link — voice simply
+    # doesn't offer matching (see triage.py). Same active-booking guard.
+    if state.get("_wants_therapist_match") and (is_chat or not mid_booking):
+        return _route(state, N.RESPOND, "matching_referral")
+
+    # ---- 12a. "Which therapists do you have?" -------------------------
+    # A roster question is answered straight from data/roster.py — no KB
+    # round-trip (the KB has no roster, which is exactly why this used to
+    # deflect). Same channel rule as the info path: answer anytime on
+    # chat; on voice defer to an active booking so a stray question
+    # doesn't abandon a half-finished booking.
+    if state.get("_asks_therapist_roster") and (is_chat or not mid_booking):
+        return _route(state, N.RESPOND, "list_therapists")
+
+    # ---- 12b. "Is anyone available to book?" --------------------------
+    # A booking-availability question checks the REAL calendar BEFORE we
+    # collect any intake, so the caller hears actual openings first, then
+    # falls into the normal booking flow (extract set intent="booking").
+    # staff_id drives propose_slots: set (named therapist) -> that calendar;
+    # unset -> any-therapist fan-out via the gateway. Same channel rule as
+    # the roster/info paths. propose_slots -> RESPOND (static edge), where
+    # the present_slots / no_availability scene renders the result.
+    if state.get("_asks_booking_availability") and (is_chat or not mid_booking):
+        if not state.get("proposed_slots"):
+            return _route(state, N.PROPOSE, "availability_peek")
+        return _route(state, N.RESPOND, "present_slots")
+
+    if (intent == "info" or state.get("_info_this_turn")) and (is_chat or not mid_booking):
+        # Re-search whenever THIS turn asks something new (info_topic holds
+        # the last searched query) — otherwise a second question reuses the
+        # first question's stale snippets and gets the wrong answer.
+        info_q = (state.get("_info_query") or "").strip()[:120]
+        last_q = (state.get("info_topic") or "").strip()
+        if not state.get("kb_snippets") or (info_q and info_q != last_q):
             return _route(state, N.SEARCH_KB, "info_needs_kb")
         return _route(state, N.RESPOND, "info_answer")
 
@@ -357,7 +436,6 @@ def planner(state: State) -> str:
     # what the LLM extractor most recently said. Stale/noisy intent
     # classifications would otherwise dump us back to greeting_or_open
     # and re-ask everything.
-    mid_booking = bs in ("collecting", "ready_for_slots", "slot_selected", "pending_confirm")
     if intent in ("booking", "insurance_check") or mid_booking:
         if state.get("payment_path") != "self_pay" and not insurance_complete(state):
             return _route(state, N.RESPOND, "ask_insurance_field")
@@ -367,7 +445,7 @@ def planner(state: State) -> str:
             return _route(state, N.RESPOND, "post_verify_offer_booking")
         if not booking_fields_complete(state):
             return _route(state, N.RESPOND, "ask_booking_field")
-        if not state.get("staff_id"):
+        if not state.get("staff_id") and not state.get("staff_any"):
             return _route(state, N.RESPOND, "ask_therapist")
         if not state.get("proposed_slots"):
             # propose_slots already ran and found nothing across the

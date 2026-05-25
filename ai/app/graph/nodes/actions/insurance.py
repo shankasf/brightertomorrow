@@ -14,9 +14,13 @@ KMS note:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
+import re
 import time
+import uuid
+from base64 import b64encode
 from datetime import datetime, timezone
 from typing import Any
 
@@ -47,8 +51,37 @@ def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _now_iso_z() -> str:
+    """ISO8601 in the canonical outbox format: 2006-01-02T15:04:05Z."""
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _now_epoch() -> int:
     return int(time.time())
+
+
+_KMS_ALIAS = os.environ.get("BT_PHI_KMS_ALIAS", "alias/bt-phi")
+_AWS_REGION_INS = os.environ.get("AWS_REGION", "us-east-1")
+
+
+def _kms_encrypt_payload(plaintext: str) -> str:
+    """Encrypt an outbox notification payload under the bt-phi CMK.
+
+    Context-free encrypt — matches the Go EnqueueNotification call and the
+    Lambda kms.decrypt() call (neither passes EncryptionContext). If you add
+    EncryptionContext here the Lambda decrypt will fail.
+
+    Returns base64-encoded ciphertext (safe for DDB String attribute).
+    """
+    if not plaintext:
+        return ""
+    kms = boto3.client("kms", region_name=_AWS_REGION_INS)
+    resp = kms.encrypt(
+        KeyId=_KMS_ALIAS,
+        Plaintext=plaintext.encode("utf-8"),
+        # NO EncryptionContext — intentional. Lambda decrypts without context.
+    )
+    return b64encode(resp["CiphertextBlob"]).decode("ascii")
 
 
 def _build_audit_event(action: str, session_id: str, **extra: Any) -> dict[str, Any]:
@@ -127,7 +160,9 @@ def verify_insurance(state: State) -> dict[str, Any]:
     last_name  = (ins.get("last_name") or "").strip()
     dob        = (ins.get("dob_yyyymmdd") or "").strip()
     payer_name = (ins.get("payer_name") or "").strip()
-    member_id  = (ins.get("member_id") or "").strip()
+    # CLAIM.MD is whitespace-sensitive; normalize to the clean card form.
+    from ....data.identifiers import normalize_member_id
+    member_id  = normalize_member_id(ins.get("member_id"))
 
     valid_dob = _validate_dob(dob)
     if not valid_dob:
@@ -267,78 +302,101 @@ def verify_insurance(state: State) -> dict[str, Any]:
 
 @traced(run_type="tool", name="send_coverage_result")
 def send_coverage_result(state: State) -> dict[str, Any]:
-    """Queue a coverage-result outbox row and mark the session done.
+    """Queue a generic email outbox row and mark the session done.
 
     Used when the caller's intent was `coverage_only` (just "do I have
-    coverage?" — not a booking). The actual SMS/email send happens in the
+    coverage?" — not a booking). The actual email send happens in the
     retry Lambda; we only write the outbox row here.
 
-    PHI note: the payload contains only information the patient already knows
-    (their own eligibility, payer name, plan, copay, deductible). The
-    notification Lambda encrypts the payload before delivery.
+    HIPAA — minimum-necessary:
+      Insurance eligibility = sensitive financial PHI. The outbound email
+      contains NO payer name, NO eligible flag, NO copay/coverage numbers.
+      It is a generic "we've reviewed, our team will call you" ack only.
+
+    Channel policy:
+      EMAIL only (SMS disabled). If the patient has no email address, skip
+      enqueuing entirely — do NOT enqueue an sms row.
+      # TODO(sms): enqueue channel="sms" row when SMS is enabled.
+
+    Best-effort: never raises. On any error, log and return done=True.
     """
     session_id = state.get("session_id", "?")
     ins = state.get("insurance_fields") or {}
     bk  = state.get("booking_fields") or {}
 
-    phone = (bk.get("phone") or "").strip()
     email = (bk.get("email") or "").strip()
 
-    outcome  = ins.get("outcome", "unknown")
-    payer    = ins.get("payer_name", "")
-    raw_resp = ins.get("raw_response_id", "")
-
-    # Determine channel: prefer SMS when phone present, else email, else skip.
-    channel = "sms" if phone else ("email" if email else None)
-    if channel is None:
-        logger.warning("send_coverage_result session=%s no_contact_channel", session_id)
+    # Skip if no email — do NOT write an sms row (SMS disabled).
+    if not email:
+        logger.info("send_coverage_result session=%s outcome=skipped_no_email", session_id)
         return {
             "scene": "coverage_only_result",
             "done": True,
             "last_action": "send_coverage_result",
             "audit_event": _build_audit_event("send_coverage_result", session_id,
-                                               outcome="skipped_no_channel"),
+                                               outcome="skipped_no_email"),
         }
 
-    import uuid
-    now_iso   = _now_iso()
-    now_epoch = _now_epoch()
     notif_id  = str(uuid.uuid4())
+    now_iso_z = _now_iso_z()
+    now_epoch = _now_epoch()
 
-    # Inline payload — no raw PHI beyond what the caller provided themselves.
-    payload_blob = {
-        "eligible": (outcome == "eligible"),
-        "outcome": outcome,
-        "payer": payer,
-    }
+    # Generic acknowledgement — NO insurance specifics in the email body.
+    # The Lambda wraps this structured content in the branded HTML template.
+    payload_json = json.dumps({
+        "subject":    "We've reviewed your insurance — Brighter Tomorrow Therapy",
+        "heading":    "We've reviewed your insurance",
+        "paragraphs": [
+            "Hi there, thanks for reaching out to Brighter Tomorrow Therapy.",
+            "We've reviewed your insurance benefits and our care team will go over "
+            "the specifics with you when we connect.",
+        ],
+    })
 
-    row = {
-        "notification_id": notif_id,
-        "created_at": now_iso,
-        "request_id": session_id,       # no request_id yet for coverage-only
-        "channel": channel,
-        "payload_ref": payload_blob,    # inline; retry Lambda will encrypt for wire
-        "dedupe_key": f"{session_id}:{channel}:coverage_result",
-        "status": "pending",
-        "attempt_count": 0,
-        "next_retry_at": now_iso,
-        "ttl": now_epoch + 30 * 86400,
+    # Canonical outbox row — matches Go EnqueueNotification schema exactly.
+    row: dict[str, Any] = {
+        "notification_id":    notif_id,
+        "created_at":         now_iso_z,
+        "channel":            "email",
+        "recipient":          email,           # table is CMK-encrypted at rest
+        "payload_ciphertext": "",              # filled below after KMS
+        "status":             "pending",
+        "next_retry_at":      now_iso_z,
+        "attempt_count":      0,
+        "dedupe_key":         f"{session_id}:email:coverage_result",
+        "ttl":                now_epoch + 30 * 86400,
     }
 
     try:
-        ddb = boto3.client("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        row["payload_ciphertext"] = _kms_encrypt_payload(payload_json)
+    except Exception:
+        logger.exception("send_coverage_result session=%s kms_encrypt_payload_failed", session_id)
+        # Best-effort: return done rather than blocking the session.
+        return {
+            "scene": "coverage_only_result",
+            "done": True,
+            "last_action": "send_coverage_result",
+            "audit_event": _build_audit_event("send_coverage_result", session_id,
+                                               outcome="kms_error"),
+        }
+
+    try:
+        ddb = boto3.client("dynamodb", region_name=_AWS_REGION_INS)
         ddb.put_item(
             TableName=_OUTBOX_TABLE,
             Item=_to_ddb_item(row),
-            # Idempotent: skip if same dedupe_key already queued.
-            ConditionExpression="attribute_not_exists(dedupe_key)",
+            # Idempotent: skip if same notification_id already queued.
+            ConditionExpression="attribute_not_exists(notification_id)",
         )
-        logger.info("send_coverage_result session=%s channel=%s notif_id=%s",
-                    session_id, channel, notif_id)
+        logger.info(
+            "send_coverage_result session=%s notification_id=%s channel=email outcome=queued",
+            session_id, notif_id,
+        )
     except ClientError as exc:
         if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
             # Already queued — idempotent OK.
-            logger.info("send_coverage_result session=%s channel=%s already_queued", session_id, channel)
+            logger.info("send_coverage_result session=%s notification_id=%s already_queued",
+                        session_id, notif_id)
         else:
             logger.exception("send_coverage_result session=%s outbox_write_failed", session_id)
             # Non-fatal: coverage result is best-effort; don't block the call.
@@ -351,7 +409,7 @@ def send_coverage_result(state: State) -> dict[str, Any]:
         "done": True,
         "last_action": "send_coverage_result",
         "audit_event": _build_audit_event("send_coverage_result", session_id,
-                                           channel=channel, notif_id=notif_id),
+                                           notification_id=notif_id, channel="email"),
     }
 
 
@@ -380,6 +438,8 @@ __all__ = [
     "_to_ddb_item",
     "_build_audit_event",
     "_now_iso",
+    "_now_iso_z",
     "_now_epoch",
+    "_kms_encrypt_payload",
     "_OUTBOX_TABLE",
 ]

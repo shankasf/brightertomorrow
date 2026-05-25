@@ -88,7 +88,7 @@ async def main() -> int:
         resolve_payer_id=lambda n: _Payer("BCBS", "BCBS"),
     )
     sys.modules["app.bt_agents"] = types.SimpleNamespace()
-    sys.modules["app.bt_agents.roster"] = types.SimpleNamespace(
+    sys.modules["app.data.roster"] = types.SimpleNamespace(
         ELIGIBLE_FOR_BOOKING=[{"staffId": 47, "name": "Elisia Danley"}],
         THERAPISTS_WITHOUT_FEEDS=[],
         THERAPISTS_WITH_FEEDS=[{"staffId": 47, "name": "Elisia Danley"}],

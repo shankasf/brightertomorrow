@@ -81,6 +81,35 @@ def _pick_scene(state: State) -> str:
     explicit_scene = state.get("scene")
     if explicit_scene and explicit_scene in SCENE_INSTRUCTIONS:
         return explicit_scene
+    # "Which therapist is right for me?" — never match; refer to the form.
+    # Mirrors planner.py step 12-pre (same channel guard, same precedence
+    # over the roster scene below).
+    if state.get("_wants_therapist_match"):
+        _bs = state.get("booking_status", "none")
+        _mid_booking = _bs in ("collecting", "ready_for_slots", "slot_selected", "pending_confirm")
+        if state.get("channel") == "chat" or not _mid_booking:
+            return "matching_referral"
+    # "Which therapists do you have?" — answer from the roster directly
+    # (planner routed here without a KB search). Same channel guard as
+    # planner.py step 12a so the two never disagree: answer anytime on
+    # chat; on voice defer to an active booking.
+    if state.get("_asks_therapist_roster"):
+        _bs = state.get("booking_status", "none")
+        _mid_booking = _bs in ("collecting", "ready_for_slots", "slot_selected", "pending_confirm")
+        if state.get("channel") == "chat" or not _mid_booking:
+            return "list_therapists"
+    # ---- Post-booking follow-up (intake complete) ----------------------
+    # Once the appointment is booked the intake flow is over. The intent
+    # often stays sticky as "booking", so a casual "thanks" or a fresh
+    # question would otherwise fall into the booking-field block below and
+    # re-render the confirmation read-back (chat session 2026-05-24). Bail
+    # to a natural follow-up: genuine questions still flow through the FAQ
+    # KB (search_kb populates kb_snippets, surfaced via info_answer);
+    # cancels fall through to the cancel-confirm path further down.
+    if state.get("booking_status") == "booked" and state.get("intent") != "cancel":
+        if state.get("intent") == "info" and state.get("kb_snippets"):
+            return "info_answer"
+        return "post_booking_followup"
     if state.get("_resume_offer_pending"):
         return "resume_offer"
     if state.get("_reuse_insurance_pending"):
@@ -101,6 +130,13 @@ def _pick_scene(state: State) -> str:
         return "post_cancel"
     if la == "submit_callback":
         return "post_callback"
+    if la in ("lookup_appointment_verify_failed", "lookup_appointment_not_found"):
+        return "cancel_not_found"
+    if la == "lookup_appointment_past":
+        return "cancel_past_appointment"
+    if la == "lookup_appointment_found":
+        # Appointment found — fall through to the confirm_cancel path below.
+        pass
     if la == "verify_insurance":
         # Insurance-only flow stops here; booking flow continues.
         if intent == "insurance_check":
@@ -124,10 +160,20 @@ def _pick_scene(state: State) -> str:
         ):
             return "post_verify_continue_booking"
         # Booking flow continues — fall through to next missing field.
-    if la == "search_kb":
+    # Render the KB answer only on the turn the caller actually asked
+    # something. A bare `last_action == "search_kb"` lingers across turns
+    # and would otherwise pin every later field-answer turn to info_answer,
+    # abandoning an in-progress booking (chat session 2026-05-24).
+    if la == "search_kb" and state.get("_info_this_turn"):
         return "info_answer"
     if la == "propose_slots" and not state.get("selected_slot"):
         return "present_slots"
+    # propose_slots swept the calendar and found nothing. Answer the
+    # no-availability situation directly (offer a callback / the office
+    # line) instead of falling through to the booking-field blocks, which
+    # would otherwise reply to "any openings?" by asking for insurance.
+    if la == "propose_slots_no_availability":
+        return "no_availability"
     if la == "rollback":
         # If booking is still booked, just acknowledge.
         if bs == "booked":
@@ -236,11 +282,35 @@ def _context_for_scene(scene: str, state: State) -> str:
         from ...data.roster import ELIGIBLE_FOR_BOOKING
         roster = ", ".join(t["name"] for t in ELIGIBLE_FOR_BOOKING)
         bits.append(f"available_therapists: {roster}")
+    elif scene == "list_therapists":
+        from ...data.roster import ELIGIBLE_FOR_BOOKING
+        from ...graph.prompts._constants import THERAPIST_MATCH_FORM_URL
+        roster = ", ".join(t["name"] for t in ELIGIBLE_FOR_BOOKING)
+        bits.append(f"available_therapists: {roster}")
+        bits.append(f"matching_form_url: {THERAPIST_MATCH_FORM_URL}")
+        bs = state.get("booking_status") or "none"
+        if bs in ("collecting", "ready_for_slots", "slot_selected", "pending_confirm"):
+            bits.append("booking_status: in_progress")
+    elif scene == "matching_referral":
+        from ...graph.prompts._constants import THERAPIST_MATCH_FORM_URL
+        bits.append(f"matching_form_url: {THERAPIST_MATCH_FORM_URL}")
     elif scene == "present_slots":
         slots = state.get("proposed_slots") or []
         bits.append("slots:")
         for i, s in enumerate(slots, 1):
-            bits.append(f"  {i}. {s.get('displayPT')}")
+            staff_name = s.get("staffName", "")
+            display = s.get("displayPT", "")
+            if staff_name:
+                bits.append(f"  {i}. {display} with {staff_name} (staffId {s.get('staffId', '?')})")
+            else:
+                bits.append(f"  {i}. {display}")
+    elif scene == "no_availability":
+        # If the caller asked about ONE specific therapist, name them so the
+        # reply can offer to check others. In "Any therapist" mode (staff_any)
+        # the fan-out already swept the whole roster — speak generally so we
+        # never wrongly blame a single clinician the caller didn't choose.
+        if state.get("staff_name") and not state.get("staff_any"):
+            bits.append(f"availability_for: {state.get('staff_name')}")
     elif scene == "confirm_booking":
         slot = state.get("selected_slot") or {}
         bits.append(
@@ -277,9 +347,27 @@ def _context_for_scene(scene: str, state: State) -> str:
         bits.append(f"next_field_label: {next_field_label}")
         bits.append(f"staff_picked: {bool(state.get('staff_id'))}")
         bits.append(f"slot_picked: {bool(state.get('selected_slot'))}")
-    elif scene == "confirm_cancel":
-        slot = state.get("selected_slot") or {}
-        bits.append(f"appointment_slot: {slot.get('displayPT')}")
+    elif scene in ("confirm_cancel", "cancel_past_appointment"):
+        # Prefer the lookup-sourced ISO time (_appt_time_iso) over the
+        # in-session selected_slot displayPT (for cancel of a prior-session
+        # appointment that has no selected_slot in state).
+        # cancel_past_appointment reuses appt_time_friendly to name the
+        # already-passed date plainly.
+        appt_time_friendly = ""
+        appt_time_iso = state.get("_appt_time_iso") or ""
+        if appt_time_iso:
+            try:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                dt = datetime.fromisoformat(appt_time_iso.replace("Z", "+00:00"))
+                dt_pt = dt.astimezone(ZoneInfo("America/Los_Angeles"))
+                appt_time_friendly = dt_pt.strftime("%A, %B %-d at %-I:%M %p PT")
+            except Exception:
+                appt_time_friendly = appt_time_iso
+        else:
+            slot = state.get("selected_slot") or {}
+            appt_time_friendly = slot.get("displayPT", "")
+        bits.append(f"appt_time_friendly: {appt_time_friendly}")
         bits.append(f"therapist: {state.get('staff_name')}")
     elif scene == "post_verify_offer_booking":
         vr = state.get("verify_result") or {}
@@ -338,6 +426,20 @@ def _context_for_scene(scene: str, state: State) -> str:
         bits.append("kb_snippets:")
         for s in snippets[:5]:
             bits.append(f"  - {s.get('title')}: {str(s.get('content', ''))[:300]}")
+        # Non-PHI hint so the scene can offer to resume an in-progress booking
+        # after answering (chat answers info questions mid-booking).
+        bs = state.get("booking_status") or "none"
+        if bs in ("collecting", "ready_for_slots", "slot_selected", "pending_confirm"):
+            bits.append("booking_status: in_progress")
+    elif scene == "post_booking_followup":
+        slot = state.get("selected_slot") or {}
+        bits.append(f"booked_slot: {slot.get('displayPT')}")
+        bits.append(f"booked_therapist: {state.get('staff_name')}")
+        snippets = state.get("kb_snippets") or []
+        if snippets:
+            bits.append("kb_snippets:")
+            for s in snippets[:5]:
+                bits.append(f"  - {s.get('title')}: {str(s.get('content', ''))[:300]}")
     return "\n".join(bits)
 
 

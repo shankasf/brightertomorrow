@@ -7,8 +7,8 @@ feature flag is flipped.
 Env vars consumed:
   * OPENAI_API_KEY                — required for LLM calls.
   * OPENAI_MODEL                  — text model for extract + respond
-                                    (default ``gpt-4o-mini`` for cost,
-                                    falls back to the existing chat pin).
+                                    (default ``gpt-5.5-2026-04-23``,
+                                    the current chat pin).
   * OPENAI_EXTRACT_MODEL          — override JUST the extract model (small
                                     fast model; defaults to OPENAI_MODEL).
   * OPENAI_RESPOND_MODEL          — override JUST the respond model;
@@ -36,7 +36,7 @@ from dataclasses import dataclass
 # Model selection
 # ---------------------------------------------------------------------------
 
-DEFAULT_TEXT_MODEL = "gpt-4o-mini"
+DEFAULT_TEXT_MODEL = "gpt-5.5-2026-04-23"
 DEFAULT_REALTIME_MODEL = "gpt-realtime-2"
 DEFAULT_REALTIME_VOICE = "marin"
 DEFAULT_REALTIME_BASE_URL = "wss://us.api.openai.com/v1/realtime"
