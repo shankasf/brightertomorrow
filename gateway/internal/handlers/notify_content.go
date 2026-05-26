@@ -223,6 +223,41 @@ func buildCancelledContent(greeting string) (subject, heading string, paragraphs
 	return
 }
 
+// buildRescheduleRequestedDetailContent returns content for a chat/voice
+// reschedule. Per product policy the patient is told this is a REQUEST pending
+// care-team confirmation — NOT yet confirmed — even though the backend has
+// applied the move. Names the requested new time + therapist so the patient
+// knows what they asked for. (Distinct from buildRescheduleRequestedContent,
+// the admin-side, no-specific-time variant.)
+//
+//   - greeting:      "Hi FirstName" or "Hi there"
+//   - therapistName: from calendar roster or "your therapist"
+//   - apptFormatted: result of formatApptTime, or "" for generic fallback
+func buildRescheduleRequestedDetailContent(greeting, therapistName, apptFormatted string) (subject, heading string, paragraphs []string, details [][2]string) {
+	subject = "We've received your reschedule request — Brighter Tomorrow Therapy"
+	heading = "We've received your reschedule request"
+
+	if apptFormatted != "" {
+		paragraphs = []string{
+			fmt.Sprintf("%s, we've received your request to reschedule your appointment. Here's the new time you requested:", greeting),
+			"A member of our care team will confirm this shortly. If anything's urgent, just call us using the button below.",
+		}
+		details = [][2]string{
+			{"Therapist", therapistName},
+			{"Requested time", apptFormatted},
+		}
+	} else {
+		paragraphs = []string{
+			fmt.Sprintf("%s, we've received your request to reschedule your appointment with %s. A member of our care team will confirm the new time shortly.", greeting, therapistName),
+			"If anything's urgent, just call us using the button below.",
+		}
+		details = [][2]string{
+			{"Therapist", therapistName},
+		}
+	}
+	return
+}
+
 // buildRescheduleRequestedContent returns content for a reschedule-request
 // acknowledgement email.
 func buildRescheduleRequestedContent(greeting string) (subject, heading string, paragraphs []string, details [][2]string) {

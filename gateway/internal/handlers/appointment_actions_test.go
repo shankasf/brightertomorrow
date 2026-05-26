@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/calendar"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 )
 
@@ -360,6 +361,10 @@ func TestCancelAppointment_Success(t *testing.T) {
 	if resp["ok"] != true {
 		t.Errorf("ok = %v, want true", resp["ok"])
 	}
+	// Notify disabled (no store) → must NOT claim a cancellation email was sent.
+	if resp["emailQueued"] != false {
+		t.Errorf("emailQueued = %v, want false when notifications are disabled", resp["emailQueued"])
+	}
 }
 
 func TestCancelAppointment_NotFound(t *testing.T) {
@@ -394,6 +399,257 @@ func TestCancelAppointment_MissingFields(t *testing.T) {
 			w := doCancelPost(t, h, tc.body)
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("status = %d, want 400", w.Code)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fake InternalCalendarStore for reschedule tests.
+// Only IsSlotFree and NearestAlternatives are exercised; the rest panic.
+// ---------------------------------------------------------------------------
+
+type fakeCalStore struct {
+	slotFree  bool
+	slotErr   error
+	alts      []calendar.Slot
+	altsErr   error
+}
+
+func (f *fakeCalStore) FreeSlots(_ context.Context, _ int, _, _ string, _ int) ([]calendar.Slot, error) {
+	panic("fakeCalStore.FreeSlots not implemented")
+}
+func (f *fakeCalStore) IsSlotFree(_ context.Context, _ int, _, _ string) (bool, error) {
+	return f.slotFree, f.slotErr
+}
+func (f *fakeCalStore) NearestAlternatives(_ context.Context, _ int, _, _ string) ([]calendar.Slot, error) {
+	return f.alts, f.altsErr
+}
+func (f *fakeCalStore) PutHold(_ context.Context, _ calendar.SoftHold) error {
+	panic("fakeCalStore.PutHold not implemented")
+}
+func (f *fakeCalStore) GetHold(_ context.Context, _ int, _ string) (*calendar.SoftHold, error) {
+	panic("fakeCalStore.GetHold not implemented")
+}
+func (f *fakeCalStore) DeleteHold(_ context.Context, _ int, _ string) error {
+	panic("fakeCalStore.DeleteHold not implemented")
+}
+
+// newRescheduleHandler builds a handler with both a fake DDB (PHI store) and a
+// fake calendar store. staffID 71 ("Sagar Shankaran") is in the real Roster.
+func newRescheduleHandler(ddb phi.DDBClient, cal *fakeCalStore) *InternalCalendarHandler {
+	store, err := phi.New(phi.Config{
+		DDB:       ddb,
+		TableName: "bt-main-test",
+		Timeout:   3 * time.Second,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return &InternalCalendarHandler{
+		PHI:            store,
+		Cal:            cal,
+		InternalSecret: "", // disabled in tests
+	}
+}
+
+func doReschedulePost(t *testing.T, h *InternalCalendarHandler, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/internal/calendar/reschedule", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.RescheduleAppointment(w, req)
+	return w
+}
+
+// validRescheduleBody is a helper that returns a well-formed reschedule body
+// using staff ID 71 (Sagar Shankaran — always in the roster) and a future slot.
+func validRescheduleBody() string {
+	start := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Hour).Format(time.RFC3339)
+	end := time.Now().UTC().Add(49 * time.Hour).Truncate(time.Hour).Format(time.RFC3339)
+	return `{"appointmentId":"appt-001","emailHash":"ehash001","staffId":71,"startISO":"` + start + `","endISO":"` + end + `"}`
+}
+
+// ---------------------------------------------------------------------------
+// RescheduleAppointment tests
+// ---------------------------------------------------------------------------
+
+// TestRescheduleAppointment_Success: slot free, DDB update succeeds → ok:true.
+func TestRescheduleAppointment_Success(t *testing.T) {
+	cal := &fakeCalStore{slotFree: true}
+	h := newRescheduleHandler(&fakeDDB{}, cal)
+	w := doReschedulePost(t, h, validRescheduleBody())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["ok"] != true {
+		t.Errorf("ok = %v, want true", resp["ok"])
+	}
+	if resp["appointmentId"] != "appt-001" {
+		t.Errorf("appointmentId = %v, want appt-001", resp["appointmentId"])
+	}
+	if _, ok := resp["appointmentTimeISO"]; !ok {
+		t.Errorf("appointmentTimeISO missing in success response")
+	}
+	// Notify is disabled in this handler (no store), so we must NOT claim an
+	// email was sent — the AI agent keys its "email on its way" line off this.
+	if resp["emailQueued"] != false {
+		t.Errorf("emailQueued = %v, want false when notifications are disabled", resp["emailQueued"])
+	}
+}
+
+// TestBuildRescheduleRequestedDetailContent: the reschedule email is framed as
+// a REQUEST (not confirmed), names the requested new time + therapist, and
+// never leaks forbidden PHI (DOB, insurance, reason).
+func TestBuildRescheduleRequestedDetailContent(t *testing.T) {
+	subj, heading, paragraphs, details := buildRescheduleRequestedDetailContent(
+		"Hi Sagar", "Alayna Hammond", "Monday, June 1, 2026 at 3:00 PM Pacific")
+
+	// Must read as a received request, NOT a confirmed reschedule.
+	if !strings.Contains(strings.ToLower(subj), "received") || !strings.Contains(strings.ToLower(heading), "received") {
+		t.Errorf("subject/heading should frame as received request: %q / %q", subj, heading)
+	}
+	if strings.Contains(strings.ToLower(heading), "has been rescheduled") {
+		t.Errorf("heading must not claim the reschedule is done: %q", heading)
+	}
+	// Requested time + therapist must appear in the details box.
+	var hasWhen, hasTherapist bool
+	for _, d := range details {
+		if d[0] == "Requested time" && d[1] == "Monday, June 1, 2026 at 3:00 PM Pacific" {
+			hasWhen = true
+		}
+		if d[0] == "Therapist" && d[1] == "Alayna Hammond" {
+			hasTherapist = true
+		}
+	}
+	if !hasWhen || !hasTherapist {
+		t.Errorf("details missing Requested time/Therapist: %+v", details)
+	}
+	// HIPAA minimum-necessary: no DOB/insurance/reason anywhere in the body.
+	blob := subj + heading + strings.Join(paragraphs, " ")
+	for _, d := range details {
+		blob += d[0] + d[1]
+	}
+	for _, forbidden := range []string{"insurance", "member id", "memberid", "dob", "diagnosis", "breakup"} {
+		if strings.Contains(strings.ToLower(blob), strings.ToLower(forbidden)) {
+			t.Errorf("reschedule email leaks forbidden field %q: %s", forbidden, blob)
+		}
+	}
+}
+
+// TestRescheduleAppointment_NotFound: DDB ConditionalCheckFailedException →
+// 200 {"ok":false,"error":"not_found"}.
+func TestRescheduleAppointment_NotFound(t *testing.T) {
+	cal := &fakeCalStore{slotFree: true}
+	h := newRescheduleHandler(&fakeDDB{updateItemCondFail: true}, cal)
+	w := doReschedulePost(t, h, validRescheduleBody())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	if resp["ok"] != false {
+		t.Errorf("ok = %v, want false", resp["ok"])
+	}
+	if resp["error"] != "not_found" {
+		t.Errorf("error = %v, want not_found", resp["error"])
+	}
+}
+
+// TestRescheduleAppointment_SlotTaken: slot not free → 409 with alternatives array.
+func TestRescheduleAppointment_SlotTaken(t *testing.T) {
+	alts := []calendar.Slot{
+		{StartISO: "2026-06-01T10:00:00Z", EndISO: "2026-06-01T11:00:00Z"},
+	}
+	cal := &fakeCalStore{slotFree: false, alts: alts}
+	h := newRescheduleHandler(&fakeDDB{}, cal)
+	w := doReschedulePost(t, h, validRescheduleBody())
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", w.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["error"] != "slot_taken" {
+		t.Errorf("error = %v, want slot_taken", resp["error"])
+	}
+	rawAlts, ok := resp["alternatives"]
+	if !ok {
+		t.Fatalf("alternatives field missing")
+	}
+	// Must be a JSON array, not null.
+	altSlice, ok := rawAlts.([]any)
+	if !ok {
+		t.Fatalf("alternatives is not an array: %T", rawAlts)
+	}
+	if len(altSlice) != 1 {
+		t.Errorf("alternatives len = %d, want 1", len(altSlice))
+	}
+}
+
+// TestRescheduleAppointment_SlotTakenNoAlts: alternatives is nil from store →
+// must return [] (not null) in JSON.
+func TestRescheduleAppointment_SlotTakenNoAlts(t *testing.T) {
+	cal := &fakeCalStore{slotFree: false, alts: nil}
+	h := newRescheduleHandler(&fakeDDB{}, cal)
+	w := doReschedulePost(t, h, validRescheduleBody())
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", w.Code)
+	}
+	// Verify alternatives is [] not null.
+	if !strings.Contains(w.Body.String(), `"alternatives":[]`) {
+		t.Errorf("expected alternatives:[] in body, got: %s", w.Body.String())
+	}
+}
+
+// TestRescheduleAppointment_ValidationErrors: various bad inputs → 400.
+func TestRescheduleAppointment_ValidationErrors(t *testing.T) {
+	cal := &fakeCalStore{slotFree: true}
+	h := newRescheduleHandler(&fakeDDB{}, cal)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			"missing appointmentId",
+			`{"emailHash":"ehash001","staffId":71,"startISO":"2026-06-01T10:00:00Z","endISO":"2026-06-01T11:00:00Z"}`,
+		},
+		{
+			"staffId zero",
+			`{"appointmentId":"appt-001","emailHash":"ehash001","staffId":0,"startISO":"2026-06-01T10:00:00Z","endISO":"2026-06-01T11:00:00Z"}`,
+		},
+		{
+			"staffId negative",
+			`{"appointmentId":"appt-001","emailHash":"ehash001","staffId":-1,"startISO":"2026-06-01T10:00:00Z","endISO":"2026-06-01T11:00:00Z"}`,
+		},
+		{
+			"staffId not in roster",
+			`{"appointmentId":"appt-001","emailHash":"ehash001","staffId":9999,"startISO":"2026-06-01T10:00:00Z","endISO":"2026-06-01T11:00:00Z"}`,
+		},
+		{
+			"missing startISO",
+			`{"appointmentId":"appt-001","emailHash":"ehash001","staffId":71,"endISO":"2026-06-01T11:00:00Z"}`,
+		},
+		{
+			"bad JSON",
+			`not json`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := doReschedulePost(t, h, tc.body)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400 for case %q", w.Code, tc.name)
 			}
 		})
 	}

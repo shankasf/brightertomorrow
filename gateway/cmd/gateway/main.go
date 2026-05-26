@@ -297,6 +297,7 @@ func main() {
 		r.Post("/calendar/confirm", internalCalendarH.Confirm)
 		r.With(httprate.LimitByIP(300, time.Minute)).Post("/calendar/lookup_appointment", internalCalendarH.LookupAppointment)
 		r.With(httprate.LimitByIP(300, time.Minute)).Post("/calendar/cancel", internalCalendarH.CancelAppointment)
+		r.With(httprate.LimitByIP(300, time.Minute)).Post("/calendar/reschedule", internalCalendarH.RescheduleAppointment)
 
 		// Clinical-intake gate endpoints — called by LangGraph gate nodes.
 		// Rate-limited to 5 req/s burst (300/min per source) — gates fire at most
