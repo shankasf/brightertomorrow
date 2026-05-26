@@ -181,9 +181,30 @@ def _pick_scene(state: State) -> str:
         if cs == "none":
             return "open_question"
 
-    # Cancel intent on a booked appointment: ask confirmation.
+    # Cancel intent on a booked appointment (in-session booking OR a
+    # prior-session appointment the lookup just flipped to "booked"): read
+    # back the details and ask confirmation.
     if intent == "cancel" and bs == "booked":
         return "confirm_cancel"
+
+    # Cancel / reschedule intent but no appointment located yet — ask for the
+    # phone + DOB so we can look up the prior-session appointment. Mirrors
+    # planner.py step 10 (ask_cancel_identifiers): the planner routes us here
+    # whenever it still lacks phone+DOB. Without this branch _pick_scene fell
+    # through to open_question and the LLM freelanced ("what's the date and
+    # time?", "what details do you remember?") instead of asking for the
+    # lookup keys it needs to surface the appointment details. The post-lookup
+    # outcomes (found / not_found / past) are already handled above via
+    # last_action, so reaching here means we genuinely need the identifiers.
+    # Guard on `not appointment_id`: once an appointment is located (e.g. a
+    # reschedule that's now picking a new slot) we must NOT fall back to asking
+    # for identifiers again.
+    if (
+        intent == "cancel"
+        and bs not in ("booked", "cancel_pending_confirm", "cancelled")
+        and not state.get("appointment_id")
+    ):
+        return "ask_cancel_identifiers"
 
     # Info path: respond after kb search or before.
     if intent == "info":
@@ -347,7 +368,7 @@ def _context_for_scene(scene: str, state: State) -> str:
         bits.append(f"next_field_label: {next_field_label}")
         bits.append(f"staff_picked: {bool(state.get('staff_id'))}")
         bits.append(f"slot_picked: {bool(state.get('selected_slot'))}")
-    elif scene in ("confirm_cancel", "cancel_past_appointment"):
+    elif scene in ("confirm_cancel", "cancel_past_appointment", "post_reschedule"):
         # Prefer the lookup-sourced ISO time (_appt_time_iso) over the
         # in-session selected_slot displayPT (for cancel of a prior-session
         # appointment that has no selected_slot in state).
@@ -369,6 +390,22 @@ def _context_for_scene(scene: str, state: State) -> str:
             appt_time_friendly = slot.get("displayPT", "")
         bits.append(f"appt_time_friendly: {appt_time_friendly}")
         bits.append(f"therapist: {state.get('staff_name')}")
+        # Reason-for-visit (post-DOB-verify, safe to read back) + whether the
+        # caller is rescheduling vs. cancelling outright — drives the wording.
+        bits.append(f"reason_for_visit: {state.get('_appt_service') or ''}")
+        bits.append(f"is_reschedule: {bool(state.get('_wants_reschedule'))}")
+        # email_sent drives whether post_reschedule may claim a confirmation
+        # email is on its way — only True when the gateway actually enqueued it.
+        bits.append(f"email_sent: {bool(state.get('_reschedule_email_sent'))}")
+    elif scene == "post_cancel":
+        # _was_reschedule is set on the cancel-success turn when the caller was
+        # rescheduling — post_cancel then pivots to finding a new time with the
+        # same therapist instead of a flat goodbye.
+        bits.append(f"is_reschedule: {bool(state.get('_was_reschedule'))}")
+        bits.append(f"therapist: {state.get('staff_name') or ''}")
+        # email_sent drives whether post_cancel may claim a cancellation email
+        # is on its way — only True when the gateway actually enqueued it.
+        bits.append(f"email_sent: {bool(state.get('_cancel_email_sent'))}")
     elif scene == "post_verify_offer_booking":
         vr = state.get("verify_result") or {}
         bits.append(f"display_text: {vr.get('display_text')}")

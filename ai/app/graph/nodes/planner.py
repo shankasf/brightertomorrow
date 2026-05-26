@@ -82,6 +82,9 @@ class N:
     # Cancel lookup — finds a prior-session appointment by phone+DOB
     LOOKUP_APPOINTMENT = "lookup_appointment"
 
+    # Reschedule move — updates a located appointment's time in place
+    RESCHEDULE_APPOINTMENT = "reschedule_appointment"
+
 
 def _route(state: State, target: str, reason: str) -> str:
     """Log the routing decision and return the target node name."""
@@ -300,7 +303,12 @@ def planner(state: State) -> str:
     if bs == "pending_confirm" and aff == "no":
         return _route(state, N.ROLLBACK, "confirm_book_no")
     if bs == "cancel_pending_confirm" and aff == "yes":
-        return _route(state, N.CANCEL, "confirm_cancel_yes")
+        # Plain cancel: commit it. Reschedule: do NOT cancel — fall through to
+        # the reschedule slot-picking loop (step 10), which proposes new times
+        # and moves the appointment in place once the caller picks one. The
+        # located appointment stays intact until the move succeeds.
+        if not state.get("_wants_reschedule"):
+            return _route(state, N.CANCEL, "confirm_cancel_yes")
     if bs == "cancel_pending_confirm" and aff == "no":
         return _route(state, N.ROLLBACK, "confirm_cancel_no")
     if cs == "pending_confirm" and aff == "yes":
@@ -347,12 +355,44 @@ def planner(state: State) -> str:
     if la == "lookup_appointment_past":
         return _route(state, N.RESPOND, "cancel_past_appointment")
 
+    # Reschedule MOVE — the caller is rescheduling, we've located the
+    # appointment, and they've now picked a new slot. Move it in place (no
+    # re-intake) via the gateway. Must precede every branch that could
+    # re-look-up or treat this as a fresh cancel.
+    if (
+        state.get("_wants_reschedule")
+        and state.get("appointment_id")
+        and state.get("selected_slot")
+    ):
+        return _route(state, N.RESCHEDULE_APPOINTMENT, "reschedule_move")
+
+    # Reschedule slot-picking loop — located appointment, rescheduling, no slot
+    # chosen yet. Keep proposing / re-presenting openings with the SAME
+    # therapist; never fall through to insurance/intake collection (the patient
+    # is already on file). Bail to a callback if the calendar has no openings.
+    if (
+        state.get("_wants_reschedule")
+        and state.get("appointment_id")
+        and not state.get("selected_slot")
+    ):
+        if la == "propose_slots_no_availability":
+            return _route(state, N.HANDOFF_ADMIN_CALLBACK, "reschedule_no_availability")
+        if not state.get("proposed_slots"):
+            return _route(state, N.PROPOSE, "reschedule_need_slots")
+        return _route(state, N.RESPOND, "present_slots")
+
     if intent == "cancel" and bs == "booked":
         return _route(state, N.RESPOND, "ask_cancel_confirm")
 
     # Cancel intent but no active booking in this session — try to look up
-    # a prior appointment by phone + DOB if we have them.
-    if intent == "cancel" and bs not in ("booked", "cancel_pending_confirm", "cancelled"):
+    # a prior appointment by phone + DOB if we have them. Guarded by
+    # `not appointment_id` so a reschedule-in-progress (appointment already
+    # located, picking a new slot) never triggers a re-lookup here.
+    if (
+        intent == "cancel"
+        and bs not in ("booked", "cancel_pending_confirm", "cancelled")
+        and not state.get("appointment_id")
+    ):
         bk = state.get("booking_fields") or {}
         cb = state.get("callback_fields") or {}
         phone = (bk.get("phone") or cb.get("phone") or "").strip()

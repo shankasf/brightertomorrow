@@ -49,6 +49,20 @@ def propose_slots(state: State) -> dict[str, Any]:
     earliest_pt = now_pt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=earliest)
     earliest_dt = earliest_pt.astimezone(timezone.utc)
 
+    # Reschedule: never re-offer the slot the caller is already booked into.
+    # _appt_time_iso is the located appointment's UTC ISO time (set by
+    # lookup_appointment); it's empty for a fresh booking, so this is a no-op
+    # outside the reschedule flow. The calendar's free-slots feed can return a
+    # patient's own current time as "free", which made the picker propose the
+    # exact same date/time as one of the options.
+    appt_iso = (state.get("_appt_time_iso") or "").strip()
+    appt_instant = None
+    if appt_iso:
+        try:
+            appt_instant = datetime.fromisoformat(appt_iso.replace("Z", "+00:00"))
+        except ValueError:
+            appt_instant = None
+
     def _pick_for(sid: int | None) -> list[dict]:
         """Fetch and time-filter slots; sid=0/None means any-therapist."""
         raw = _fetch_free_slots(sid if sid else None, days_ahead=max(14, earliest + 7))
@@ -57,6 +71,8 @@ def propose_slots(state: State) -> dict[str, Any]:
             start = datetime.fromisoformat(s["startISO"].replace("Z", "+00:00"))
             if start < earliest_dt:
                 continue
+            if appt_instant is not None and start == appt_instant:
+                continue  # skip the caller's current appointment slot
             if h0 <= start.astimezone(PT).hour < h1:
                 out.append(s)
             if len(out) >= 3:
@@ -204,7 +220,11 @@ def cancel_appointment(state: State) -> dict[str, Any]:
         return {"last_action": "cancel_appointment_blocked_no_appt"}
     email_hash = state.get("_appt_email_hash") or ""
     try:
-        from ...integrations.aws_signer import gateway_post
+        # gateway_post is imported at module top (....integrations.aws_signer).
+        # A previous in-function `from ...integrations...` used the wrong depth
+        # (app.graph.integrations) and raised ModuleNotFoundError on EVERY
+        # cancel, so the call silently failed and the caller was told to phone
+        # the practice. Use the module-level import.
         resp = gateway_post(
             "/internal/calendar/cancel",
             {"appointmentId": appointment_id, "emailHash": email_hash},
@@ -215,10 +235,21 @@ def cancel_appointment(state: State) -> dict[str, Any]:
         ok = False
         resp = {"error": str(exc)}
     if ok:
+        # If this cancel was the first half of a reschedule, hand a one-turn
+        # flag to post_cancel so it offers a new time instead of a flat
+        # goodbye, then clear the sticky reschedule flag so it can't leak into
+        # an unrelated future cancel.
+        was_reschedule = bool(state.get("_wants_reschedule"))
         return {
             "booking_status": "cancelled",
             "appointment_id": None,
             "last_action": "cancel_appointment_success",
+            "_was_reschedule": was_reschedule,
+            "_wants_reschedule": False,
+            # Only set when the gateway actually enqueued the email, so
+            # post_cancel can truthfully tell the caller a confirmation is on
+            # its way.
+            "_cancel_email_sent": bool(resp.get("emailQueued")),
         }
     return {
         "last_action": "cancel_appointment_error",
@@ -288,6 +319,7 @@ def lookup_appointment(state: State) -> dict[str, Any]:
             "appointment_id": resp.get("appointment_id"),
             "_appt_email_hash": resp.get("email_hash", ""),
             "_appt_time_iso": resp.get("appointment_time_iso", ""),
+            "_appt_service": resp.get("service", ""),
             "staff_id": staff_id,
             "staff_name": staff_name,
             "booking_status": "booked",
@@ -306,6 +338,104 @@ def lookup_appointment(state: State) -> dict[str, Any]:
         }
 
     return {"last_action": "lookup_appointment_not_found"}
+
+
+# ---------------------------------------------------------------------------
+# reschedule_appointment — MOVE a located appointment to a newly-picked slot
+# ---------------------------------------------------------------------------
+
+@traced(run_type="tool", name="reschedule_appointment")
+def reschedule_appointment(state: State) -> dict[str, Any]:
+    """Move a located appointment to the caller's newly-picked slot.
+
+    Reschedule keeps the SAME patient record — no re-intake. The gateway
+    /internal/calendar/reschedule endpoint updates the appointment time in
+    place by appointmentId + emailHash (both from the verified lookup); the
+    new slot + therapist come from the caller's selection (selected_slot).
+
+    Outcomes:
+      - ok: booking_status="booked", _appt_time_iso=new time,
+        last_action="reschedule_appointment_success" (-> post_reschedule).
+      - 409 slot_taken: proposed_slots=alternatives, selected_slot cleared,
+        last_action="reschedule_slot_taken" (-> present the alternatives).
+      - not_found / failure: last_action="reschedule_appointment_error".
+
+    HIPAA: logs only session_id + ok/reason. Never phone, DOB, or the slot.
+    """
+    appointment_id = state.get("appointment_id")
+    email_hash = state.get("_appt_email_hash") or ""
+    slot = state.get("selected_slot") or {}
+    staff_id = state.get("staff_id") or slot.get("staffId")
+    if not appointment_id or not slot or not staff_id:
+        return {"last_action": "reschedule_appointment_blocked", "scene": "booking_failed_retry"}
+
+    body = {
+        "appointmentId": appointment_id,
+        "emailHash": email_hash,
+        "staffId": staff_id,
+        "startISO": slot.get("startISO"),
+        "endISO": slot.get("endISO"),
+    }
+    try:
+        resp = gateway_post("/internal/calendar/reschedule", body)
+    except Exception as exc:
+        import httpx as _httpx
+        if isinstance(exc, _httpx.HTTPStatusError) and exc.response.status_code == 409:
+            # The slot was taken between proposal and move — re-present the
+            # gateway's alternatives so the caller can pick another.
+            alts = exc.response.json().get("alternatives", []) or []
+            for a in alts:
+                a["displayPT"] = _format_slot_display(a["startISO"])
+            return {
+                "proposed_slots": alts,
+                "selected_slot": None,
+                "booking_status": "ready_for_slots",
+                "last_action": "reschedule_slot_taken",
+                "scene": "present_slots",
+            }
+        logger.exception("reschedule_appointment_error session=%s", state.get("session_id", "?"))
+        return {
+            "last_action": "reschedule_appointment_error",
+            "_reschedule_error": "request_failed",
+            "scene": "booking_failed_retry",
+        }
+
+    if not resp.get("ok"):
+        logger.info(
+            "action reschedule_appointment session=%s ok=false reason=%s",
+            state.get("session_id", "?"), resp.get("error"),
+        )
+        return {
+            "last_action": "reschedule_appointment_error",
+            "_reschedule_error": resp.get("error", "failed"),
+            "scene": "booking_failed_retry",
+        }
+
+    new_iso = resp.get("appointmentTimeISO") or slot.get("startISO") or ""
+    email_sent = bool(resp.get("emailQueued"))
+    logger.info(
+        "action reschedule_appointment session=%s ok=true email_sent=%s",
+        state.get("session_id", "?"), email_sent,
+    )
+    return {
+        "booking_status": "booked",
+        "appointment_id": resp.get("appointmentId") or appointment_id,
+        "_appt_time_iso": new_iso,
+        # Only set when the gateway actually enqueued the email, so respond can
+        # truthfully tell the caller a confirmation is on its way.
+        "_reschedule_email_sent": email_sent,
+        "last_action": "reschedule_appointment_success",
+        "_was_reschedule": True,
+        "_wants_reschedule": False,
+        # Intent is reset so a follow-up ("thanks") doesn't re-trigger the
+        # cancel branch (intent stayed "cancel" through the locate/move flow).
+        "intent": "idle",
+        "selected_slot": None,
+        "proposed_slots": [],
+        # Explicit scene (cleared by respond after one render) — avoids the
+        # last_action-persistence loop that the old post_cancel rebook had.
+        "scene": "post_reschedule",
+    }
 
 
 # ---------------------------------------------------------------------------

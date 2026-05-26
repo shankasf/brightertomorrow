@@ -74,6 +74,7 @@ from .nodes.actions import (
     lookup_appointment,
     offer_self_pay,
     propose_slots,
+    reschedule_appointment,
     search_kb,
     send_acknowledgement,
     send_coverage_result,
@@ -135,6 +136,7 @@ _PLANNER_TARGETS: dict[str, str] = {
     N.CREATE_PENDING_REQUEST: N.CREATE_PENDING_REQUEST,
     # Cancel lookup — prior-session appointment lookup by phone+DOB
     N.LOOKUP_APPOINTMENT: N.LOOKUP_APPOINTMENT,
+    N.RESCHEDULE_APPOINTMENT: N.RESCHEDULE_APPOINTMENT,
 }
 
 
@@ -160,6 +162,7 @@ def build_graph():
     g.add_node(N.BOOK, book_appointment)
     g.add_node(N.CANCEL, cancel_appointment)
     g.add_node(N.LOOKUP_APPOINTMENT, lookup_appointment)
+    g.add_node(N.RESCHEDULE_APPOINTMENT, reschedule_appointment)
     g.add_node(N.SUBMIT_CALLBACK, submit_callback)
     g.add_node(N.SEARCH_KB, search_kb)
     g.add_node(N.ROLLBACK, rollback)
@@ -220,6 +223,7 @@ def build_graph():
         N.PROPOSE,
         N.CANCEL,
         N.LOOKUP_APPOINTMENT,
+        N.RESCHEDULE_APPOINTMENT,
         N.SUBMIT_CALLBACK,
         N.SEARCH_KB,
         N.ROLLBACK,

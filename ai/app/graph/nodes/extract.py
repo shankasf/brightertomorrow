@@ -760,6 +760,24 @@ def extract(state: State) -> dict[str, Any]:
         getattr(result, "wants_therapist_match", False)
     )
 
+    # Reschedule signal — caller wants to MOVE an existing appointment, not
+    # just cancel it. Sticky (NOT overwritten to False every turn): set on the
+    # turn it's detected and preserved through the locate → confirm → cancel
+    # steps so post_cancel can offer a new time. cancel_appointment clears it
+    # once consumed; rollback ("keep") clears it too. Reschedule shares the
+    # cancel-locate mechanics, so force intent=cancel (mirrors the extract
+    # guidance) unless the turn is clearly off-topic.
+    if getattr(result, "wants_reschedule", False):
+        update["_wants_reschedule"] = True
+        if update.get("intent") not in ("out_of_scope",):
+            update["intent"] = "cancel"
+    # Abandoning the cancel ("no, keep it") also abandons any reschedule.
+    if update.get("intent") == "keep" or (
+        result.affirmation == "no"
+        and state.get("booking_status") == "cancel_pending_confirm"
+    ):
+        update["_wants_reschedule"] = False
+
     # Info-question-this-turn signal. Lets the planner answer a mid-flow
     # KB/FAQ question without the sticky intent having to flip to "info"
     # (which would hijack the next field answer and abandon a booking).

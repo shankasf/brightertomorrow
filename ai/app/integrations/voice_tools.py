@@ -1331,11 +1331,143 @@ def book_appointment(
     return {"ok": True, "appointment_id": appointment_id, "next_step": next_step}
 
 
+# ---------------------------------------------------------------------------
+# Cancel / reschedule — locate a prior appointment by phone + DOB, then cancel.
+# Mirrors the chat graph's lookup_appointment/cancel_appointment nodes and hits
+# the SAME gateway endpoints. Reschedule = lookup → confirm → cancel → rebook
+# (the agent reuses the booking tools for the new time).
+#
+# HIPAA: never log phone, DOB, name, or reason — only booleans + opaque IDs.
+# The gateway gates all detail disclosure behind a DOB second-factor and writes
+# its own audit row. _log_call here is invoked with NO PHI kwargs.
+# ---------------------------------------------------------------------------
+
+def _staff_name(staff_id: int | None) -> str | None:
+    """Map a therapist staffId to a display name via the roster."""
+    if not staff_id:
+        return None
+    from ..data.roster import THERAPISTS_WITH_FEEDS
+    for t in THERAPISTS_WITH_FEEDS:
+        if t["staffId"] == staff_id:
+            return t["name"]
+    return f"therapist #{staff_id}"
+
+
+def _lookup_appointment_impl(phone: str, dob: str) -> dict[str, Any]:
+    """Plain helper (so it's unit-testable; @function_tool wrappers aren't
+    directly callable). Looks up the caller's most-recent upcoming appointment
+    by phone, gated behind a DOB match. Returns friendly fields on success."""
+    # Only guard against an empty / placeholder value. Do NOT reject "fake-
+    # looking" numbers (e.g. 555-01xx) here — for a LOOKUP the phone is just a
+    # search key and the DOB is the security gate; a booking may legitimately
+    # have been made with an unusual number.
+    if _is_placeholder(phone) or not any(c.isdigit() for c in (phone or "")):
+        return {"found": False, "error": "need_phone",
+                "say": "Ask the caller for the phone number on the appointment."}
+    valid_dob = _validate_dob(dob)
+    if not valid_dob:
+        return {"found": False, "error": "invalid_dob",
+                "say": "Convert the caller's date of birth to a real date and try again."}
+
+    resp = gateway_post("/internal/calendar/lookup_appointment",
+                        {"phone": phone.strip(), "dob_yyyymmdd": valid_dob})
+
+    if resp.get("found") and resp.get("dob_match"):
+        staff_id_raw = resp.get("therapist_staff_id")
+        staff_id = int(staff_id_raw) if staff_id_raw not in (None, "") else None
+        when = ""
+        if resp.get("appointment_time_iso"):
+            try:
+                when = _format_slot_display(resp["appointment_time_iso"])
+            except Exception:
+                when = ""
+        return {
+            "found": True,
+            "appointment_id": resp.get("appointment_id", ""),
+            "email_hash": resp.get("email_hash", ""),
+            "when": when,
+            "therapist": _staff_name(staff_id) or "your therapist",
+            "reason": resp.get("service", "") or "",
+        }
+
+    reason = resp.get("reason", "")
+    if reason == "verification_failed":
+        # Phone matched but DOB did not — reveal NOTHING (no leak that an appt exists).
+        return {"found": False, "reason": "verification_failed"}
+    if reason == "past_appointment":
+        when = ""
+        if resp.get("appointment_time_iso"):
+            try:
+                when = _format_slot_display(resp["appointment_time_iso"])
+            except Exception:
+                when = ""
+        return {"found": False, "reason": "past_appointment", "when": when}
+    return {"found": False, "reason": "not_found"}
+
+
+@function_tool
+def lookup_appointment(phone: str, dob: str) -> dict[str, Any]:
+    """Look up the caller's UPCOMING appointment by phone number + date of birth.
+
+    Call this when the caller wants to CANCEL or RESCHEDULE an appointment. Pass
+    the phone number on the booking and convert their spoken date of birth to
+    YYYYMMDD first (e.g. 'August 19th 1998' -> '19980819').
+
+    Returns on a verified match:
+      {"found": true, "appointment_id": "...", "email_hash": "...",
+       "when": "Wednesday, July 15 at 3:00 PM PT", "therapist": "...",
+       "reason": "..."}
+      -> Read the when / therapist / reason back to the caller and ask them to
+         confirm before cancelling. Keep the appointment_id + email_hash to pass
+         to cancel_appointment.
+
+    Otherwise:
+      {"found": false, "reason": "verification_failed"} -> say you couldn't find
+         a matching appointment; do NOT reveal whether the phone matched.
+      {"found": false, "reason": "past_appointment", "when": "..."} -> that
+         appointment already passed; nothing to cancel — offer to book a new one.
+      {"found": false, "reason": "not_found"} -> no upcoming appointment found.
+      {"found": false, "error": "need_phone"|"invalid_dob", "say": "..."} -> ask
+         the caller for the missing/clearer value (speak the `say` hint).
+    """
+    with _log_call("lookup_appointment"):
+        return _lookup_appointment_impl(phone, dob)
+
+
+def _cancel_appointment_impl(appointment_id: str, email_hash: str) -> dict[str, Any]:
+    if not appointment_id or not email_hash:
+        return {"ok": False, "error": "missing_ids",
+                "say": "Look the appointment up first with lookup_appointment."}
+    try:
+        resp = gateway_post("/internal/calendar/cancel",
+                            {"appointmentId": appointment_id, "emailHash": email_hash})
+    except Exception:
+        logger.exception("cancel_appointment_error")
+        return {"ok": False, "error": "cancel_failed"}
+    return {"ok": bool(resp.get("ok")), "error": resp.get("error", "")}
+
+
+@function_tool
+def cancel_appointment(appointment_id: str, email_hash: str) -> dict[str, Any]:
+    """Cancel an appointment the caller just confirmed they want cancelled.
+
+    Pass the `appointment_id` and `email_hash` returned by lookup_appointment.
+    Call ONLY after the caller has heard the appointment details and said yes.
+
+    Returns {"ok": true} on success, or {"ok": false, "error": "..."} — on
+    failure tell the caller you couldn't complete it and offer 725-238-6990.
+    """
+    with _log_call("cancel_appointment"):
+        return _cancel_appointment_impl(appointment_id, email_hash)
+
+
 BOOKING_TOOLS = [
     verify_coverage,
     get_free_slots,
     propose_slots,
     book_appointment,
+    lookup_appointment,
+    cancel_appointment,
     list_payers,
     check_insurance_support,
 ]

@@ -30,6 +30,7 @@ from ...prompts import (
 )
 from ...integrations.voice_tools import (
     book_appointment,
+    cancel_appointment,
     check_insurance_support,
     end_call,
     get_business_hours_and_contact,
@@ -41,6 +42,7 @@ from ...integrations.voice_tools import (
     list_services,
     list_specialties,
     list_team_members,
+    lookup_appointment,
     propose_slots,
     request_intake_callback,
     search_faqs,
@@ -60,6 +62,8 @@ _AGENT_TOOLS = [
     check_insurance_support, list_payers, verify_coverage,
     # booking
     get_free_slots, propose_slots, book_appointment,
+    # cancel / reschedule
+    lookup_appointment, cancel_appointment,
     # callback
     request_intake_callback,
     # call control
@@ -297,6 +301,37 @@ def build_realtime_triage(caller_phone: str | None = None) -> RealtimeAgent:
             "promise a text/SMS (only email is sent). Mention copay if coverage "
             "showed one, offer 725-238-6990, then call end_call. If the "
             "caller backs out, give a brief warm farewell then end_call.\n\n"
+
+            # --- Cancel / reschedule flow ---
+            "CANCEL / RESCHEDULE — when the caller wants to cancel or move an "
+            "existing appointment:\n"
+            "STEP 1 — Collect TWO things, ONE per turn: the phone number on the "
+            "appointment, then their date of birth. If you already have the "
+            "caller's number on file (ANI), confirm it rather than asking them "
+            "to recite it. Convert the spoken DOB to YYYYMMDD.\n"
+            "STEP 2 — Call lookup_appointment(phone, dob). This is the ONLY way "
+            "to find the appointment — never guess a date or ask them to recite "
+            "the appointment time.\n"
+            "  • found:true -> read back the `when` (say 'Pacific Time'), the "
+            "`therapist`, and the `reason` in ONE short sentence, then ask a "
+            "single yes/no: to CANCEL, 'Would you like me to cancel that?'; to "
+            "RESCHEDULE, 'Would you like me to cancel that so we can find a new "
+            "time?'.\n"
+            "  • reason 'verification_failed' OR 'not_found' -> say warmly you "
+            "couldn't find a matching appointment; do NOT say whether the phone "
+            "matched. Offer to try again or take a callback.\n"
+            "  • reason 'past_appointment' -> say that appointment (`when`) has "
+            "already passed so there's nothing to cancel; offer to book a new "
+            "one.\n"
+            "  • error 'need_phone'/'invalid_dob' -> speak the `say` hint.\n"
+            "STEP 3 — Only after an explicit yes, call cancel_appointment("
+            "appointment_id, email_hash) using the values from lookup. On "
+            "ok:true: confirm it's cancelled. If RESCHEDULING, then go straight "
+            "into the BOOKING FLOW to find a new time (reuse the same therapist "
+            "from the lookup unless they want someone else) — you already know "
+            "the therapist. On ok:false: say you couldn't complete it and offer "
+            "725-238-6990. NEVER call cancel_appointment before lookup_appointment "
+            "returned found:true and the caller said yes.\n\n"
 
             "THERAPIST SELECTION is a separate question from the caller's own "
             "name — never lock a roster name onto a mumbled caller name "

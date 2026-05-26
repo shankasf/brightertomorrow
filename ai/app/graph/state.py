@@ -298,8 +298,14 @@ class State(TypedDict, total=False):
     _booking_error: str | None        # last book_appointment error code
     _callback_error: str | None       # last submit_callback error
     _cancel_error: str | None         # last cancel_appointment error
+    _reschedule_error: str | None     # last reschedule_appointment error
     _appt_email_hash: str | None       # email_hash from lookup_appointment response
     _appt_time_iso: str | None         # appointment_time_iso (RFC3339) from lookup_appointment
+    _appt_service: str | None          # service / reason-for-visit from lookup_appointment (post-DOB-verify)
+    _wants_reschedule: bool            # caller wants to RESCHEDULE (not just cancel) — sticky; shares the cancel-locate mechanics then offers a new time
+    _was_reschedule: bool              # set on the cancel-success turn when _wants_reschedule was active — lets post_cancel offer a new time instead of a flat goodbye
+    _reschedule_email_sent: bool       # gateway confirmed a reschedule-confirmation email was enqueued — post_reschedule only claims an email when True
+    _cancel_email_sent: bool           # gateway confirmed a cancellation-confirmation email was enqueued — post_cancel only claims an email when True
     verify_result_next_step: str | None  # post-booking message from Jane
     insurance_pending_admin: bool     # CLAIM.MD couldn't verify; admin team will follow up. Keeps the booking flow alive so the caller still books a slot.
 

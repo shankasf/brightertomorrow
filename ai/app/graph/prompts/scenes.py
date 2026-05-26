@@ -38,6 +38,7 @@ Scene = Literal[
     "cancel_past_appointment",
     "confirm_cancel",
     "post_cancel",
+    "post_reschedule",
     "post_verify_offer_booking",
     "post_verify_continue_booking",
     "post_verify_declined",
@@ -271,17 +272,60 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
     ),
 
     "confirm_cancel": (
-        "Confirm the caller wants to cancel their existing appointment. Read "
-        "back the appointment using `appt_time_friendly` (already formatted "
-        "as a friendly Pacific Time date/time from the context) and the "
-        "therapist name from `therapist`. End with a single yes/no question: "
-        "'Are you sure you'd like to cancel?'. The state will be flipped to "
-        "cancel_pending_confirm in this turn."
+        "We found the caller's appointment and must confirm before changing "
+        "it. First write ONE short lead-in line ('I found your appointment — "
+        "here are the details:'). Then render a clean, readable recap as a "
+        "markdown bullet list, ONE detail per line, using ONLY the context "
+        "values — never invent or guess any field. Omit a line entirely if "
+        "its value is empty:\n"
+        "  - **Date & time:** {appt_time_friendly}\n"
+        "  - **Therapist:** {therapist}\n"
+        "  - **Reason for visit:** {reason_for_visit}\n"
+        "Then ask a SINGLE yes/no question, choosing wording by "
+        "`is_reschedule`:\n"
+        "  - is_reschedule True  -> 'Would you like me to cancel this so we "
+        "can find you a new time?'\n"
+        "  - is_reschedule False -> 'Would you like me to cancel this "
+        "appointment?'\n"
+        "Keep it warm and concise. Do NOT add a phone number or extra "
+        "paragraphs. The state will be flipped to cancel_pending_confirm in "
+        "this turn."
     ),
 
     "post_cancel": (
-        "Tell the caller their appointment is cancelled. Offer to rebook if "
-        "they'd like. End with the practice number."
+        "The caller has just REQUESTED to cancel their appointment. Treat this "
+        "as a REQUEST that the care team still needs to confirm — it is NOT yet "
+        "a done deal. Branch on `is_reschedule`:\n"
+        "  - is_reschedule True  -> pivot straight to rebooking: offer to find "
+        "a new time"
+        "{with the same therapist when `therapist` is non-empty}, and end with "
+        "ONE question like 'What day or time works best for you?'\n"
+        "  - is_reschedule False -> in ONE warm sentence tell them we've "
+        "received their request to cancel and a member of our care team will "
+        "confirm it shortly; then give the practice number 725-238-6990. Do "
+        "NOT say the appointment 'is cancelled' / 'has been cancelled' as a "
+        "completed fact — it is pending confirmation.\n"
+        "ONLY if `email_sent` is True, add one short sentence telling them a "
+        "confirmation email is on its way to their inbox; if `email_sent` is "
+        "False, do NOT mention email at all.\n"
+        "Keep it to 2-3 short sentences. Do NOT invent a new appointment time."
+    ),
+
+    "post_reschedule": (
+        "The caller has just REQUESTED to reschedule to a new time. Treat this "
+        "as a REQUEST that still needs the care team to confirm — it is NOT yet "
+        "confirmed. In ONE warm sentence using ONLY the context values, tell "
+        "them we've received their request to move their appointment to "
+        "{appt_time_friendly} with {therapist} and that a member of our care "
+        "team will confirm it shortly. If `therapist` is empty, drop the "
+        "'with …' clause. For voice, include 'Pacific Time'. Do NOT say 'done', "
+        "'all set', 'confirmed', 'booked', or 'you're scheduled' — it is "
+        "pending confirmation. Then, ONLY if `email_sent` is True, add one "
+        "short sentence telling them a confirmation email is on its way to "
+        "their inbox; if `email_sent` is False, do NOT mention email at all. "
+        "Then add ONE short closing offer ('Anything else I can help with? You "
+        "can always reach us at 725-238-6990.'). Do NOT read back insurance or "
+        "other intake, and do NOT ask them to confirm anything again."
     ),
 
     "post_verify_offer_booking": (

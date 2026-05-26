@@ -302,6 +302,20 @@ class TurnExtraction(BaseModel):
         ),
     )
 
+    wants_reschedule: bool = Field(
+        default=False,
+        description=(
+            "True when the caller wants to MOVE / CHANGE / RESCHEDULE an "
+            "existing appointment to a different time — e.g. 'reschedule my "
+            "appointment', 'move my session', 'change my appointment time', "
+            "'can I push it to next week?'. Rescheduling reuses the same "
+            "locate-and-confirm path as cancelling (so ALSO set "
+            "intent_delta='cancel'), but it ends by booking a NEW time rather "
+            "than just cancelling. A plain 'cancel my appointment' with no "
+            "intent to rebook is intent_delta='cancel' with this LEFT FALSE."
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # System prompt — short and surgical
@@ -441,6 +455,14 @@ Rules:
     right fit", "who do you recommend?"). The assistant NEVER picks for
     them — it refers them to a matching form. Distinct from 8a (bare
     roster), 8b (open slots), and naming a therapist to book (staff_name).
+
+8d. `wants_reschedule`: set TRUE when the caller wants to MOVE/CHANGE an
+    existing appointment to a new time ("reschedule", "move my session",
+    "change my appointment", "push it to next week"). ALSO set
+    intent_delta="cancel" — rescheduling locates and confirms the existing
+    appointment exactly like a cancel, then books a new time. A plain
+    "cancel my appointment" with no rebooking stays intent_delta="cancel"
+    and leaves wants_reschedule FALSE.
 
 9. `safety_signal`: set TRUE for any uncaught crisis indicator, INCLUDING
    hedged or future-tense phrasings like "thinking about hurting
