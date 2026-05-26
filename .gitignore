@@ -66,3 +66,8 @@ image.png
 *.docx
 *.doc
 *.csv
+
+# Exception: public marketing freebies on /services/journal (NOT PHI),
+# versioned via Git LFS. Keep this scoped to web/public/downloads only.
+!web/public/downloads/*.pdf
+!web/public/downloads/*.docx

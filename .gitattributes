@@ -1,0 +1,2 @@
+web/public/downloads/*.pdf filter=lfs diff=lfs merge=lfs -text
+web/public/downloads/*.docx filter=lfs diff=lfs merge=lfs -text
