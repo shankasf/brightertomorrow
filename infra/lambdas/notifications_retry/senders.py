@@ -36,6 +36,12 @@ TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 TWILIO_SECRET_ARN = os.environ.get("TWILIO_SECRET_ARN", "")
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
 SES_FROM_EMAIL = os.environ.get("SES_FROM_EMAIL", "")
+# Practice/admin address BCC'd on EVERY patient email so staff retain a copy of
+# every confirmation (booking, reschedule, cancel, status changes). Internal
+# disclosure to the covered entity — permitted, minimum-necessary content only.
+# Empty disables the BCC. BCC (not CC) keeps the admin address off the patient's
+# copy.
+ADMIN_BCC_EMAIL = os.environ.get("ADMIN_BCC_EMAIL", "").strip()
 
 
 def _env_flag(name: str, default: str) -> bool:
@@ -153,10 +159,16 @@ def send_email(row: Dict[str, Any], decrypted_payload: str) -> None:
     from email_template import render_from_payload  # noqa: PLC0415
     subject, html_body, text_body = render_from_payload(body)
 
+    # BCC the practice/admin inbox so staff get a copy of every patient email.
+    # Skip if it equals the recipient (avoid a duplicate to the same address).
+    destination: Dict[str, Any] = {"ToAddresses": [to_email]}
+    if ADMIN_BCC_EMAIL and ADMIN_BCC_EMAIL.lower() != to_email.strip().lower():
+        destination["BccAddresses"] = [ADMIN_BCC_EMAIL]
+
     try:
         _ses.send_email(
             Source=SES_FROM_EMAIL,
-            Destination={"ToAddresses": [to_email]},
+            Destination=destination,
             Message={
                 "Subject": {"Data": subject, "Charset": "UTF-8"},
                 "Body": {

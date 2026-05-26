@@ -85,6 +85,10 @@ export class NotificationsRetryStack extends Stack {
         // From a verified SES domain identity (mail. subdomain isolates
         // deliverability/DMARC from the website apex). See bt.ts sesFromIdentityArn.
         SES_FROM_EMAIL: "noreply@mail.brightertomorrowtherapy.cloud",
+        // Admin/practice inbox BCC'd on EVERY patient email (booking,
+        // reschedule, cancel, status changes) so staff keep a copy. Internal
+        // disclosure to the covered entity; minimum-necessary content only.
+        ADMIN_BCC_EMAIL: "sagar@callsphere.tech",
         // SES is LIVE (domain mail.brightertomorrowtherapy.cloud verified +
         // DKIM in Hostinger DNS, account out of sandbox). Twilio/SMS stays
         // disabled until A2P 10DLC registration completes — those rows are
