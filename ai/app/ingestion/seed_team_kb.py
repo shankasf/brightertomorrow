@@ -817,32 +817,6 @@ THERAPISTS: list[dict] = [
             " understand their story, and begin building the life they want, one session at a time.",
         ],
     },
-    {
-        "slug": "yvette-howard",
-        "full_name": "Yvette Howard",
-        "credentials_suffix": "LCSW",
-        "role": "Founder & Licensed Clinical Social Worker",
-        # Note: Yvette is not currently accepting new clients; her profile describes her
-        # role as CEO/Founder supporting the Brighter Tomorrow team.
-        "bio_paragraphs": [
-            "Yvette Howard, LCSW, is the CEO and Founder of Brighter Tomorrow Therapy. As a"
-            " dedicated mental health therapist, her purpose is to guide individuals on their"
-            " journey toward self-discovery and empowerment.",
-            "Yvette is currently not accepting new clients, as her mission is dedicated to"
-            " assisting and leading the Brighter Tomorrow team. She specializes in helping clients"
-            " break through barriers, silence the inner critic, and embrace their unique path. Her"
-            " approach is rooted in compassion, empathy, and understanding.",
-        ],
-        "qualifications": [
-            "Licensed Clinical Social Worker (LCSW)",
-            "CEO & Founder, Brighter Tomorrow Counseling",
-        ],
-        "education": [],  # not provided in source JSON
-        "modalities": [],  # not provided in source JSON
-        "who_i_help": [],  # not provided in source JSON — currently not accepting new clients
-        "approach_intro": None,
-        "philosophy_paragraphs": [],
-    },
 ]
 
 
