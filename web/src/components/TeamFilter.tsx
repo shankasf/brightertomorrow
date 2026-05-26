@@ -36,8 +36,10 @@ function slugToLabel(slug: string): string {
   return OFFICE_SLUG_LABEL[slug] ?? slug;
 }
 
-// Canonical display order for the filter dropdown.
-const OFFICE_ORDER = ["E Russell", "N Durango", "Telehealth"];
+// Canonical display order for the Office filter — physical locations only.
+// Telehealth is universal across the roster, so it lives under the Modality
+// filter (and on the cards), not here where it would no longer narrow results.
+const OFFICE_ORDER = ["E Russell", "N Durango"];
 
 function uniq<T>(xs: T[]): T[] {
   return Array.from(new Set(xs));
@@ -100,14 +102,19 @@ export default function TeamFilter({
   const [filters, setFilters] = useState<Filters>(EMPTY);
 
   const options = useMemo(() => {
-    // Office options: collect all display labels present across members, sorted
-    // by canonical order then alpha for any unlisted slugs.
-    const allLabels = uniq(
-      members.flatMap((m) => (m.office_locations ?? []).map(slugToLabel)),
+    // Office options: physical locations only (telehealth excluded — it's a
+    // modality, covered by the Modality filter). Sorted by canonical order,
+    // then alpha for any unlisted slugs.
+    const physicalLabels = uniq(
+      members.flatMap((m) =>
+        (m.office_locations ?? [])
+          .filter((s) => s !== "telehealth")
+          .map(slugToLabel),
+      ),
     );
     const wheres = [
-      ...OFFICE_ORDER.filter((l) => allLabels.includes(l)),
-      ...allLabels.filter((l) => !OFFICE_ORDER.includes(l)),
+      ...OFFICE_ORDER.filter((l) => physicalLabels.includes(l)),
+      ...physicalLabels.filter((l) => !OFFICE_ORDER.includes(l)),
     ];
 
     const hasTele = members.some((m) =>
