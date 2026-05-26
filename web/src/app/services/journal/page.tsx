@@ -1,39 +1,19 @@
-"use client";
-
 import Link from "next/link";
 import Image from "next/image";
-import { motion } from "framer-motion";
 import Reveal from "@/components/Reveal";
-import { FiDownload, FiBookOpen } from "react-icons/fi";
+import { FiBookOpen } from "react-icons/fi";
+import { getWorkbooks } from "@/lib/queries";
+import WorkbookGrid from "./WorkbookGrid";
 
 const WINE = "#66202A";
 const GOLD = "#E1B878";
 const INK = "#192735";
 
-const WORKBOOKS = [
-  {
-    title: "Comfort Zone Workbook",
-    body: "Ready to Break Free from Your Comfort Zone? Download this FREE guide of evidence-based techniques.",
-    image: "/images/services/journal/comfort-zone.webp",
-  },
-  {
-    title: "Healing Wounds of People-Pleasing",
-    body: "Ready to Break Free from People-Pleasing? Download this FREE guide and reconnect with what you actually want.",
-    image: "/images/services/journal/healing-wounds.webp",
-  },
-  {
-    title: "7 Ways for Moving On After a Breakup",
-    body: "Want to Move On After a Breakup? Download this FREE guide of seven proven strategies.",
-    image: "/images/services/journal/moving-on.webp",
-  },
-  {
-    title: "Real Reflections Journal (Fillable)",
-    body: "Ditch the Negative Self-Talk and Focus on Positivity — a fillable journal with prompts to spark honest reflection.",
-    image: "/images/services/journal/real-reflections.webp",
-  },
-];
+export const metadata = { title: "Journal & Free Resources — Brighter Tomorrow Therapy" };
 
-export default function JournalPage() {
+export default async function JournalPage() {
+  const workbooks = await getWorkbooks();
+
   return (
     <article className="bg-white">
       {/* HERO */}
@@ -97,16 +77,16 @@ export default function JournalPage() {
             <Reveal delay={0.1} className="lg:col-span-5">
               <div className="relative mx-auto max-w-[460px]">
                 <div className="absolute -bottom-6 -right-6 w-full h-full" style={{ backgroundColor: WINE, borderRadius: "60px 0 60px 60px" }} aria-hidden />
-                <motion.div className="relative aspect-[4/5] overflow-hidden" style={{ borderRadius: "60px 0 60px 60px" }} whileHover={{ scale: 1.02 }} transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}>
+                <div className="relative aspect-[4/5] overflow-hidden transition-transform duration-500 hover:scale-[1.02]" style={{ borderRadius: "60px 0 60px 60px" }}>
                   <Image src="/images/services/journal/book-cover.jpg" alt="Tame My Chronic Pain journal cover" fill priority sizes="(min-width:1024px) 420px, 100vw" className="object-cover" />
-                </motion.div>
+                </div>
               </div>
             </Reveal>
           </div>
         </div>
       </section>
 
-      {/* SECTION 3 — Free Resources grid (4 cards on cream sandwich) */}
+      {/* SECTION 3 — Free Resources grid (cards on cream sandwich) */}
       <section style={{ backgroundColor: WINE }} className="relative">
         <div className="bg-cream pt-16 pb-20 px-4 sm:px-6 lg:px-10 mx-3 sm:mx-6 lg:mx-12 rounded-[40px] -my-10 relative z-10">
           <Reveal>
@@ -119,40 +99,7 @@ export default function JournalPage() {
             </p>
           </Reveal>
 
-          <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-7">
-            {WORKBOOKS.map((wb, i) => (
-              <Reveal key={wb.title} delay={i * 0.08}>
-                <motion.div
-                  whileHover={{ y: -6 }}
-                  transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                  className="h-full bg-white p-5 flex flex-col"
-                  style={{ borderRadius: "30px 0 30px 30px", border: `1px solid ${i === 0 ? WINE : GOLD}` }}
-                >
-                  <div className="relative aspect-[3/4] overflow-hidden" style={{ borderRadius: "20px 0 20px 20px" }}>
-                    <Image
-                      src={wb.image}
-                      alt={wb.title}
-                      fill
-                      sizes="(min-width:1024px) 280px, (min-width:640px) 50vw, 100vw"
-                      className="object-cover"
-                    />
-                  </div>
-                  <h4 className="mt-5 font-display font-bold text-[17px] leading-[1.3]" style={{ color: INK }}>
-                    {wb.title}
-                  </h4>
-                  <p className="mt-2 text-[13.5px] leading-[1.6] text-ink-soft flex-1">{wb.body}</p>
-                  <Link
-                    href="/contact"
-                    className="mt-4 inline-flex items-center justify-center gap-2 font-display font-bold tracking-[0.12em] text-[12px] uppercase px-5 py-3 transition hover:opacity-90"
-                    style={{ backgroundColor: WINE, color: "#fff", borderRadius: "20px 0 20px 20px" }}
-                  >
-                    <FiDownload size={14} />
-                    Download
-                  </Link>
-                </motion.div>
-              </Reveal>
-            ))}
-          </div>
+          <WorkbookGrid items={workbooks} />
         </div>
       </section>
 

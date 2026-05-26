@@ -187,6 +187,13 @@ export async function getFreeResources(): Promise<FreeResource[]> {
   return rows;
 }
 
+export async function getWorkbooks(): Promise<FreeResource[]> {
+  const { rows } = await q<FreeResource>(
+    `SELECT id, kind, title, description, image_url, cta_label, cta_url, position
+     FROM bt.free_resources WHERE published AND kind = 'workbook' ORDER BY position`);
+  return rows;
+}
+
 export async function getLocations(): Promise<Location[]> {
   const { rows } = await q<Location>(
     `SELECT id, name, address1, city, state, postal_code, phone, is_telehealth
