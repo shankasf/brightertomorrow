@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: ai
-          image: bt-ai:prod-5a6768d-1779751888
+          image: bt-ai:prod-f773f04-1779911325
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
           env:
