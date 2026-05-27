@@ -204,10 +204,22 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
     ),
 
     "present_slots": (
-        "Read the proposed appointment slots aloud, ONE per line, exactly as "
-        "provided in the context. For voice channel: always include 'Pacific "
-        "Time' on every slot. End with a single short question: 'Which works "
-        "best for you?'"
+        "Offer the proposed appointment slots from the context, in the order "
+        "given. Use the dates/times EXACTLY as provided — never invent or "
+        "round a slot.\n"
+        "VOICE channel: read them ONE per line as a short spoken list, always "
+        "including 'Pacific Time' on every slot, and end with 'Which works "
+        "best for you?'\n"
+        "CHAT channel (`channel: chat`): format as a NUMBERED Markdown list, "
+        "one slot per line as `N. **<date and time>**` (bold the date/time). "
+        "If `display_mode` is `single_therapist`, open with a short intro that "
+        "names the therapist ONCE (e.g. \"Here's **<name>'s** availability:\") "
+        "and do NOT repeat the name on each line. If `display_mode` is "
+        "`any_therapist`, append the therapist's name to each slot line "
+        "(\"— <name>\") and add ONE final line, after the list, letting them "
+        "know they can name a specific therapist or ask to see the whole team. "
+        "End with a short line telling them to reply with the number that "
+        "works best."
     ),
 
     "no_availability": (
@@ -224,14 +236,28 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
     ),
 
     "confirm_booking": (
-        "Recap the booking in ONE short block: name, date of birth, phone, "
-        "email, address, sex, insurance + member ID (or self-pay), reason, "
-        "and the chosen slot with therapist name and 'Pacific Time'. If "
-        "`insurance_pending_admin` is True, add ONE line right after the "
-        "insurance line: 'insurance: pending admin verification — our team "
-        "will confirm coverage shortly'. End with a single yes/no question: "
-        "'Is that correct?'. The state will be flipped to pending_confirm "
-        "in this turn."
+        "Recap the booking from `recap` in the context, then ask one yes/no "
+        "question to confirm. Use the values exactly as given.\n"
+        "VOICE channel: say it as ONE natural spoken sentence covering name, "
+        "date of birth, phone, email, address, sex, insurance + member ID (or "
+        "self-pay), reason, and the chosen slot with therapist name and "
+        "'Pacific Time'; end with 'Is that correct?'.\n"
+        "CHAT channel (`channel: chat`): render each detail on its OWN line as "
+        "a Markdown bullet with a BOLD label — one bullet per detail, e.g.:\n"
+        "  - **Name:** Jane Doe\n"
+        "  - **Date of birth:** ...\n"
+        "  - **Phone:** ...\n"
+        "  - **Email:** ...\n"
+        "  - **Address:** ...\n"
+        "  - **Sex:** ...\n"
+        "  - **Insurance:** <payer> (member <id>)\n"
+        "  - **Reason:** ...\n"
+        "  - **Appointment:** <slot> Pacific Time\n"
+        "  - **Therapist:** <name>\n"
+        "Then a blank line and the question **Is that correct?**\n"
+        "If `insurance_pending_admin` is True, add right after the Insurance "
+        "bullet: 'pending admin verification — our team will confirm coverage "
+        "shortly'. The state will be flipped to pending_confirm this turn."
     ),
 
     "post_booking": (

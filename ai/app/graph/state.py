@@ -240,6 +240,7 @@ class State(TypedDict, total=False):
     staff_id: int | None             # therapist chosen by caller (pinned from the chosen slot in any-mode)
     staff_name: str | None           # for read-back
     staff_any: bool                  # caller chose "Any therapist" — propose_slots fans out across ALL therapists (gateway staffId=0)
+    last_therapist_discussed: str | None  # most recent therapist named/asked-about — lets the extractor resolve a later pronoun ("book with her")
 
     # ----- Tool results --------------------------------------------------
     verify_result: VerifyResult | None
@@ -352,6 +353,7 @@ def initial_state(channel: Channel, session_id: str, agent_source: str) -> State
         staff_id=None,
         staff_name=None,
         staff_any=False,
+        last_therapist_discussed=None,
         verify_result=None,
         proposed_slots=[],
         selected_slot=None,

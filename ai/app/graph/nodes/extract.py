@@ -364,6 +364,7 @@ def _context_block(state: State) -> str:
         f"booking_fields_present: {sorted(k for k, v in booking.items() if v)}\n"
         f"callback_fields_present: {sorted(k for k, v in callback.items() if v)}\n"
         f"pending_question: {state.get('pending_question')}\n"
+        f"last_therapist_discussed: {state.get('last_therapist_discussed')}\n"
         f"last_assistant_said: {_last_assistant_text(state)[:300]!r}\n"
         f"gates_done: {sorted(k for k, v in gates.items() if v)}\n"
         f"caller_relationship: {state.get('caller_relationship')}\n"
@@ -501,7 +502,34 @@ def _merge_field_deltas(state: State, deltas) -> dict[str, Any]:
     # gates on staff_id and loops forever even after staff_name is set.
     _staff_update = _resolve_staff(state, deltas)
     if _staff_update:
+        # Caller switched therapists mid-flow (named a different clinician than
+        # the one we already pinned) — drop the prior therapist's slots and
+        # any pending selection so propose_slots re-runs for the new pick
+        # instead of re-presenting the old therapist's openings.
+        new_sid = _staff_update.get("staff_id")
+        if (
+            new_sid
+            and new_sid != state.get("staff_id")
+            and state.get("proposed_slots")
+        ):
+            update["proposed_slots"] = []
+            update["selected_slot"] = None
+            if state.get("booking_status") in (
+                "ready_for_slots", "slot_selected", "pending_confirm",
+            ):
+                update["booking_status"] = "collecting"
         update.update(_staff_update)
+
+    # Remember who the conversation is about so a later pronoun ("book with
+    # her") resolves on the next turn. A concrete booking pick wins; otherwise
+    # an info reference ("tell me about Alayna") still updates the memory.
+    _discussed = _staff_update.get("staff_name")
+    if not _discussed and getattr(deltas, "therapist_about", None):
+        _about_match = _match_roster(deltas.therapist_about)
+        if _about_match:
+            _discussed = _about_match["name"]
+    if _discussed:
+        update["last_therapist_discussed"] = _discussed
 
     # Scheduling preferences flow through to action nodes via transient keys.
     if deltas.time_of_day:

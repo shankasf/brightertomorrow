@@ -485,8 +485,12 @@ def planner(state: State) -> str:
             return _route(state, N.RESPOND, "post_verify_offer_booking")
         if not booking_fields_complete(state):
             return _route(state, N.RESPOND, "ask_booking_field")
-        if not state.get("staff_id") and not state.get("staff_any"):
-            return _route(state, N.RESPOND, "ask_therapist")
+        # Therapist selection is NOT a gating question. If the caller named a
+        # therapist (staff_id) we book with them; if they named no one we go
+        # straight to the soonest opening across the whole roster (any-mode
+        # fan-out) and the present_slots scene invites them to name a specific
+        # therapist or ask to see the full team. The full roster list is only
+        # shown on explicit request (handled above via _asks_therapist_roster).
         if not state.get("proposed_slots"):
             # propose_slots already ran and found nothing across the
             # entire roster — escalate to an admin callback instead of

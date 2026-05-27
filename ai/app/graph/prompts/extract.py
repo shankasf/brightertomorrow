@@ -72,7 +72,29 @@ class FieldDeltas(BaseModel):
     # Scheduling
     staff_name: str | None = Field(
         default=None,
-        description="Therapist the caller asked for, by name. Only set when they EXPLICITLY name a therapist for booking — not when they say their OWN name on their insurance card.",
+        description=(
+            "Therapist the caller wants to BOOK with. Set this when they pick "
+            "a therapist for booking — either by name (\"book with Alayna "
+            "Hammond\", \"I'll see Jordan\") OR by pronoun (\"book with her\", "
+            "\"let's go with him\", \"book that one\") right after a specific "
+            "therapist was discussed. When they use a pronoun, resolve it to "
+            "the therapist in `last_therapist_discussed` (or named in "
+            "`last_assistant_said`) and emit that therapist's FULL name. Do "
+            "NOT set this from the caller's OWN name on their insurance card, "
+            "and do NOT set it just because they asked ABOUT a therapist with "
+            "no intent to book yet — use `therapist_about` for that."
+        ),
+    )
+    therapist_about: str | None = Field(
+        default=None,
+        description=(
+            "Full name of a specific therapist the caller is asking ABOUT for "
+            "information this turn (not yet booking), e.g. \"tell me about "
+            "Alayna Hammond\" or \"what does Jordan specialize in?\". This lets "
+            "us remember who the conversation is about so a later pronoun "
+            "(\"book with her\") can be resolved. Leave null when no specific "
+            "therapist is referenced."
+        ),
     )
     no_therapist_preference: bool = Field(
         default=False,

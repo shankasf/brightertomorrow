@@ -234,8 +234,9 @@ def _pick_scene(state: State) -> str:
         # Booking fields next.
         if not booking_fields_complete(state):
             return "ask_booking_field"
-        if not state.get("staff_id"):
-            return "ask_therapist"
+        # Therapist choice is NOT a gating question (mirrors planner.py): a
+        # named therapist is carried forward; nobody named -> propose the
+        # soonest opening across the whole roster. We never re-ask here.
         if not state.get("proposed_slots"):
             # planner should have routed to propose_slots; if we end up
             # here it means propose returned nothing — offer a callback.
@@ -317,14 +318,23 @@ def _context_for_scene(scene: str, state: State) -> str:
         bits.append(f"matching_form_url: {THERAPIST_MATCH_FORM_URL}")
     elif scene == "present_slots":
         slots = state.get("proposed_slots") or []
+        # Pinned = the caller chose a specific clinician (not the any-mode
+        # fan-out). Drives the display: single therapist -> name once in the
+        # intro; any-mode -> name per slot + invite them to pick someone.
+        pinned = bool(state.get("staff_id")) and not state.get("staff_any")
+        if pinned:
+            bits.append("display_mode: single_therapist")
+            bits.append(f"availability_for: {state.get('staff_name')}")
+        else:
+            bits.append("display_mode: any_therapist")
         bits.append("slots:")
         for i, s in enumerate(slots, 1):
             staff_name = s.get("staffName", "")
             display = s.get("displayPT", "")
-            if staff_name:
-                bits.append(f"  {i}. {display} with {staff_name} (staffId {s.get('staffId', '?')})")
-            else:
+            if pinned or not staff_name:
                 bits.append(f"  {i}. {display}")
+            else:
+                bits.append(f"  {i}. {display} with {staff_name} (staffId {s.get('staffId', '?')})")
     elif scene == "no_availability":
         # If the caller asked about ONE specific therapist, name them so the
         # reply can offer to check others. In "Any therapist" mode (staff_any)
