@@ -81,7 +81,7 @@ export default async function TherapistBioPage(
       {/* ───── Hero ───── */}
       <section className="bg-white">
         <div className="container-x py-12 sm:py-16 lg:py-20">
-          <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
+          <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-start">
             {(bio.photo_url || heroPhotos.length > 0) && (
               <Reveal direction="up">
                 <div className="relative mx-auto w-full max-w-[420px]">
