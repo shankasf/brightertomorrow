@@ -276,6 +276,13 @@ def _try_deterministic_fast_path(state: State, user_text: str) -> TurnExtraction
     # use this when the next missing name field is unambiguous so we
     # don't accidentally label a therapist name as patient first_name.
     if _SINGLE_NAME_RE.match(text):
+        # A name that matches a bookable therapist (e.g. "Janelle Thompson",
+        # "Alayna") is almost always a THERAPIST pick — or an info reference —
+        # not the patient's own name. Defer to the LLM, which has the
+        # conversation context (was a name even being asked for?) to tell the
+        # difference and set staff_name/therapist_about instead of first_name.
+        if _match_roster(text):
+            return None
         # callback uses its own field bag; booking / insurance_check share
         # the insurance_fields bag for identity (first/last/dob/...).
         bag = cb if intent == "callback" else ins
@@ -352,6 +359,14 @@ def _context_block(state: State) -> str:
     callback = state.get("callback_fields") or {}
     gates = state.get("gates") or {}
     slots = state.get("proposed_slots") or []
+    # Roster names so the extractor can tell a TYPED therapist name (a
+    # booking selection) from the caller's own name. Without this it can't
+    # know "Janelle Thompson" is one of our therapists.
+    try:
+        from ...data.roster import ELIGIBLE_FOR_BOOKING
+        roster_names = ", ".join(t["name"] for t in ELIGIBLE_FOR_BOOKING)
+    except Exception:  # noqa: BLE001 — context is best-effort
+        roster_names = ""
     slot_lines = "\n".join(
         f"  [{i}] {s.get('displayPT') or s.get('startISO', '')}"
         for i, s in enumerate(slots)
@@ -364,6 +379,7 @@ def _context_block(state: State) -> str:
         f"booking_fields_present: {sorted(k for k, v in booking.items() if v)}\n"
         f"callback_fields_present: {sorted(k for k, v in callback.items() if v)}\n"
         f"pending_question: {state.get('pending_question')}\n"
+        f"bookable_therapists: {roster_names}\n"
         f"last_therapist_discussed: {state.get('last_therapist_discussed')}\n"
         f"last_assistant_said: {_last_assistant_text(state)[:300]!r}\n"
         f"gates_done: {sorted(k for k, v in gates.items() if v)}\n"
@@ -787,6 +803,27 @@ def extract(state: State) -> dict[str, Any]:
     update["_wants_therapist_match"] = bool(
         getattr(result, "wants_therapist_match", False)
     )
+
+    # "Who else is available?" — caller wants OTHER therapists than the one
+    # currently in focus (usually after we said that therapist had no
+    # openings). Drop the pinned therapist + the stale no-availability result
+    # and switch to the any-therapist fan-out so the planner re-proposes the
+    # soonest opening across the whole roster instead of repeating the
+    # dead-end. Skip if they named a specific other therapist this turn
+    # (staff_name) — that pick wins.
+    if getattr(result, "wants_other_therapist", False) and not result.field_deltas.staff_name:
+        update["staff_id"] = None
+        update["staff_name"] = None
+        update["staff_any"] = True
+        update["proposed_slots"] = []
+        update["selected_slot"] = None
+        update["last_action"] = None
+        if state.get("intent") not in ("cancel", "out_of_scope"):
+            update["intent"] = "booking"
+        if state.get("booking_status") in (
+            "ready_for_slots", "slot_selected", "pending_confirm",
+        ):
+            update["booking_status"] = "collecting"
 
     # Reschedule signal — caller wants to MOVE an existing appointment, not
     # just cancel it. Sticky (NOT overwritten to False every turn): set on the

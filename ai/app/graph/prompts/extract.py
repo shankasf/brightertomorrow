@@ -298,11 +298,28 @@ class TurnExtraction(BaseModel):
             "therapist + availability — e.g. 'is anyone available to "
             "book?', 'do you have any openings?', 'when's the soonest I "
             "can come in?', 'can I book with someone this week?', 'is "
-            "Christie available to book?', 'what times does Janelle have?'. "
+            "Alayna available to book?', 'what times does Janelle have?'. "
             "ALSO set intent_delta='booking' (they intend to book). If they "
             "named a specific therapist, ALSO fill staff_name. Leave False "
             "for a bare roster question ('who are your therapists?' -> use "
             "asks_for_therapist_roster instead)."
+        ),
+    )
+
+    wants_other_therapist: bool = Field(
+        default=False,
+        description=(
+            "True when the caller wants to see a DIFFERENT therapist or OTHER "
+            "options than the one currently in focus — typically right after "
+            "you said a specific therapist has no openings, or they decide "
+            "they'd rather not see that therapist. Cues: 'who else is "
+            "available?', 'anyone else?', 'any other therapists?', 'someone "
+            "else', 'what about other therapists', 'is there another "
+            "therapist', 'show me others'. This switches the booking to the "
+            "soonest opening across the WHOLE roster (any-therapist). Leave "
+            "False for the first-time generic roster question ('who are your "
+            "therapists?' -> asks_for_therapist_roster) and when they name a "
+            "specific different therapist (-> staff_name)."
         ),
     )
 
@@ -409,10 +426,20 @@ Rules:
        words ("of", "on") before parsing.
    Only return null if NO ordering yields a valid calendar date.
 
-5. Insurance fields: do NOT confuse the caller's OWN name (on their
-   insurance card) with a therapist they want to book with. If they're
-   answering "what's your name?" during insurance collection, that's
-   `first_name`/`last_name`, NOT `staff_name`.
+5. Names — caller's OWN name vs a THERAPIST. Do NOT confuse them.
+   • If the previous assistant turn asked for the caller's name ("what's
+     your first name?", "your last name?") during booking/insurance
+     collection, the reply is `first_name`/`last_name` — even if it
+     happens to match a therapist's name.
+   • OTHERWISE, a message that is just a person's name matching one in
+     the `bookable_therapists` list in the context (e.g. "Janelle
+     Thompson", "Alayna", "Jordan Fuller") — especially right after the
+     roster was listed, after you offered to book, or after you asked
+     which therapist they want — is a THERAPIST SELECTION: set
+     `staff_name` to that therapist and intent_delta="booking". Do NOT
+     put it in `first_name`/`last_name`. (A caller answering "what's your
+     name?" with a name that happens to match a therapist is the rare
+     exception above — there a name WAS just asked for.)
 
 6. Self-pay: ANY indication the caller is uninsured or paying themselves
    -> intent_delta="self_pay". Examples: "no insurance", "I don't have
@@ -463,7 +490,7 @@ Rules:
     "this week" / "next week", or a named therapist + availability —
     e.g. "is anyone available to book?", "do you have any openings?",
     "when's the soonest I can come in?", "can I book with someone this
-    week?", "is Christie available to book?", "what times does Janelle
+    week?", "is Alayna available to book?", "what times does Janelle
     have?". ALSO set intent_delta="booking" (they intend to book). If a
     specific therapist is named, ALSO fill staff_name. The split vs 8a:
     "who are your therapists?" = roster (8a, names); "is anyone free to

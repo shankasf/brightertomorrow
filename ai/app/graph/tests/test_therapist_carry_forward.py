@@ -98,7 +98,27 @@ def main() -> int:
         print(f"FAIL 4. expected last_discussed=Elisia/no staff_id, got {out4!r}")
         fails += 1
 
-    print(f"\n{fails} failures / 4 checks")
+    # --- 5. fast-path must NOT read a roster name as the patient's name ---
+    from app.graph.nodes.extract import _try_deterministic_fast_path
+    st5 = initial_state("chat", "t-fp", "test")
+    st5["intent"] = "booking"
+    fp = _try_deterministic_fast_path(st5, "Janelle Thompson")
+    if fp is None:
+        print("OK   5. fast-path defers roster name 'Janelle Thompson' to the LLM")
+    else:
+        print(f"FAIL 5. fast-path grabbed first_name={fp.field_deltas.first_name!r} "
+              "for a roster therapist name (should defer)")
+        fails += 1
+
+    # control: a genuine (non-roster) patient name still fast-paths
+    fp2 = _try_deterministic_fast_path(st5, "Sagar Shankaran")
+    if fp2 is not None and fp2.field_deltas.first_name == "Sagar":
+        print("OK   5b. fast-path still captures a real patient name (Sagar Shankaran)")
+    else:
+        print(f"FAIL 5b. expected first_name=Sagar, got {fp2!r}")
+        fails += 1
+
+    print(f"\n{fails} failures / 6 checks")
     return 0 if fails == 0 else 1
 
 
