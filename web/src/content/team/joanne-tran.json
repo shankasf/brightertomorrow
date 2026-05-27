@@ -1,28 +1,19 @@
 {
   "slug": "joanne-tran",
   "full_name": "Joanne Tran",
-  "credentials_suffix": "LCSW",
-  "role": "Licensed Clinical Social Worker, Team Lead, Reiki and Trauma Yoga specialist",
+  "credentials_suffix": "LCSW, Team Lead",
+  "role": "Licensed Clinical Social Work",
   "photo_url": "/team/joanne-tran.webp",
+  "psychology_today_badge": true,
+  "psychology_today_url": "https://www.psychologytoday.com/us/therapists/joanne-tran-las-vegas-nv/1251774",
   "hero_headline": "Finding Strength Through Life's Challenges with Joanne Tran, LCSW, Team Lead",
-  "hero_intro": null,
+  "hero_intro": "Life can feel confusing, overwhelming, and even lonely at times—but you don't have to face it alone. My passion is to help young adults who feel stuck, anxious, or sad, especially during big life changes. Knowing firsthand how tough it can be to manage stress, loss, or anxiety while adjusting to life's transitions, like having a tough breakup or going through medical trauma when having chronic pain and illness. I provide a safe, welcoming space where you can heal and grow.\n\nAs the daughter of Vietnamese refugees, I have a special place in my heart and I am passionate about serving Asian Americans who are working through family challenges and generational struggles. Together, we can work through the tough moments, and understand and heal from the past so you can move forward with confidence.\n\nTrue healing happens when we take care of our whole selves—mind, body, and spirit. By using traditional therapy along with mindfulness, meditation, movement, and nutrition, you can feel balanced and supported in your journey. Utilizing many other therapeutic tools such as brainspotting, Parts and Memory Therapy, and Trauma-Informed Yoga, helps you to process emotions in a deep and lasting way.\n\nWhen not working with clients, I love going to live music events, exploring new places, hiking in nature, reading, and enjoying relaxing activities like sound baths and astrology.",
   "bio_paragraphs": [
-    "Life can feel confusing, overwhelming, and even lonely at times—but you don't have to face it alone. My passion is to help young adults who feel stuck, anxious, or sad, especially during big life changes. Knowing firsthand how tough it can be to manage stress, loss, or anxiety while adjusting to life's transitions, like having a tough breakup or going through medical trauma when having chronic pain and illness. I provide a safe, welcoming space where you can heal and grow.",
-    "As the daughter of Vietnamese refugees, I have a special place in my heart and I am passionate about serving Asian Americans who are working through family challenges and generational struggles. Together, we can work through the tough moments, and understand and heal from the past so you can move forward with confidence.",
-    "True healing happens when we take care of our whole selves—mind, body, and spirit. By using traditional therapy along with mindfulness, meditation, movement, and nutrition, you can feel balanced and supported in your journey. Utilizing many other therapeutic tools such as brainspotting, Parts and Memory Therapy, and Trauma-Informed Yoga, helps you to process emotions in a deep and lasting way.",
-    "As a therapist who truly understands, listens with compassion, and supports you at every step, I am here to help you on your journey! Call today and schedule your first step to a Brighter Tomorrow.",
     "Joanne Tran is a Licensed Clinical Social Work, Brainspotting Practitioner, Level 2 Reiki Practitioner, and 200-Hour Certified Yoga Teacher dedicated to helping individuals heal from emotional wounds and navigate life's challenges with greater clarity and confidence. She earned her Master's in Social Work from the University of Nevada, Las Vegas, and has extensive training in trauma-informed therapy, integrative healing modalities, and mind-body wellness practices.",
     "Joanne specializes in working with young adults in their 20s and 30s who are struggling with depression, anxiety, grief, relationship challenges, and major life transitions. She understands that life can feel overwhelming, especially for those balancing personal growth, career pressures, and shifting family dynamics. As the daughter of Vietnamese refugees, she is particularly passionate about supporting Asian American children of immigrants as they process intergenerational trauma, cultural identity conflicts, and family expectations."
   ],
-  "qualifications": [
-    "Licensed Clinical Social Work",
-    "Brainspotting Practitioner",
-    "Level 2 Reiki Practitioner",
-    "200-Hour Certified Yoga Teacher"
-  ],
-  "education": [
-    "Master's in Social Work from the University of Nevada, Las Vegas"
-  ],
+  "qualifications": [],
+  "education": [],
   "approach_headline": "A Holistic and Trauma-Informed Approach",
   "approach_intro": "Joanne believes that true healing requires more than just talk therapy—it involves addressing the mind, body, and spirit as a whole. By blending evidence-based psychotherapy with mindfulness-based interventions, she creates a compassionate and empowering space for her clients to explore their emotions, develop coping strategies, and foster self-awareness. Her approach integrates:",
   "modalities": [
@@ -60,11 +51,13 @@
     "Processing childhood trauma and intergenerational wounds.",
     "Seeking alternative healing practices alongside traditional therapy."
   ],
+  "philosophy_headline": "A Space for Healing and Growth",
   "philosophy_paragraphs": [
     "Joanne's goal is to provide clients with a supportive and non-judgmental space where they feel safe to explore their emotions, reconnect with their inner wisdom, and build resilience. She believes that therapy should be an empowering journey—one that helps clients develop the skills, self-awareness, and confidence to create a life that feels aligned and fulfilling.",
+    "Outside of therapy, Joanne enjoys live music, traveling, hiking, reading, attending sound baths, studying astrology, and reading tarot—interests that further deepen her connection to holistic healing and self-exploration.",
     "For those seeking a therapist who blends modern psychology with ancient healing practices, Joanne offers an approach that is both deeply compassionate and transformative. She is committed to walking alongside her clients as they heal, grow, and step into their fullest potential."
   ],
-  "personal_interests": "Outside of therapy, Joanne enjoys live music, traveling, hiking, reading, attending sound baths, studying astrology, and reading tarot—interests that further deepen her connection to holistic healing and self-exploration.",
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "personal_interests": null,
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

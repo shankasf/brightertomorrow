@@ -4,27 +4,19 @@
   "credentials_suffix": "LMFT",
   "role": "Licensed Marriage and Family Therapist",
   "photo_url": "/team/tony-martinez.jpg",
+  "psychology_today_badge": false,
+  "psychology_today_url": null,
   "hero_headline": "Depth, Healing, and Lasting Change With Dr. Tony Martinez, Ph.D., LMFT",
-  "hero_intro": "Sometimes life has a way of choosing our path. For me, therapy wasn't just a career—it was a calling. Growing up in difficult circumstances taught me the value of resilience, compassion, and truly being heard. Today, I bring that same depth of understanding into my work as a therapist, helping individuals and couples find clarity, connection, and hope—even in their most challenging seasons.",
+  "hero_intro": "Sometimes life has a way of choosing our path. For me, therapy wasn't just a career—it was a calling. Growing up in difficult circumstances taught me the value of resilience, compassion, and truly being heard. Today, I bring that same depth of understanding into my work as a therapist, helping individuals and couples find clarity, connection, and hope—even in their most challenging seasons.\n\nAs a Licensed Marriage and Family Therapist (LMFT) and U.S. Air Force veteran, I offer a grounded, real-world approach to therapy. My experience serving on multiple deployments gave me a deep appreciation for human strength, vulnerability, and the power of healing. Whether you're navigating trauma, relationship strain, depression, or anxiety, I create a space where you can dig deep, feel safe, and move forward with purpose.",
   "bio_paragraphs": [
-    "As a Licensed Marriage and Family Therapist (LMFT) and U.S. Air Force veteran, I offer a grounded, real-world approach to therapy. My experience serving on multiple deployments gave me a deep appreciation for human strength, vulnerability, and the power of healing. Whether you're navigating trauma, relationship strain, depression, or anxiety, I create a space where you can dig deep, feel safe, and move forward with purpose.",
     "Dr. Tony Martinez is a Licensed Marriage and Family Therapist with a Ph.D. in Clinical Psychology from Pacifica Graduate Institute. He has been practicing since 2007 and brings over 15 years of clinical experience to his work with individuals, couples, and families. A veteran of the U.S. Air Force, Dr. Martinez's approach is grounded in real-life perspective, multicultural awareness, and psychodynamic theory.",
     "Dr. Martinez specializes in helping clients explore and heal deep-rooted emotional patterns related to trauma, anxiety, depression, identity, and relationships. He creates a safe, collaborative space for growth while integrating holistic wellness practices, including spiritual connection for those who seek it.",
     "Outside of private practice, Dr. Martinez has taught university-level psychology and continues to volunteer with underserved communities, including local shelters and nonprofit organizations. His compassionate and reflective style helps clients uncover insight, develop healthy habits, and take confident steps toward lasting change."
   ],
-  "qualifications": [
-    "Ph.D. in Clinical Psychology from Pacifica Graduate Institute",
-    "Licensed Marriage and Family Therapist (LMFT)",
-    "U.S. Air Force veteran",
-    "Practicing since 2007",
-    "Over 15 years of clinical experience",
-    "University-level psychology instructor"
-  ],
-  "education": [
-    "Ph.D. in Clinical Psychology from Pacifica Graduate Institute"
-  ],
+  "qualifications": [],
+  "education": [],
   "approach_headline": "A Client-Centered and Relationship-Focused Approach",
-  "approach_intro": "Dr. Martinez uses a psychodynamic approach, helping you understand how your past experiences shape current patterns, emotions, and relationships. Together, we'll explore how those experiences influence your sense of self—and how to break free from what's holding you back.",
+  "approach_intro": "Dr. Martinez uses a psychodynamic approach, helping you understand how your past experiences shape current patterns, emotions, and relationships. Together, we'll explore how those experiences influence your sense of self—and how to break free from what's holding you back.\n\nYou can expect therapy with Dr. Martinez to be:",
   "modalities": [
     {
       "name": "Collaborative and Reflective",
@@ -51,10 +43,12 @@
     "Individuals seeking a deeper understanding of themselves and their relationships",
     "Clients from diverse cultural backgrounds looking for a therapist who understands the power of lived experience"
   ],
+  "philosophy_headline": "A Safe Place to Reflect, Heal, and Reclaim Your Life",
   "philosophy_paragraphs": [
-    "You are capable of more than you believe—and therapy can be the place where you start to believe it too. My mission is to help you discover your strength, understand your story, and begin building the life you want, one session at a time."
+    "You are capable of more than you believe—and therapy can be the place where you start to believe it too. My mission is to help you discover your strength, understand your story, and begin building the life you want, one session at a time.",
+    "If you're ready to take the next step, I invite you to reach out for a free consultation. Let's begin your healing journey—together."
   ],
   "personal_interests": null,
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

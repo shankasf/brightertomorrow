@@ -1,15 +1,22 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { FiArrowLeft, FiArrowRight, FiAward, FiBookOpen, FiCheck, FiHeart } from "react-icons/fi";
+import { FiArrowRight, FiCheck } from "react-icons/fi";
 import Reveal from "@/components/Reveal";
 import { getTeamBio } from "@/lib/teamBio";
 
 const JANE_APP_URL = "https://brightertomorrow.janeapp.com/";
 
-// Matches the pattern used by /specialties/[slug]: the root layout fetches
-// site_settings/nav from Postgres, which isn't available at build time, so
-// we render on demand instead of prerendering.
+// Design tokens lifted from brightertomorrowtherapy.com (Elementor) so these
+// individual therapist pages match the .com pages: Karla headings in navy,
+// Mukta Vaani body in grey, gold asymmetric buttons, slate closing CTA.
+const NAVY = "#192735";
+const GREY = "#858585";
+const GOLD = "#E1B878";
+const MAROON = "#66202A";
+const SLATE = "#475560";
+
+// Team data lives in Postgres/JSON (not available at build time) — render on
+// demand. Mirrors /specialties/[slug].
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(
@@ -20,14 +27,37 @@ export async function generateMetadata(
   if (!bio) return { title: "Therapist — Brighter Tomorrow Therapy" };
   const title = `${bio.full_name}${bio.credentials_suffix ? `, ${bio.credentials_suffix}` : ""} — Brighter Tomorrow Therapy`;
   const description =
-    bio.hero_intro ||
+    (bio.hero_intro || "").split("\n\n")[0]?.slice(0, 200) ||
     bio.bio_paragraphs?.[0]?.slice(0, 200) ||
     `Meet ${bio.full_name}, ${bio.role ?? "therapist"} at Brighter Tomorrow Therapy.`;
   return { title, description };
 }
 
-function firstName(fullName: string): string {
-  return fullName.replace(/^Dr\.\s+/i, "").split(/\s+/)[0] ?? fullName;
+// Gold "Book an Appointment" button — matches the .com Elementor button
+// (gold fill, navy text, 2px tracking, 20px 0 20px 20px corners).
+function GoldButton({ label }: { label: string }) {
+  return (
+    <a
+      href={JANE_APP_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-2 px-7 py-4 text-[13.5px] font-semibold tracking-[2px] uppercase transition hover:brightness-95"
+      style={{ backgroundColor: GOLD, color: NAVY, borderRadius: "20px 0 20px 20px" }}
+    >
+      {label} <FiArrowRight size={14} />
+    </a>
+  );
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h2
+      className="text-[30px] sm:text-[38px] lg:text-[45px] font-bold leading-[1.15] tracking-[-1.4px]"
+      style={{ color: NAVY }}
+    >
+      {children}
+    </h2>
+  );
 }
 
 export default async function TherapistBioPage(
@@ -37,196 +67,154 @@ export default async function TherapistBioPage(
   const bio = await getTeamBio(slug);
   if (!bio) notFound();
 
-  const first = firstName(bio.full_name);
+  const nameLine = `${bio.full_name}${bio.credentials_suffix ? `, ${bio.credentials_suffix}` : ""}`;
+  const heroParas = (bio.hero_intro || "").split("\n\n").map((s) => s.trim()).filter(Boolean);
 
   return (
-    <article>
+    <article className="bg-white" style={{ color: GREY }}>
       {/* ───── Hero ───── */}
-      <section className="bg-cream-alt relative overflow-hidden border-b border-surface-line">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-24 -right-24 w-[260px] h-[260px] sm:w-[420px] sm:h-[420px] rounded-full opacity-[0.10]"
-          style={{ backgroundColor: "#E1B878" }}
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-32 -left-32 w-[260px] h-[260px] sm:w-[420px] sm:h-[420px] rounded-full opacity-[0.08]"
-          style={{ backgroundColor: "#66202A" }}
-        />
-        <div className="container-x relative py-12 sm:py-16 lg:py-20">
-          <Link
-            href="/team"
-            className="inline-flex items-center gap-2 text-sm text-brand-700 hover:text-brand transition mb-8"
-          >
-            <FiArrowLeft /> All therapists
-          </Link>
-
-          <div className="grid lg:grid-cols-12 gap-10 lg:gap-14 items-center">
+      <section className="bg-white">
+        <div className="container-x py-12 sm:py-16 lg:py-20">
+          <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
             {bio.photo_url && (
-              <div className="lg:col-span-5">
-                <Reveal>
-                  <div className="relative aspect-[4/5] rounded-4xl overflow-hidden shadow-card border border-surface-line bg-cream-deep">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={bio.photo_url}
-                      alt={bio.full_name}
-                      className="w-full h-full object-cover object-top"
-                    />
-                  </div>
-                </Reveal>
-              </div>
+              <Reveal direction="up">
+                <div className="relative mx-auto w-full max-w-[420px]">
+                  <div
+                    aria-hidden
+                    className="absolute -bottom-5 -left-5 w-full h-full rounded-[28px]"
+                    style={{ backgroundColor: MAROON }}
+                  />
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={bio.photo_url}
+                    alt={bio.full_name}
+                    className="relative w-full aspect-[4/5] object-cover object-top rounded-[28px] shadow-lg"
+                  />
+                </div>
+              </Reveal>
             )}
 
-            <div className={bio.photo_url ? "lg:col-span-7" : "lg:col-span-12"}>
-              <Reveal delay={0.05}>
-                <span className="eyebrow" style={{ color: "#E1B878" }}>Meet your therapist</span>
-                {bio.hero_headline && (
-                  <h1 className="mt-5 display text-3xl sm:text-4xl lg:text-5xl text-ink leading-[1.08]">
-                    <span className="italic-accent" style={{ color: "#66202A" }}>
-                      {bio.hero_headline}
-                    </span>
-                  </h1>
-                )}
-                <div className="mt-6 font-display text-2xl sm:text-3xl text-ink leading-tight">
-                  {bio.full_name}
-                  {bio.credentials_suffix && (
-                    <span className="text-ink-soft font-medium text-lg">
-                      , {bio.credentials_suffix}
-                    </span>
-                  )}
+            <Reveal direction="up" delay={0.08}>
+              <div className={bio.photo_url ? "" : "lg:col-span-2 max-w-3xl"}>
+                {bio.hero_headline && <SectionHeading>{bio.hero_headline}</SectionHeading>}
+                <div className="mt-5 text-2xl font-bold" style={{ color: NAVY }}>
+                  {nameLine}
                 </div>
                 {bio.role && (
-                  <div className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">
+                  <div
+                    className="mt-1.5 text-xs font-semibold uppercase tracking-[1.5px]"
+                    style={{ color: MAROON }}
+                  >
                     {bio.role}
                   </div>
                 )}
-                {bio.hero_intro && (
-                  <p className="mt-6 text-ink-muted text-lg leading-relaxed">{bio.hero_intro}</p>
+                {heroParas.length > 0 && (
+                  <div className="mt-6 space-y-4">
+                    {heroParas.map((p, i) => (
+                      <p key={i} className="text-[16.5px] leading-[1.6]">{p}</p>
+                    ))}
+                  </div>
                 )}
-                <div className="mt-8 flex flex-wrap gap-3">
-                  <a
-                    href={JANE_APP_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-primary"
-                  >
-                    Book an Appointment <FiArrowRight size={14} />
-                  </a>
-                  <Link href="/team" className="btn-ghost">View all therapists</Link>
+                <div className="mt-8">
+                  <GoldButton label="Book an Appointment with me" />
                 </div>
-              </Reveal>
-            </div>
+              </div>
+            </Reveal>
           </div>
         </div>
       </section>
 
-      {/* ───── About / Bio ───── */}
-      {bio.bio_paragraphs.length > 0 && (
-        <section className="section bg-white">
-          <div className="container-x max-w-4xl">
-            <Reveal>
-              <span className="eyebrow">About {first}</span>
-              <h2 className="mt-4 display text-3xl sm:text-4xl text-ink leading-tight">
-                A little about{" "}
-                <span className="italic-accent" style={{ color: "#66202A" }}>{first}</span>.
-              </h2>
-            </Reveal>
-            <div className="mt-8 space-y-6">
+      {/* ───── About ───── */}
+      {(bio.bio_paragraphs.length > 0 || bio.psychology_today_badge) && (
+        <section className="bg-white pb-4">
+          <div className="container-x max-w-3xl text-center">
+            <Reveal><SectionHeading>About {nameLine}</SectionHeading></Reveal>
+
+            {/* Verified by Psychology Today seal (image hosted locally) */}
+            {bio.psychology_today_badge && (
+              <Reveal delay={0.05}>
+                <div className="mt-7 flex justify-center">
+                  {bio.psychology_today_url ? (
+                    <a
+                      href={bio.psychology_today_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${bio.full_name} — verified by Psychology Today`}
+                      className="inline-block transition hover:opacity-90"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src="/team/psychology-today-verified.png"
+                        alt="Verified by Psychology Today"
+                        width={300}
+                        height={90}
+                        className="h-[58px] w-auto"
+                      />
+                    </a>
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src="/team/psychology-today-verified.png"
+                      alt="Verified by Psychology Today"
+                      width={300}
+                      height={90}
+                      className="h-[58px] w-auto"
+                    />
+                  )}
+                </div>
+              </Reveal>
+            )}
+
+            <div className="mt-8">
               {bio.bio_paragraphs.map((p, i) => (
                 <Reveal key={i} delay={Math.min(i, 4) * 0.04}>
-                  <p className="text-lg leading-[1.85] text-ink-muted">{p}</p>
+                  {i > 0 && (
+                    <div
+                      aria-hidden
+                      className="mx-auto my-6 h-px w-full"
+                      style={{ backgroundColor: "#e6e6e6" }}
+                    />
+                  )}
+                  <p className="text-[16.5px] leading-[1.7]">{p}</p>
                 </Reveal>
               ))}
             </div>
-            <div className="mt-10 flex flex-wrap gap-3">
-              <a
-                href={JANE_APP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-primary"
-              >
-                Book an Appointment <FiArrowRight size={14} />
-              </a>
-            </div>
           </div>
         </section>
       )}
 
-      {/* ───── Qualifications + Education ───── */}
-      {(bio.qualifications.length > 0 || bio.education.length > 0) && (
-        <section className="section-tight bg-cream-alt">
-          <div className="container-x grid lg:grid-cols-2 gap-8 lg:gap-12">
-            {bio.qualifications.length > 0 && (
-              <Reveal>
-                <div className="rounded-3xl bg-white border border-surface-line p-7 sm:p-9 shadow-soft h-full">
-                  <div className="flex items-center gap-3">
-                    <span className="w-10 h-10 rounded-full bg-sage-100 text-sage-700 grid place-items-center">
-                      <FiAward size={18} />
-                    </span>
-                    <h3 className="font-display text-2xl text-ink">Credentials &amp; Qualifications</h3>
-                  </div>
-                  <ul className="mt-6 space-y-3">
-                    {bio.qualifications.map((q, i) => (
-                      <li key={i} className="flex items-start gap-3 text-ink-muted leading-relaxed">
-                        <FiCheck className="mt-1 shrink-0 text-brand-700" size={16} />
-                        <span>{q}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </Reveal>
-            )}
-            {bio.education.length > 0 && (
-              <Reveal delay={0.05}>
-                <div className="rounded-3xl bg-white border border-surface-line p-7 sm:p-9 shadow-soft h-full">
-                  <div className="flex items-center gap-3">
-                    <span className="w-10 h-10 rounded-full bg-sage-100 text-sage-700 grid place-items-center">
-                      <FiBookOpen size={18} />
-                    </span>
-                    <h3 className="font-display text-2xl text-ink">Education</h3>
-                  </div>
-                  <ul className="mt-6 space-y-3">
-                    {bio.education.map((e, i) => (
-                      <li key={i} className="flex items-start gap-3 text-ink-muted leading-relaxed">
-                        <FiCheck className="mt-1 shrink-0 text-brand-700" size={16} />
-                        <span>{e}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </Reveal>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* ───── Approach / Modalities ───── */}
+      {/* ───── Approach (icon-box list) ───── */}
       {bio.modalities.length > 0 && (
-        <section className="section bg-white">
-          <div className="container-x">
+        <section className="bg-white py-14 sm:py-16 lg:py-20">
+          <div className="container-x max-w-3xl">
             <Reveal>
-              <div className="max-w-3xl">
-                <span className="eyebrow">Approach</span>
-                {bio.approach_headline && (
-                  <h2 className="mt-4 display text-3xl sm:text-4xl text-ink leading-tight">
-                    <span className="italic-accent" style={{ color: "#66202A" }}>
-                      {bio.approach_headline}
-                    </span>
-                  </h2>
-                )}
+              <div className="text-center">
+                {bio.approach_headline && <SectionHeading>{bio.approach_headline}</SectionHeading>}
                 {bio.approach_intro && (
-                  <p className="mt-6 text-ink-muted text-lg leading-relaxed">{bio.approach_intro}</p>
+                  <p className="mt-5 text-[16.5px] leading-[1.7] max-w-2xl mx-auto">
+                    {bio.approach_intro}
+                  </p>
                 )}
               </div>
             </Reveal>
-            <div className="mt-10 grid sm:grid-cols-2 gap-5 lg:gap-6">
+            <div className="mt-10 space-y-7">
               {bio.modalities.map((m, i) => (
-                <Reveal key={i} delay={Math.min(i, 6) * 0.04}>
-                  <div className="h-full rounded-3xl bg-cream border border-surface-line p-6 sm:p-7 hover:shadow-card transition-shadow">
-                    <h3 className="font-display text-xl text-ink leading-tight">{m.name}</h3>
-                    {m.description && (
-                      <p className="mt-3 text-ink-muted leading-relaxed">{m.description}</p>
-                    )}
+                <Reveal key={i} delay={Math.min(i, 6) * 0.05}>
+                  <div className="flex gap-4 items-start">
+                    <span
+                      className="mt-0.5 shrink-0 w-9 h-9 rounded-full grid place-items-center"
+                      style={{ backgroundColor: MAROON, color: "#fff" }}
+                    >
+                      <FiCheck size={17} />
+                    </span>
+                    <div>
+                      <h3 className="text-[20px] font-semibold leading-snug" style={{ color: NAVY }}>
+                        {m.name}
+                      </h3>
+                      {m.description && (
+                        <p className="mt-1 text-[16.5px] leading-[1.6]">{m.description}</p>
+                      )}
+                    </div>
                   </div>
                 </Reveal>
               ))}
@@ -235,28 +223,23 @@ export default async function TherapistBioPage(
         </section>
       )}
 
-      {/* ───── Who I Help ───── */}
+      {/* ───── Who They Help ───── */}
       {bio.who_i_help.length > 0 && (
-        <section className="section-tight bg-cream-alt">
-          <div className="container-x max-w-4xl">
+        <section className="bg-white pb-14 sm:pb-16 lg:pb-20">
+          <div className="container-x max-w-3xl">
             <Reveal>
-              <span className="eyebrow">Who I help</span>
-              <h2 className="mt-4 display text-3xl sm:text-4xl text-ink leading-tight">
-                {bio.who_i_help_headline ?? (
-                  <>
-                    Who{" "}
-                    <span className="italic-accent" style={{ color: "#66202A" }}>{first}</span> helps.
-                  </>
-                )}
-              </h2>
+              <div className="text-center">
+                <SectionHeading>{bio.who_i_help_headline ?? "Who They Help"}</SectionHeading>
+              </div>
             </Reveal>
-            <ul className="mt-8 grid sm:grid-cols-2 gap-x-8 gap-y-3">
+            <ul className="mt-8 space-y-3 max-w-2xl mx-auto">
               {bio.who_i_help.map((item, i) => (
-                <Reveal key={i} delay={Math.min(i, 6) * 0.03}>
-                  <li className="flex items-start gap-3 text-ink-muted leading-relaxed">
-                    <span className="mt-1 w-6 h-6 rounded-full bg-sage-100 text-sage-700 grid place-items-center shrink-0">
-                      <FiHeart size={12} />
-                    </span>
+                <Reveal key={i} delay={Math.min(i, 6) * 0.04}>
+                  <li className="flex gap-3 text-[16.5px] leading-[1.6]">
+                    <span
+                      className="mt-[0.55em] w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: MAROON }}
+                    />
                     <span>{item}</span>
                   </li>
                 </Reveal>
@@ -266,60 +249,44 @@ export default async function TherapistBioPage(
         </section>
       )}
 
-      {/* ───── Philosophy + Personal interests ───── */}
-      {(bio.philosophy_paragraphs.length > 0 || bio.personal_interests) && (
-        <section className="section bg-white">
-          <div className="container-x max-w-4xl">
-            <Reveal>
-              <span className="eyebrow">Philosophy</span>
-              <h2 className="mt-4 display text-3xl sm:text-4xl text-ink leading-tight">
-                In{" "}
-                <span className="italic-accent" style={{ color: "#66202A" }}>{first}&rsquo;s</span> own words.
-              </h2>
-            </Reveal>
-            <div className="mt-8 space-y-6">
+      {/* ───── Philosophy ───── */}
+      {bio.philosophy_paragraphs.length > 0 && (
+        <section className="bg-white pb-14 sm:pb-16 lg:pb-20">
+          <div className="container-x max-w-3xl text-center">
+            {bio.philosophy_headline && (
+              <Reveal><SectionHeading>{bio.philosophy_headline}</SectionHeading></Reveal>
+            )}
+            <div className="mt-8 space-y-5">
               {bio.philosophy_paragraphs.map((p, i) => (
                 <Reveal key={i} delay={Math.min(i, 4) * 0.04}>
-                  <p className="text-lg leading-[1.85] text-ink-muted">{p}</p>
+                  <p className="text-[16.5px] leading-[1.7]">{p}</p>
                 </Reveal>
               ))}
-              {bio.personal_interests && (
-                <Reveal delay={0.1}>
-                  <p className="text-lg leading-[1.85] text-ink-muted">{bio.personal_interests}</p>
-                </Reveal>
-              )}
             </div>
           </div>
         </section>
       )}
 
-      {/* ───── Final CTA ───── */}
-      <section className="relative overflow-hidden" style={{ backgroundColor: "#66202A" }}>
+      {/* ───── Slate CTA ───── */}
+      <section style={{ backgroundColor: SLATE }}>
         <div className="container-x py-16 sm:py-20 text-center">
           <Reveal>
-            <h2 className="display text-3xl sm:text-4xl text-white leading-tight">
-              {bio.cta_headline ?? `Ready to take the first step?`}
+            <p className="script text-lg" style={{ color: GOLD }}>
+              Ready to begin your healing journey?
+            </p>
+            <h2
+              className="mt-3 text-[28px] sm:text-[36px] lg:text-[42px] font-bold leading-tight tracking-[-1px]"
+              style={{ color: "#F5EDE0" }}
+            >
+              {bio.cta_headline ?? "Take the first step on the path toward a brighter tomorrow!"}
             </h2>
             {bio.cta_subtext && (
-              <p className="mt-4 text-white/80 text-lg max-w-2xl mx-auto leading-relaxed">
+              <p className="mt-4 max-w-2xl mx-auto text-[16.5px] leading-[1.7]" style={{ color: "#E7D9C5" }}>
                 {bio.cta_subtext}
               </p>
             )}
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <a
-                href={JANE_APP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full bg-white text-brand-700 font-semibold text-sm hover:bg-cream transition shadow-soft"
-              >
-                Book an Appointment <FiArrowRight size={14} />
-              </a>
-              <Link
-                href="/team"
-                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-full border border-white/30 text-white font-semibold text-sm hover:bg-white/10 transition"
-              >
-                <FiArrowLeft size={14} /> Meet the full team
-              </Link>
+            <div className="mt-8 flex justify-center">
+              <GoldButton label="Book an Appointment" />
             </div>
           </Reveal>
         </div>

@@ -2,33 +2,21 @@
   "slug": "jordan-fuller",
   "full_name": "Jordan Fuller",
   "credentials_suffix": "CSW-I",
-  "role": "Clinical Social Worker, Intern",
+  "role": "Clinical Social Work Intern",
   "photo_url": "/team/jordan-fuller.jpg",
+  "psychology_today_badge": true,
+  "psychology_today_url": null,
   "hero_headline": "Insightful Conversations. Authentic Growth. Meaningful Change with Jordan Fuller, CSW-I",
-  "hero_intro": null,
+  "hero_intro": "Life can feel overwhelming when you're carrying stress, anxiety, unresolved experiences, or major transitions on your own. Sometimes it's hard to slow down long enough to understand what you're feeling or where to go next. Therapy offers a space to pause, reflect, and reconnect with yourself in a meaningful way. My goal is to create an environment where you feel comfortable being honest, exploring challenges openly, and building toward lasting growth.\n\nAs a Clinical Social Work Intern, I work with adult clients navigating anxiety, depression, trauma, identity exploration, relationship challenges, and life transitions. Although my professional background includes over a decade of supporting youth and students in educational settings, my current clinical focus is helping adults better understand themselves, process difficult experiences, and develop healthier ways of coping and moving forward.\n\nI believe therapy should feel approachable and genuine—not overly clinical or intimidating. Healing can involve difficult conversations, but it can also include moments of insight, perspective, self-discovery, and even humor. I often incorporate relatable examples and metaphors to help clients better understand patterns, shift perspectives, and recognize their own strengths throughout the healing process.",
   "bio_paragraphs": [
-    "Sometimes life feels confusing, overwhelming, or just plain exhausting—especially when you're trying to figure things out on your own. Whether you're dealing with anxiety, past experiences, or big life changes, therapy can be a space where things start to make more sense. With me, you'll find a supportive, down-to-earth environment where you can show up as you are and begin moving forward in a way that feels right for you.",
-    "As a Clinical Social Work Intern, I work primarily with children, teens, and young adults navigating challenges like anxiety, depression, trauma, and transitions. With over 10 years of experience supporting youth in school settings, I understand how these challenges show up in everyday life—and how important it is to feel both heard and understood.",
-    "I believe therapy should feel real and approachable. Growth doesn't have to come only from heavy conversations—it can also come from moments of clarity, new perspectives, and even humor. I often use metaphors and relatable examples to help clients better understand themselves, shift how they view challenges, and recognize their own resilience in the process.",
     "Jordan Fuller is a Clinical Social Work Intern with a background in education, mentorship, and personal development. He earned his Associate's degree in Social Science from Skyline College, a Bachelor's degree in Gender and Sexuality Studies with a minor in Family Studies from the University of Nevada, Las Vegas, and a Master's degree in Psychology from National University. He is currently pursuing his Master's in Social Work at Chamberlain University.",
-    "Jordan has spent over a decade working with K–12 students, along with years mentoring college students and supporting individuals through personal life coaching. His experience gives him a strong understanding of the challenges young people face across different stages of development.",
-    "He takes a thoughtful, strengths-focused approach to therapy, helping clients better understand themselves, navigate difficult experiences, and build the confidence to move forward in meaningful and lasting ways."
+    "Jordan brings years of experience supporting individuals through mentorship, coaching, and guidance across educational and personal development settings. His professional background has shaped his thoughtful, strengths-focused approach to therapy and his ability to connect with clients from diverse experiences and walks of life.",
+    "He is passionate about helping adults navigate anxiety, life transitions, emotional challenges, and personal growth in a way that feels empowering, collaborative, and sustainable."
   ],
-  "qualifications": [
-    "Clinical Social Work Intern (CSW-I)",
-    "Associate's degree in Social Science from Skyline College",
-    "Bachelor's degree in Gender and Sexuality Studies with a minor in Family Studies from the University of Nevada, Las Vegas",
-    "Master's degree in Psychology from National University",
-    "Currently pursuing a Master's in Social Work at Chamberlain University"
-  ],
-  "education": [
-    "Associate's degree in Social Science from Skyline College",
-    "Bachelor's degree in Gender and Sexuality Studies with a minor in Family Studies from the University of Nevada, Las Vegas",
-    "Master's degree in Psychology from National University",
-    "Master's in Social Work (in progress) at Chamberlain University"
-  ],
-  "approach_headline": "A Genuine, Strengths-Focused Approach",
-  "approach_intro": "Therapy is most effective when it feels natural, engaging, and tailored to you. I focus on building a genuine connection while helping clients develop practical tools they can use in their daily lives.",
+  "qualifications": [],
+  "education": [],
+  "approach_headline": "My Approach to Therapy",
+  "approach_intro": "I approach therapy as a collaborative experience where clients feel respected, supported, and empowered to grow at their own pace. Building a strong therapeutic relationship is important to me, and I strive to create sessions that feel engaging, grounded, and meaningful.",
   "modalities": [
     {
       "name": "Cognitive Behavioral Therapy (CBT)",
@@ -39,8 +27,8 @@
       "description": "Identifying and building on your existing capabilities"
     },
     {
-      "name": "Relatable & Interactive Dialogue",
-      "description": "Using real-life examples and metaphors to deepen understanding"
+      "name": "Authentic & Relatable Conversations",
+      "description": "Using practical examples and perspective-shifting dialogue to deepen self-awareness"
     },
     {
       "name": "Client-Led Process",
@@ -49,16 +37,18 @@
   ],
   "who_i_help_headline": "Who He Helps",
   "who_i_help": [
-    "Children, adolescents, and young adults working through emotional or behavioral challenges",
-    "Individuals experiencing anxiety, depression, or the effects of trauma",
-    "Students navigating school stress, identity development, or life direction",
-    "Clients who prefer a therapist who is approachable, genuine, and easy to talk to"
+    "Adults navigating anxiety, depression, trauma, or major life changes",
+    "Individuals working through identity exploration, self-esteem, or personal growth",
+    "Clients facing relationship stress, emotional overwhelm, or difficulty finding direction",
+    "People seeking a therapist who feels approachable, grounded, and easy to connect with",
+    "Individuals wanting deeper self-understanding and practical tools for lasting change"
   ],
+  "philosophy_headline": "A Supportive Space to Learn, Grow, and Move Forward",
   "philosophy_paragraphs": [
-    "My goal is to help you feel more grounded, more self-aware, and more confident in handling life's challenges. Therapy with me is about creating a space where you can explore openly, gain new insights, and develop tools that actually work for you—while feeling supported every step of the way.",
-    "If you're looking for a therapist who brings honesty, perspective, and a human approach to healing, I'm here to support you."
+    "My goal is to help clients feel more confident, self-aware, and emotionally grounded as they navigate life's challenges. Therapy is not about having everything figured out—it's about creating space to better understand yourself, build healthier patterns, and move forward with greater clarity and resilience.",
+    "Whether you're processing past experiences, navigating a difficult season of life, or simply wanting to better understand yourself, I'm here to support you through the process with honesty, compassion, and authenticity."
   ],
   "personal_interests": null,
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

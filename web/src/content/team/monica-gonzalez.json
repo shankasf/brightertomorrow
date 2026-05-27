@@ -2,25 +2,19 @@
   "slug": "monica-gonzalez",
   "full_name": "Monica Gonzalez",
   "credentials_suffix": "CSW-I",
-  "role": "Clinical Social Worker, Intern",
+  "role": "Clinical Social Work Intern",
   "photo_url": "/team/monica-gonzalez.jpg",
+  "psychology_today_badge": true,
+  "psychology_today_url": null,
   "hero_headline": "Compassionate Care. Real Support. Meaningful Growth with Monica Gonzalez, CSW-I",
-  "hero_intro": null,
+  "hero_intro": "Life can feel overwhelming at times—especially when you're navigating anxiety, depression, grief, or feeling misunderstood in a world that doesn't always meet your needs. If you're struggling to find balance or clarity, you're not alone. Therapy with me is a supportive, judgment-free space where you can feel heard, understood, and empowered to move forward.\n\nAs a Clinical Social Work Intern, I work with young adults through mid-adulthood, with a strong focus on supporting Hispanic/Latino and Spanish-speaking communities, as well as neurodiverse and other vulnerable populations. I have experience helping individuals facing challenges such as anxiety, depression, suicidal ideation, psychotic disorders, ADHD, substance use, and grief.",
   "bio_paragraphs": [
-    "Life can feel overwhelming at times—especially when you're navigating anxiety, depression, grief, or feeling misunderstood in a world that doesn't always meet your needs. If you're struggling to find balance or clarity, you're not alone. Therapy with me is a supportive, judgment-free space where you can feel heard, understood, and empowered to move forward.",
-    "As a Clinical Social Work Intern, I work with young adults through mid-adulthood, with a strong focus on supporting Hispanic/Latino and Spanish-speaking communities, as well as neurodiverse and other vulnerable populations. I have experience helping individuals facing challenges such as anxiety, depression, suicidal ideation, psychotic disorders, ADHD, substance use, and grief. I understand how difficult it can be to navigate systems, relationships, and life stressors—especially when language or cultural barriers are present—and I'm here to walk alongside you through it.",
     "Monica Gonzalez holds a Master of Social Work from Fordham University and is a Clinical Social Work Intern dedicated to supporting diverse and underserved communities. She has experience working with individuals facing anxiety, depression, suicidal ideation, psychotic disorders, ADHD, substance use, and grief.",
-    "Monica is trained in CBT, TF-CBT, CBITS, DBT, and Motivational Interviewing, and she is passionate about continuing to expand her skills, including exploring somatic-based approaches. She is especially committed to serving Spanish-speaking, Hispanic/Latino, and neurodiverse populations, offering culturally aware, compassionate care that centers each client's unique experience.",
-    "Her approach is rooted in empathy, encouragement, and accountability—helping clients build resilience, shift perspectives, and move toward meaningful, lasting change."
+    "Monica is trained in CBT, TF-CBT, CBITS, DBT, and Motivational Interviewing, and she is passionate about continuing to expand her skills, including exploring somatic-based approaches. She is especially committed to serving Spanish-speaking, Hispanic/Latino, and neurodiverse populations, offering culturally aware, compassionate care that centers each client's unique experience. Her approach is rooted in empathy, encouragement, and accountability—helping clients build resilience, shift perspectives, and move toward meaningful, lasting change."
   ],
-  "qualifications": [
-    "Master of Social Work from Fordham University",
-    "Clinical Social Work Intern (CSW-I)"
-  ],
-  "education": [
-    "Master of Social Work from Fordham University"
-  ],
-  "approach_headline": "A Supportive, Evidence-Based Approach",
+  "qualifications": [],
+  "education": [],
+  "approach_headline": "A Compassionate and Evidence-Based Approach to Therapy",
   "approach_intro": "I believe therapy should feel both supportive and empowering. My approach combines evidence-based practices with genuine compassion, helping you build insight, develop coping skills, and create meaningful change at your own pace.",
   "modalities": [
     {
@@ -47,11 +41,12 @@
     "Neurodiverse individuals and those facing systemic or social challenges",
     "Clients working through relationship struggles, identity, or major life stressors"
   ],
+  "philosophy_headline": "A Space for Growth, Healing, and Empowerment",
   "philosophy_paragraphs": [
     "My goal is to provide a warm, encouraging space where you feel supported while also being gently challenged to grow. I help clients face their struggles with new perspectives, build accountability toward their goals, and develop tools to navigate life with greater confidence and clarity.",
     "If you're ready to feel more in control, supported, and understood, I'm here to walk that path with you."
   ],
   "personal_interests": null,
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

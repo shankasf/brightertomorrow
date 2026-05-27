@@ -4,24 +4,17 @@
   "credentials_suffix": "CPC-I",
   "role": "Clinical Professional Counselor, Intern",
   "photo_url": "/team/alayna-hammond.jpeg",
+  "psychology_today_badge": true,
+  "psychology_today_url": "https://www.psychologytoday.com/us/therapists/alayna-hammond-las-vegas-nv/1552828",
   "hero_headline": "Real Conversations. Safe Space. Lasting Change with Alayna Hammond, CPC-I",
-  "hero_intro": "Sometimes life feels like too much—too overwhelming, too fast, or too heavy. If you're dealing with anxiety, depression, mood swings, or feeling emotionally stuck, I want you to know you're not alone. Therapy with me is a no-pressure, no-judgment zone where you can breathe, be yourself, and start taking steps toward what truly matters to you.",
+  "hero_intro": "Sometimes life feels like too much—too overwhelming, too fast, or too heavy. If you're dealing with anxiety, depression, mood swings, or feeling emotionally stuck, I want you to know you're not alone. Therapy with me is a no-pressure, no-judgment zone where you can breathe, be yourself, and start taking steps toward what truly matters to you.\n\nAs a Clinical Professional Counselor Intern, I focus on working with adults and young people (ages 7+), especially those in the queer and BIPOC communities, who are navigating mental health challenges such as Borderline Personality Disorder (BPD), anxiety, depression, and suicidal ideation. With a background in the U.S. Air Force, I bring both groundedness and empathy to every session—meeting you where you are and walking beside you as you move forward.",
   "bio_paragraphs": [
-    "As a Clinical Professional Counselor Intern, I focus on working with adults and young people (ages 7+), especially those in the queer and BIPOC communities, who are navigating mental health challenges such as Borderline Personality Disorder (BPD), anxiety, depression, and suicidal ideation. With a background in the U.S. Air Force, I bring both groundedness and empathy to every session—meeting you where you are and walking beside you as you move forward.",
     "Alayna Hammond is a Clinical Professional Counselor Intern with a Bachelor of Science in Psychology from Delaware State University and a Master's in Clinical Mental Health Counseling and School Counseling from Walden University. Before pursuing a career in mental health, she served in the U.S. Air Force, a background that shapes her grounded, direct, and supportive approach to therapy.",
     "Alayna specializes in supporting clients ages 7 and up, with a focus on queer and BIPOC individuals navigating anxiety, depression, suicidal ideation, and Borderline Personality Disorder. She creates a safe, empowering, and nonjudgmental space where clients can explore their emotions and challenges freely.",
     "Using CBT, DBT, and client-centered counseling, Alayna helps clients build emotional resilience, improve self-understanding, and develop healthy coping strategies. Her work is rooted in compassion, respect, and authenticity, and she is passionate about helping people rediscover their strength, value, and purpose."
   ],
-  "qualifications": [
-    "Clinical Professional Counselor, Intern (CPC-I)",
-    "Bachelor of Science in Psychology from Delaware State University",
-    "Master's in Clinical Mental Health Counseling and School Counseling from Walden University",
-    "U.S. Air Force service background"
-  ],
-  "education": [
-    "Bachelor of Science in Psychology from Delaware State University",
-    "Master's in Clinical Mental Health Counseling and School Counseling from Walden University"
-  ],
+  "qualifications": [],
+  "education": [],
   "approach_headline": "A Personalized and Holistic Approach",
   "approach_intro": "Therapy doesn't have to be stiff or clinical—it should feel like real conversations, in a safe space, with someone who sees your whole self. Alayna uses a mix of evidence-based tools and genuine human connection to help clients build emotional balance, healthier coping skills, and renewed self-worth. Here's how I work with clients:",
   "modalities": [
@@ -54,11 +47,12 @@
     "Clients looking for a grounded, affirming, and honest therapist who \"gets it\"",
     "People who want practical tools paired with real conversations and compassion"
   ],
+  "philosophy_headline": "A Space for Clarity, Stability, and Self-Discovery",
   "philosophy_paragraphs": [
     "Therapy doesn't have to feel intimidating or clinical—it can be a place to breathe, reflect, and reconnect with your sense of self. Alayna will meet you where you are, help you clarify what you want out of life, and support you in taking manageable steps toward your goals.",
     "If you're ready for honest conversations, effective tools, and a space where you're genuinely seen, Alayna is here to support you on your journey."
   ],
   "personal_interests": null,
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

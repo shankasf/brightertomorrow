@@ -4,22 +4,18 @@
   "credentials_suffix": "CSW-I",
   "role": "Clinical Social Work, Intern",
   "photo_url": "/team/janelle-thompson.jpg",
+  "psychology_today_badge": true,
+  "psychology_today_url": "https://www.psychologytoday.com/us/therapists/janelle-thompson-las-vegas-nv/1657030",
   "hero_headline": "Compassionate Therapy for Kids and Teens with Janelle Thompson, CSW-I",
-  "hero_intro": "Growing up is full of changes—and sometimes those changes feel overwhelming. As a therapist who specializes in working with children and teens, I help young people navigate the stress, emotions, and big questions that come with growing up in today's world.",
+  "hero_intro": "Growing up is full of changes—and sometimes those changes feel overwhelming. As a therapist who specializes in working with children and teens, I help young people navigate the stress, emotions, and big questions that come with growing up in today's world.\n\nWhether a child is experiencing anxiety, grief, trauma, or struggling with friendships or identity, I create a safe, supportive space where they can feel understood, heard, and empowered. My goal is always to meet kids where they are—offering encouragement, structure, and practical tools they can use both in and outside of therapy.\n\nWith a background in advocacy and crisis support, I've worked closely with youth navigating major life transitions, school stress, family changes, and interpersonal trauma. I believe that emotional safety and a strong therapeutic relationship are the foundations for lasting growth.",
   "bio_paragraphs": [
-    "Whether a child is experiencing anxiety, grief, trauma, or struggling with friendships or identity, I create a safe, supportive space where they can feel understood, heard, and empowered.",
-    "My goal is always to meet kids where they are—offering encouragement, structure, and practical tools they can use both in and outside of therapy.",
-    "With a background in advocacy and crisis support, I've worked closely with youth navigating major life transitions, school stress, family changes, and interpersonal trauma.",
-    "I believe that emotional safety and a strong therapeutic relationship are the foundations for lasting growth.",
     "Janelle Thompson is a Clinical Social Work Intern who specializes in working with children and teens ages 4 to 15. Her background includes advocacy, crisis support, and trauma-informed care for young people navigating grief, anxiety, interpersonal violence, and identity development. She uses a strengths-based, collaborative approach that combines Cognitive Behavioral Therapy (CBT), Dialectical Behavioral Therapy (DBT), and creative engagement strategies tailored to each child's developmental needs.",
     "Janelle brings warmth, patience, and cultural humility to every session, creating a safe and empowering space where young clients can thrive."
   ],
-  "qualifications": [
-    "Clinical Social Work-Intern (CSW-I)"
-  ],
+  "qualifications": [],
   "education": [],
   "approach_headline": "Trauma-informed care, empowerment approach",
-  "approach_intro": "Janelle's work is grounded in trauma-informed care, empowerment theory, and deep respect for each child's lived experience. She helps kids and teens explore their feelings, learn healthy coping strategies, and grow into more confident, connected versions of themselves. You can expect therapy with Janelle to be:",
+  "approach_intro": "Janelle's work is grounded in trauma-informed care, empowerment theory, and deep respect for each child's lived experience. She helps kids and teens explore their feelings, learn healthy coping strategies, and grow into more confident, connected versions of themselves.",
   "modalities": [
     {
       "name": "Kid and Teen Friendly",
@@ -45,11 +41,12 @@
     "Youth adjusting to family transitions, divorce, or loss",
     "Kids from diverse cultural or LGBTQ+ families who need affirming support"
   ],
+  "philosophy_headline": "A Safe Space for Kids and Teens to Be Heard and Grow",
   "philosophy_paragraphs": [
     "Janelle believes that every child deserves to be seen, heard, and supported as they grow. Therapy can be a powerful place for young people to make sense of their world, learn new skills, and feel more confident in themselves.",
     "If your child is struggling emotionally or behaviorally, Janelle is here to help. She is ready to partner together to support your healing, growth, and well-being."
   ],
   "personal_interests": null,
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

@@ -4,22 +4,16 @@
   "credentials_suffix": "LCSW",
   "role": "Licensed Clinical Social Worker",
   "photo_url": "/team/lorenthia-clayton.webp",
+  "psychology_today_badge": true,
+  "psychology_today_url": "https://www.psychologytoday.com/us/therapists/lorenthia-s-clayton-las-vegas-nv/1510426",
   "hero_headline": "Finding Healing and Hope with Lorenthia Clayton, LCSW",
-  "hero_intro": null,
+  "hero_intro": "Life's challenges can often feel overwhelming, especially when facing grief, anxiety, depression, or difficult family dynamics. If you're struggling with loss, trauma, or a sense of disconnection, you don't have to go through it alone. My goal is to provide a safe and compassionate space where you can process your emotions, build self-awareness, and find strength in your healing journey.\n\nAs a Licensed Clinical Social Worker, I specialize in working with teens, young adults, and individuals navigating loss and life transitions. Whether you're struggling with grief, depression, family concerns, or a lack of self-awareness, I believe that healing starts with understanding the root of your struggles and breaking down the barriers that hold you back.",
   "bio_paragraphs": [
-    "Life's challenges can often feel overwhelming, especially when facing grief, anxiety, depression, or difficult family dynamics. If you're struggling with loss, trauma, or a sense of disconnection, you don't have to go through it alone. My goal is to provide a safe and compassionate space where you can process your emotions, build self-awareness, and find strength in your healing journey.",
-    "As a Licensed Clinical Social Worker, I specialize in working with teens, young adults, and individuals navigating loss and life transitions. Whether you're struggling with grief, depression, family concerns, or a lack of self-awareness, I believe that healing starts with understanding the root of your struggles and breaking down the barriers that hold you back.",
     "Lorenthia Clayton is a Licensed Clinical Social Worker committed to helping individuals process emotions, navigate grief, and build resilience. Originally from Los Angeles, CA, she earned her Master's Degree in Social Work with honors from the University of Southern California (USC). Her experience includes working with teens, young adults, and individuals facing end-of-life challenges, helping them find meaning, connection, and healing in their journey.",
     "Lorenthia specializes in treating anxiety, depression, grief, and family concerns. She has a strong passion for supporting bereaved individuals, parents, and youth, guiding them through the complex emotions and challenges that come with loss, identity struggles, and life transitions. She is known for her client-centered approach, ensuring that each person she works with feels heard, validated, and empowered to create change."
   ],
-  "qualifications": [
-    "Licensed Clinical Social Worker (LCSW)",
-    "Master's Degree in Social Work with honors from the University of Southern California (USC)",
-    "Originally from Los Angeles, CA"
-  ],
-  "education": [
-    "Master's Degree in Social Work with honors from the University of Southern California (USC)"
-  ],
+  "qualifications": [],
+  "education": [],
   "approach_headline": "A Holistic and Trauma-Informed Approach",
   "approach_intro": "Lorenthia believes that therapy should be a space for self-exploration, healing, and personal growth. She integrates a variety of evidence-based and compassionate approaches to help clients move forward. Her approach includes:",
   "modalities": [
@@ -52,11 +46,12 @@
     "People facing emotional barriers and seeking clarity and healing.",
     "Clients wanting a supportive, non-judgmental space to process their emotions and build self-confidence."
   ],
+  "philosophy_headline": "A Safe and Supportive Space for Healing",
   "philosophy_paragraphs": [
     "Lorenthia is passionate about helping clients gain self-awareness, heal from the past, and move forward with confidence. She believes that each person has the potential for growth and transformation, and she provides the guidance, tools, and encouragement needed to achieve lasting change.",
     "For those looking for a therapist who understands the complexities of grief, family challenges, and emotional healing, Lorenthia offers a compassionate and empowering approach. She is committed to walking alongside her clients as they reclaim their strength, discover their purpose, and step into a brighter future."
   ],
   "personal_interests": null,
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

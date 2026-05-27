@@ -4,22 +4,17 @@
   "credentials_suffix": "CPC-I",
   "role": "Clinical Professional Counselor, Intern",
   "photo_url": "/team/pascha-broadie.webp",
+  "psychology_today_badge": false,
+  "psychology_today_url": null,
   "hero_headline": "Finding Healing and Balance with Pascha Broadie, CPC-I",
-  "hero_intro": null,
+  "hero_intro": "Life can be overwhelming, especially when depression, anxiety, or emotional struggles leave you feeling lost. If you're experiencing mood challenges, borderline personality disorder (BPD), or circumstantial depression, therapy can provide the support and clarity you need. I offer a safe, non-judgmental space where you can explore your emotions, find healing, and take meaningful steps toward a more fulfilling life.\n\nAs a Clinical Professional Counselor Intern, I specialize in working with young adults and middle-aged individuals, particularly within the Black and LGBTQ+ communities. My approach is built on understanding each person's subjective experiences, creating a therapeutic environment where clients feel seen, heard, and empowered to grow.",
   "bio_paragraphs": [
-    "Life can be overwhelming, especially when depression, anxiety, or emotional struggles leave you feeling lost. If you're experiencing mood challenges, borderline personality disorder (BPD), or circumstantial depression, therapy can provide the support and clarity you need. I offer a safe, non-judgmental space where you can explore your emotions, find healing, and take meaningful steps toward a more fulfilling life.",
-    "As a Clinical Professional Counselor Intern, I specialize in working with young adults and middle-aged individuals, particularly within the Black and LGBTQ+ communities. My approach is built on understanding each person's subjective experiences, creating a therapeutic environment where clients feel seen, heard, and empowered to grow.",
     "Pascha Broadie is a Clinical Professional Counselor Intern dedicated to helping individuals process emotions, heal from past experiences, and build a life of clarity and self-empowerment. She earned her Master of Arts in Clinical Mental Health Counseling from Montreat College in North Carolina and has extensive experience working with adolescents and adults in individual and group therapy settings.",
     "Pascha specializes in treating depression, anxiety, mood disorders, and Borderline Personality Disorder (BPD). She has a deep understanding of how circumstantial depression and emotional dysregulation can impact daily life, and she works closely with clients to help them develop new coping strategies and self-awareness. As a therapist who identifies with the Black and LGBTQ+ communities, she is passionate about creating a culturally competent and affirming space for clients seeking inclusive, empathetic support."
   ],
-  "qualifications": [
-    "Clinical Professional Counselor, Intern (CPC-I)",
-    "Master of Arts in Clinical Mental Health Counseling from Montreat College"
-  ],
-  "education": [
-    "Master of Arts in Clinical Mental Health Counseling from Montreat College in North Carolina"
-  ],
-  "approach_headline": "An Integrative, Evidence-Based Approach",
+  "qualifications": [],
+  "education": [],
+  "approach_headline": "A Personalized and Holistic Approach",
   "approach_intro": "Pascha integrates evidence-based therapy, holistic techniques, and innovative therapeutic tools to help clients navigate their healing journey. Her approach includes:",
   "modalities": [
     {
@@ -47,11 +42,12 @@
     "People dealing with circumstantial depression and major life changes.",
     "Clients looking for a holistic and personalized approach to mental wellness."
   ],
+  "philosophy_headline": "A Safe and Supportive Space",
   "philosophy_paragraphs": [
     "Pascha is committed to helping clients feel heard, valued, and empowered in their healing process. She believes that therapy is a journey toward self-discovery, resilience, and emotional freedom, and she provides the tools and support needed to help clients create lasting change.",
     "For those looking for a compassionate therapist who blends modern psychology with holistic healing, Pascha offers an approach that is both deeply personal and transformative. She is dedicated to helping her clients live with purpose, clarity, and emotional balance."
   ],
   "personal_interests": null,
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

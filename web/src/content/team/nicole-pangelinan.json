@@ -2,26 +2,21 @@
   "slug": "nicole-pangelinan",
   "full_name": "Nicole Pangelinan",
   "credentials_suffix": "CSW-I",
-  "role": "Clinical Social Work, Intern",
+  "role": "Clinical Social Work-Intern",
   "photo_url": "/team/nicole-pangelinan.png",
-  "hero_headline": "Real Conversations. Gentle Healing. Empowered Growth with Nicole Pangelinan, CSW-I",
-  "hero_intro": "Sometimes the weight of past experiences, family stress, or overwhelming emotions can feel like too much to carry alone—especially for children, teens, and young adults still trying to understand who they are and where they belong. If you or your child are navigating anxiety, trauma, mood challenges, or relationship struggles, therapy can be a safe place to slow down, make sense of those experiences, and begin healing at your own pace.",
+  "psychology_today_badge": true,
+  "psychology_today_url": null,
+  "hero_headline": "Compassionate Therapy for Kids and Teens with Nicole Pangelinan, CSW-I",
+  "hero_intro": "Sometimes the weight of past experiences, family stress, or overwhelming emotions can feel like too much to carry alone—especially for children, teens, and young adults still trying to understand who they are and where they belong. If you or your child are navigating anxiety, trauma, mood challenges, or relationship struggles, therapy can be a safe place to slow down, make sense of those experiences, and begin healing at your own pace.\n\nAs a Clinical Level Social Work Intern, I work with children, adolescents, and young adults who are coping with complex trauma, anxiety, mood disorders, behavioral dysregulation, and attachment-related concerns. I'm especially passionate about supporting youth from minority backgrounds or those who have experienced poverty, single-parent dynamics, foster care involvement, or disruptions in early relationships. My goal is to create a warm, validating space where clients feel truly seen, understood, and supported as they build resilience and self-confidence.",
   "bio_paragraphs": [
-    "As a Clinical Level Social Work Intern, I work with children, adolescents, and young adults who are coping with complex trauma, anxiety, mood disorders, behavioral dysregulation, and attachment-related concerns. I'm especially passionate about supporting youth from minority backgrounds or those who have experienced poverty, single-parent dynamics, foster care involvement, or disruptions in early relationships. My goal is to createa warm, validating space where clients feel truly seen, understood, and supported as they build resilience and self-confidence.",
     "Nicole Gogue Pangelinan is a Clinical Level Social Work Intern currently pursuing her Master of Social Work at Syracuse University. She has experience supporting children and adolescents presenting with complex trauma, anxiety disorders, mood disorders, behavioral dysregulation, and attachment-related concerns.",
-    "Nicole believes therapy should feel safe, collaborative, and empowering—never intimidating or rushed. Healing begins with stability and trust, so she will focus first on helping clients feel grounded and emotionally safe before exploring deeper experiences. She blends trauma-informed care with practical skill-building to help clients better understand their emotions, relationships, and inner strengths.",
-    "Her goal is to help clients feel emotionally safe, understood, and empowered to move forward with greater confidence and self-awareness. Whether you or your child are coping with trauma, anxiety, or challenges in relationships and identity, we will work together to build stability, strengthen coping skills, and create a path toward lasting healing and growth.",
-    "If you're looking for compassionate, trauma-informed support that meets you where you are, Nicole is here to walk alongside you every step of the way."
+    "Nicole is trained in trauma-informed care, TF-CBT principles, CBT-based interventions, and DBT-informed skills, and has experience facilitating group therapy, crisis intervention, and behavioral stabilization. She is particularly passionate about helping youth and young adults impacted by trauma, foster care involvement, family instability, and cultural or socioeconomic stressors.",
+    "Her therapeutic approach emphasizes safety, emotional stabilization, and strengthening each client's window of tolerance before deeper trauma processing. Nicole is especially interested in expanding her work with trauma-focused modalities such as IFS and EMDR to further support healing and long-term resilience. Rooted in compassion, cultural awareness, and genuine connection, she is dedicated to helping young people feel validated, build emotional regulation skills, and develop a stronger sense of identity, belonging, and hope."
   ],
-  "qualifications": [
-    "CSW-I (Clinical Social Work-Intern)",
-    "Pursuing Master of Social Work at Syracuse University"
-  ],
-  "education": [
-    "Pursuing Master of Social Work at Syracuse University"
-  ],
+  "qualifications": [],
+  "education": [],
   "approach_headline": "Trauma-informed care, empowerment approach",
-  "approach_intro": null,
+  "approach_intro": "Nicole believes therapy should feel safe, collaborative, and empowering—never intimidating or rushed. Healing begins with stability and trust, so she will focus first on helping clients feel grounded and emotionally safe before exploring deeper experiences. She blends trauma-informed care with practical skill-building to help clients better understand their emotions, relationships, and inner strengths.",
   "modalities": [
     {
       "name": "TF-CBT & CBT-Based Interventions",
@@ -47,10 +42,12 @@
     "Clients struggling with emotional regulation, identity development, or relationship difficulties",
     "Individuals from minority backgrounds seeking culturally aware and validating support"
   ],
+  "philosophy_headline": "A Safe Space for Healing and Growth",
   "philosophy_paragraphs": [
-    "Nicole believes therapy should feel safe, collaborative, and empowering—never intimidating or rushed. Healing begins with stability and trust, so she will focus first on helping clients feel grounded and emotionally safe before exploring deeper experiences. She blends trauma-informed care with practical skill-building to help clients better understand their emotions, relationships, and inner strengths."
+    "Her goal is to help clients feel emotionally safe, understood, and empowered to move forward with greater confidence and self-awareness. Whether you or your child are coping with trauma, anxiety, or challenges in relationships and identity, we will work together to build stability, strengthen coping skills, and create a path toward lasting healing and growth.",
+    "If you're looking for compassionate, trauma-informed support that meets you where you are, Nicole is here to walk alongside you every step of the way."
   ],
   "personal_interests": null,
-  "cta_headline": "Ready to begin your healing journey?",
-  "cta_subtext": "Take the first step on the path toward a brighter tomorrow!"
+  "cta_headline": "Take the first step on the path toward a brighter tomorrow!",
+  "cta_subtext": null
 }

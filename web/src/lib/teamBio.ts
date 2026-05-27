@@ -10,6 +10,10 @@ export type TeamBio = {
   credentials_suffix: string | null;
   role: string | null;
   photo_url: string | null;
+  // "Verified by Psychology Today" seal (image hosted locally). `badge` shows
+  // the seal; `url`, when set, links it to the therapist's PT profile.
+  psychology_today_badge: boolean;
+  psychology_today_url: string | null;
   hero_headline: string | null;
   hero_intro: string | null;
   bio_paragraphs: string[];
@@ -20,6 +24,7 @@ export type TeamBio = {
   modalities: Modality[];
   who_i_help_headline: string | null;
   who_i_help: string[];
+  philosophy_headline: string | null;
   philosophy_paragraphs: string[];
   personal_interests: string | null;
   cta_headline: string | null;
