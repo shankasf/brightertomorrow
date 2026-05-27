@@ -4,6 +4,11 @@
   "credentials_suffix": "LCSW, Team Lead",
   "role": "Licensed Clinical Social Work",
   "photo_url": "/team/joanne-tran.webp",
+  "photos": [
+    "/team/joanne-tran.webp",
+    "/team/joanne-tran-2.webp",
+    "/team/joanne-tran-3.webp"
+  ],
   "psychology_today_badge": true,
   "psychology_today_url": "https://www.psychologytoday.com/us/therapists/joanne-tran-las-vegas-nv/1251774",
   "hero_headline": "Finding Strength Through Life's Challenges with Joanne Tran, LCSW, Team Lead",

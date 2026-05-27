@@ -10,6 +10,10 @@ export type TeamBio = {
   credentials_suffix: string | null;
   role: string | null;
   photo_url: string | null;
+  // Multiple hero photos → auto-crossfading carousel (matches the .com hero
+  // for therapists who have more than one photo). Optional; falls back to
+  // photo_url when absent or single.
+  photos?: string[];
   // "Verified by Psychology Today" seal (image hosted locally). `badge` shows
   // the seal; `url`, when set, links it to the therapist's PT profile.
   psychology_today_badge: boolean;

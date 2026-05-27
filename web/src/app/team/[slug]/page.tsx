@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { FiArrowRight, FiCheck } from "react-icons/fi";
 import Reveal from "@/components/Reveal";
+import HeroPhotoCarousel from "@/components/HeroPhotoCarousel";
 import { getTeamBio } from "@/lib/teamBio";
 
 const JANE_APP_URL = "https://brightertomorrow.janeapp.com/";
@@ -69,6 +70,11 @@ export default async function TherapistBioPage(
 
   const nameLine = `${bio.full_name}${bio.credentials_suffix ? `, ${bio.credentials_suffix}` : ""}`;
   const heroParas = (bio.hero_intro || "").split("\n\n").map((s) => s.trim()).filter(Boolean);
+  const heroPhotos = bio.photos && bio.photos.length > 0
+    ? bio.photos
+    : bio.photo_url
+    ? [bio.photo_url]
+    : [];
 
   return (
     <article className="bg-white" style={{ color: GREY }}>
@@ -76,7 +82,7 @@ export default async function TherapistBioPage(
       <section className="bg-white">
         <div className="container-x py-12 sm:py-16 lg:py-20">
           <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
-            {bio.photo_url && (
+            {(bio.photo_url || heroPhotos.length > 0) && (
               <Reveal direction="up">
                 <div className="relative mx-auto w-full max-w-[420px]">
                   <div
@@ -84,12 +90,18 @@ export default async function TherapistBioPage(
                     className="absolute -bottom-5 -left-5 w-full h-full rounded-[28px]"
                     style={{ backgroundColor: MAROON }}
                   />
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={bio.photo_url}
-                    alt={bio.full_name}
-                    className="relative w-full aspect-[4/5] object-cover object-top rounded-[28px] shadow-lg"
-                  />
+                  {heroPhotos.length > 1 ? (
+                    <div className="relative">
+                      <HeroPhotoCarousel photos={heroPhotos} alt={bio.full_name} />
+                    </div>
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={heroPhotos[0] ?? bio.photo_url ?? ""}
+                      alt={bio.full_name}
+                      className="relative w-full aspect-[4/5] object-cover object-top rounded-[28px] shadow-lg"
+                    />
+                  )}
                 </div>
               </Reveal>
             )}
