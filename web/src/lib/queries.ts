@@ -48,6 +48,7 @@ export type TeamMember = {
   pricing_tier: string | null;
   network_status: string | null;
   specialties: string[];
+  specialties_text: string | null;
 };
 
 export type Testimonial = { id: number; author: string; quote: string; rating: number | null; position: number };
@@ -124,7 +125,7 @@ export async function getTeamGroups(): Promise<TeamGroup[]> {
 export async function getTeamMembers(): Promise<TeamMember[]> {
   const { rows } = await q<TeamMember>(
     `SELECT id, group_id, full_name, credentials, role, bio, photo_url,
-            office_locations, pricing_tier, network_status, specialties
+            office_locations, pricing_tier, network_status, specialties, specialties_text
      FROM bt.team_members WHERE published ORDER BY position`);
   return rows;
 }

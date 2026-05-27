@@ -338,16 +338,21 @@ export default function TeamFilter({
                 const network = m.network_status;
                 const slug = therapistSlug(m.full_name);
                 const first = m.full_name.replace(/^Dr\.\s+/i, "").split(/\s+/)[0] ?? m.full_name;
+                // Specialties sentence: prefer the curated full-sentence field;
+                // fall back to joining the tag array into a sentence.
+                const specialtiesText =
+                  m.specialties_text?.trim() ||
+                  (specialties.length > 0 ? `${specialties.join(", ")}.` : "");
                 return (
                   <Reveal key={m.id} delay={Math.min(i, 8) * 0.04}>
                     <Link
                       href={`/team/${slug}`}
                       aria-label={`Learn more about ${m.full_name}`}
-                      className="group h-full flex flex-col bg-white border border-surface-line rounded-3xl shadow-soft overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+                      className="group h-full flex flex-col bg-brand-700 text-cream rounded-[2.5rem] shadow-soft overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
                     >
                       <article className="contents">
                         {m.photo_url && (
-                          <div className="relative overflow-hidden aspect-[4/5] bg-cream-deep">
+                          <div className="relative overflow-hidden aspect-[4/5] bg-brand-800">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={m.photo_url}
@@ -371,65 +376,56 @@ export default function TeamFilter({
                             )}
                           </div>
                         )}
-                        <div className="p-5 sm:p-6 flex-1 flex flex-col">
-                          <h3 className="font-display text-[1.45rem] sm:text-[1.55rem] text-ink leading-[1.15] break-words group-hover:text-brand-700 transition-colors">
+                        <div className="p-6 sm:p-7 flex-1 flex flex-col">
+                          {/* Name + credentials — centered */}
+                          <h3 className="text-center font-display text-[1.4rem] font-semibold text-cream leading-tight break-words">
                             {m.full_name}
                             {m.credentials && (
-                              <span className="text-ink-soft font-medium text-[0.95rem]">
-                                , {m.credentials}
-                              </span>
+                              <span className="font-normal">, {m.credentials}</span>
                             )}
                           </h3>
                           {m.role && (
-                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">
+                            <p className="mt-1.5 text-center text-sm text-cream/80">
                               {m.role}
-                            </div>
-                          )}
-                          {m.bio && (
-                            <p className="text-[14px] text-ink-muted mt-3 leading-relaxed line-clamp-3">
-                              {m.bio}
                             </p>
                           )}
 
-                          {/* Specialty chips */}
-                          {specialties.length > 0 && (
-                            <div className="mt-4 flex flex-wrap gap-1.5">
-                              {specialties.map((s) => (
-                                <span
-                                  key={s}
-                                  className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 text-[10px] font-semibold uppercase tracking-[0.12em]"
-                                >
-                                  {s}
-                                </span>
-                              ))}
-                            </div>
+                          {/* Divider */}
+                          <div className="my-5 h-px w-full bg-cream/15" />
+
+                          {/* Specialties sentence */}
+                          {specialtiesText && (
+                            <p className="text-[13.5px] text-cream/90 leading-relaxed">
+                              <strong className="text-cream font-semibold">Specialties:</strong>{" "}
+                              {specialtiesText}
+                            </p>
                           )}
 
-                          {/* Bottom row: pricing (wine) + network (sage) — hidden when empty */}
-                          {(price || network) && (
-                            <div className="mt-auto pt-5 flex flex-wrap items-center gap-2">
-                              {price && (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-brand-700 text-white text-[10.5px] font-semibold tracking-[0.04em]">
-                                  {price}
-                                </span>
-                              )}
-                              {network && (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-sage-100 text-sage-700 border border-sage-200 text-[10.5px] font-semibold tracking-[0.04em]">
-                                  {network}
-                                </span>
-                              )}
-                            </div>
+                          {/* Rate */}
+                          {price && (
+                            <p className="mt-3 text-[13.5px] text-cream/90">
+                              <strong className="text-cream font-semibold">Rate:</strong> {price}
+                            </p>
                           )}
 
-                          {/* Learn more affordance — entire card is clickable; this is the visible CTA */}
-                          <div className={`${price || network ? "mt-4" : "mt-auto pt-5"} flex items-center gap-2 text-brand-700 font-semibold text-sm`}>
-                            <span>Learn more about {first}</span>
-                            <FiArrowRight
-                              aria-hidden
-                              size={14}
-                              className="transition-transform duration-300 group-hover:translate-x-1"
-                            />
-                          </div>
+                          {/* Network */}
+                          {network && (
+                            <p className="mt-3 text-[13px] font-semibold text-cream">
+                              {network}
+                            </p>
+                          )}
+
+                          {/* CTA — gold-outline pill; entire card is the link, this is the visible affordance */}
+                          <span className="mt-auto pt-6 inline-flex">
+                            <span className="inline-flex items-center justify-center gap-2 w-full rounded-[20px_20px_20px_0] border border-brand bg-transparent px-5 py-3 text-sm font-semibold text-cream transition-colors duration-300 group-hover:bg-brand group-hover:text-ink">
+                              Meet more about {first}
+                              <FiArrowRight
+                                aria-hidden
+                                size={14}
+                                className="transition-transform duration-300 group-hover:translate-x-1"
+                              />
+                            </span>
+                          </span>
                         </div>
                       </article>
                     </Link>
