@@ -36,7 +36,6 @@ export const FALLBACK_ROSTER: Therapist[] = [
   { staffId: 47, name: 'Elisia Danley',      feedConnected: true,  colorHex: '#DB2777' },
   { staffId: 24, name: 'Keunshea Fleming',   feedConnected: true,  colorHex: '#2563EB' },
   { staffId: 21, name: 'Alayna Hammond',     feedConnected: true,  colorHex: '#059669' },
-  { staffId: 34, name: 'Christie Johnson',   feedConnected: true,  colorHex: '#D97706' },
   { staffId: 53, name: 'Janelle Thompson',   feedConnected: true,  colorHex: '#DC2626' },
   { staffId: 59, name: 'Samara Cobb',        feedConnected: false, colorHex: '#6B7280' },
   { staffId: 16, name: 'Joanne Tran',        feedConnected: false, colorHex: '#6B7280' },

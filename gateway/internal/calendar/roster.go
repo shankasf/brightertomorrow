@@ -10,16 +10,15 @@ type Therapist struct {
 	ColorHex      string `json:"colorHex"`
 }
 
-// Roster is the canonical list of 10 therapists. All have iCal feeds wired
-// (feedConnected: true) — the prior 4 "no-feed" entries got self-served
-// tokens on 2026-05-21. This is the single source of truth — admin UI and
+// Roster is the canonical list of therapists. All have iCal feeds wired
+// (feedConnected: true). This is the single source of truth — admin UI and
 // AI agents derive the staffId set from this slice.
+// (Christie Johnson, staffId 34, left the practice 2026-05-27 and was removed.)
 var Roster = []Therapist{
 	{StaffID: 71, Name: "Sagar Shankaran", FeedConnected: true, ColorHex: "#7C3AED"},
 	{StaffID: 47, Name: "Elisia Danley", FeedConnected: true, ColorHex: "#DB2777"},
 	{StaffID: 24, Name: "Keunshea Fleming", FeedConnected: true, ColorHex: "#2563EB"},
 	{StaffID: 21, Name: "Alayna Hammond", FeedConnected: true, ColorHex: "#059669"},
-	{StaffID: 34, Name: "Christie Johnson", FeedConnected: true, ColorHex: "#D97706"},
 	{StaffID: 53, Name: "Janelle Thompson", FeedConnected: true, ColorHex: "#DC2626"},
 	{StaffID: 59, Name: "Samara Cobb", FeedConnected: true, ColorHex: "#0891B2"},
 	{StaffID: 16, Name: "Joanne Tran", FeedConnected: true, ColorHex: "#9333EA"},

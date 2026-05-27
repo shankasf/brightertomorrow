@@ -26,7 +26,6 @@ const THERAPIST_OPTIONS: string[] = [
   "Elisia Danley",
   "Keunshea Fleming",
   "Alayna Hammond",
-  "Christie Johnson",
   "Janelle Thompson",
   "Samara Cobb",
   "Joanne Tran",
