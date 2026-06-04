@@ -40,6 +40,7 @@ type Appointment = {
   sex: string;
   insurance_name: string;
   insurance_member_id: string;
+  therapist_name: string;
   workflow_status: string;
   email_hash: string;
 };
@@ -505,7 +506,7 @@ export default function AdminAppointmentsPage() {
       </AnimatePresence>
 
       {!data && !error ? (
-        <SkeletonRows rows={6} cols={11} />
+        <SkeletonRows rows={6} cols={12} />
       ) : items.length === 0 ? (
         <EmptyState
           title={from || to || q || source !== 'all' || status !== 'active' ? 'No appointment requests match these filters' : 'No appointment requests yet'}
@@ -536,6 +537,7 @@ export default function AdminAppointmentsPage() {
                 <SortableTH label="Sex" col="sex" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('sex')} />
                 <SortableTH label="Insurance" col="insurance_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_name')} />
                 <SortableTH label="Member ID" col="insurance_member_id" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_member_id')} />
+                <TH>Interested therapist</TH>
                 <TH>Source</TH>
                 <SortableTH label="Received" col="created_at" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('created_at')} />
               </tr>
@@ -575,6 +577,7 @@ export default function AdminAppointmentsPage() {
                   <TD className="whitespace-nowrap font-mono text-[12.5px] tabular-nums">
                     {a.insurance_member_id || '—'}
                   </TD>
+                  <TD className="whitespace-nowrap">{a.therapist_name || '—'}</TD>
                   <TD>
                     <Pill tone={sourceTone(a.source)} dot>{a.source_label}</Pill>
                   </TD>

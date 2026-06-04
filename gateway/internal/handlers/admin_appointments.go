@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/calendar"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	appmw "github.com/brightertomorrowtherapy/bt-gateway/internal/middleware"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
@@ -39,6 +40,7 @@ type appointmentRow struct {
 	CreatedAt         string `json:"created_at"`
 	AppointmentTime   string `json:"appointment_time,omitempty"`
 	TherapistStaffID  int    `json:"therapist_staff_id,omitempty"`
+	TherapistName     string `json:"therapist_name,omitempty"` // resolved calendar roster name, blank if unknown
 	Source            string `json:"source"`
 	SourceLabel       string `json:"source_label"`
 	Flow              string `json:"flow"`
@@ -261,6 +263,9 @@ func (h *AdminAppointmentsHandler) fetchAppointments(r *http.Request, f appointm
 		}
 		if rec.TherapistStaffID != nil {
 			row.TherapistStaffID = *rec.TherapistStaffID
+			if t, ok := calendar.ByID(*rec.TherapistStaffID); ok {
+				row.TherapistName = t.Name
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -360,7 +365,7 @@ func (h *AdminAppointmentsHandler) ExportCSV(w http.ResponseWriter, r *http.Requ
 		"First Name", "Last Name", "Date of Birth", "Phone", "Email", "Home Address", "Sex",
 		"Insurance Name", "Insurance ID Number",
 		// New columns appended — existing consumers unaffected.
-		"Email Hash", "Workflow Status",
+		"Email Hash", "Workflow Status", "Interested Therapist",
 	})
 	for _, r := range rows {
 		staffID := ""
@@ -376,7 +381,7 @@ func (h *AdminAppointmentsHandler) ExportCSV(w http.ResponseWriter, r *http.Requ
 			r.SourceLabel, r.Flow, r.Status, r.PaymentMethod,
 			r.FirstName, r.LastName, r.DateOfBirth, r.Phone, r.Email, r.HomeAddress, r.Sex,
 			r.InsuranceName, r.InsuranceMemberID,
-			r.EmailHash, wfStatus,
+			r.EmailHash, wfStatus, r.TherapistName,
 		})
 	}
 	cw.Flush()
