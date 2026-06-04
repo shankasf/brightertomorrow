@@ -2,13 +2,11 @@
 //
 // Why this lives in DDB and not Postgres
 // ======================================
-// bt.insurance_checks rows hold payer_name, coverage_status, email_hash,
-// and (when linked) a submission_uuid that resolves to full patient PHI in
-// DDB. Under HIPAA the combination of email_hash + payer + status + linkage
-// to an intake record is a HIPAA-covered de-identified linking token.
-// Hostinger does not sign a BAA; the VPS Postgres cannot legally hold these.
-// The bt-main DynamoDB table is CMK-encrypted, BAA-covered, and the right
-// place for all PHI-adjacent records.
+// Insurance check rows carry patient name / DOB / phone / email / member
+// ID plus payer + status. That is full PHI. The bt-main DynamoDB table is
+// CMK-encrypted, BAA-covered, and the only place this data is allowed to
+// land — Hostinger does not sign a BAA, so the VPS Postgres cannot hold
+// it. Admin reads are audited per row via admin.LogPHIAccessBatch.
 //
 // Single-table key shape
 // ======================
@@ -47,9 +45,17 @@ import (
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// InsuranceCheckRecord is the PHI-adjacent record for one eligibility check.
+// InsuranceCheckRecord is the PHI record for one eligibility check.
 // When SubmissionUUID is empty the check is "standalone" (no booking yet).
 // When linked, SubmissionUUID points to the IntakeRecord in DDB.
+//
+// PHI fields (FirstName/LastName/DateOfBirth/Phone/Email/MemberID) are
+// stored in plaintext on the same BAA-covered, CMK-encrypted bt-main table
+// that holds IntakeRecord PHI. Admin reads are audited via
+// admin.LogPHIAccessBatch in handlers/admin_insurance_checks.go. Without
+// these on the record, standalone chatbot / voice / website coverage checks
+// render as "—" in /admin/insurance-checks until they get linked to a
+// booking, which defeats the audit-trail purpose of the page.
 type InsuranceCheckRecord struct {
 	CheckUUID      string     `dynamodbav:"checkUuid"`
 	SubmissionUUID string     `dynamodbav:"submissionUuid,omitempty"`
@@ -60,6 +66,12 @@ type InsuranceCheckRecord struct {
 	CoverageStatus string     `dynamodbav:"coverageStatus"`
 	Eligible       bool       `dynamodbav:"eligible"`
 	EmailHash      string     `dynamodbav:"emailHash"`
+	FirstName      string     `dynamodbav:"firstName,omitempty"`
+	LastName       string     `dynamodbav:"lastName,omitempty"`
+	DateOfBirth    string     `dynamodbav:"dateOfBirth,omitempty"` // YYYY-MM-DD
+	Phone          string     `dynamodbav:"phone,omitempty"`
+	Email          string     `dynamodbav:"email,omitempty"`
+	MemberID       string     `dynamodbav:"insuranceMemberId,omitempty"`
 	CreatedAt      time.Time  `dynamodbav:"createdAt"`
 	RetainUntil    time.Time  `dynamodbav:"retainUntil"`
 	PurgedAt       *time.Time `dynamodbav:"purgedAt,omitempty"`
@@ -300,6 +312,12 @@ type InsuranceCheckSummary struct {
 	PayerName      string
 	CoverageStatus string
 	Eligible       bool
+	FirstName      string
+	LastName       string
+	DateOfBirth    string
+	Phone          string
+	Email          string
+	MemberID       string
 	CreatedAt      time.Time
 }
 
@@ -368,7 +386,10 @@ func (s *Store) ListInsuranceChecks(ctx context.Context, f InsuranceCheckFilter)
 			continue
 		}
 		if needle != "" {
-			hay := strings.ToLower(r.PayerName + " " + r.EmailHash + " " + r.CheckUUID)
+			hay := strings.ToLower(strings.Join([]string{
+				r.PayerName, r.EmailHash, r.CheckUUID,
+				r.FirstName, r.LastName, r.Email, r.Phone, r.MemberID,
+			}, " "))
 			if !strings.Contains(hay, needle) {
 				continue
 			}
@@ -381,6 +402,12 @@ func (s *Store) ListInsuranceChecks(ctx context.Context, f InsuranceCheckFilter)
 			PayerName:      r.PayerName,
 			CoverageStatus: r.CoverageStatus,
 			Eligible:       r.Eligible,
+			FirstName:      r.FirstName,
+			LastName:       r.LastName,
+			DateOfBirth:    r.DateOfBirth,
+			Phone:          r.Phone,
+			Email:          r.Email,
+			MemberID:       r.MemberID,
 			CreatedAt:      r.CreatedAt,
 		})
 	}

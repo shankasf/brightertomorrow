@@ -12,12 +12,12 @@
 //
 // HIPAA model
 // ===========
-// • bt.insurance_checks holds non-PHI only — payer name, status, eligible
-//   flag, email_hash (or name+DOB hash for standalone checks), source.
-//   No first/last name, no DOB, no member_id ever lands in Postgres here.
-//   §164.502(b) minimum necessary.
-// • The row gains an immutable audit entry via the phi_audit_trigger
-//   already attached to this table.
+// • The InsuranceCheckRecord lives on DynamoDB bt-main (BAA-covered,
+//   CMK-encrypted) and carries the patient PHI the AI already collected
+//   (name, DOB, member ID, optional phone/email). Storing it here lets the
+//   admin /admin/insurance-checks page show "who was checked" for every
+//   eligibility decision — standalone or booking-linked.
+// • Admin reads are audited per row via admin.LogPHIAccessBatch.
 // • Endpoint is /internal/* — not exposed via Traefik ingress. Cluster
 //   boundary IS the auth boundary.
 package handlers
@@ -44,15 +44,19 @@ type CoverageInternalHandler struct {
 }
 
 // recordRequest is the body of POST /internal/coverage/record. The AI
-// pod sends the CLAIM.MD outcome plus enough identity bits to hash a
-// stable patient identifier — never plaintext PII (we don't want first
-// name, last name, or DOB leaving the DDB layer).
+// pod sends the CLAIM.MD outcome plus the patient PHI it collected to
+// run the check — name, DOB, member ID, and (when known) phone / email.
+// All of it lands on the InsuranceCheckRecord so the admin history page
+// can show who was checked even before they finish booking.
 type recordRequest struct {
 	FirstName      string `json:"first_name"`
 	LastName       string `json:"last_name"`
 	DateOfBirth    string `json:"date_of_birth"`     // YYYY-MM-DD
 	PayerName      string `json:"payer_name"`
 	PayerID        string `json:"payer_id,omitempty"` // CLAIM.MD code
+	MemberID       string `json:"member_id,omitempty"`
+	Phone          string `json:"phone,omitempty"`
+	Email          string `json:"email,omitempty"`
 	Eligible       bool   `json:"eligible"`
 	CoverageStatus string `json:"coverage_status"`
 	Source         string `json:"source"`             // chat-agent | voice-agent
@@ -64,6 +68,9 @@ func (b *recordRequest) normalize() {
 	b.DateOfBirth = strings.TrimSpace(b.DateOfBirth)
 	b.PayerName = strings.TrimSpace(b.PayerName)
 	b.PayerID = strings.TrimSpace(b.PayerID)
+	b.MemberID = strings.TrimSpace(b.MemberID)
+	b.Phone = strings.TrimSpace(b.Phone)
+	b.Email = strings.TrimSpace(b.Email)
 	b.CoverageStatus = strings.TrimSpace(b.CoverageStatus)
 	b.Source = strings.TrimSpace(b.Source)
 }
@@ -133,6 +140,12 @@ func (h *CoverageInternalHandler) Record(w http.ResponseWriter, r *http.Request)
 		CoverageStatus: CanonicalCoverageStatus(body.CoverageStatus, body.Eligible),
 		Eligible:       body.Eligible,
 		EmailHash:      hash,
+		FirstName:      body.FirstName,
+		LastName:       body.LastName,
+		DateOfBirth:    body.DateOfBirth,
+		Phone:          body.Phone,
+		Email:          body.Email,
+		MemberID:       body.MemberID,
 		CreatedAt:      now,
 		RetainUntil:    now.AddDate(10, 0, 0),
 	}

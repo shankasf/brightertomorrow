@@ -18,9 +18,11 @@ import (
 )
 
 // AdminInsuranceChecksHandler exposes the eligibility-check history.
-// Reads insurance check summaries from DynamoDB bt-main (BAA-covered)
-// and hydrates patient name/phone/email/member_id from the same DDB
-// store via BatchGetIntakes when a check is linked to a booking.
+// Reads InsuranceCheckSummary rows from DynamoDB bt-main (BAA-covered).
+// Patient name / DOB / phone / email / member ID live on the
+// InsuranceCheckRecord itself; for rows linked to a booking we still call
+// BatchGetIntakes to overlay any fresher contact details captured at
+// booking time (e.g. the visitor typed a phone after coverage check).
 //
 // HIPAA: every list / export / detail call writes one access_log row per
 // PHI record returned, so "who looked up which check, when" is auditable.
@@ -156,15 +158,37 @@ func (h *AdminInsuranceChecksHandler) fetchChecks(ctx context.Context, f insuran
 			PayerName:      s.PayerName,
 			CoverageStatus: s.CoverageStatus,
 			Eligible:       s.Eligible,
+			FirstName:      s.FirstName,
+			LastName:       s.LastName,
+			DateOfBirth:    s.DateOfBirth,
+			Phone:          s.Phone,
+			Email:          s.Email,
+			MemberID:       s.MemberID,
 		}
+		// For booking-linked checks, overlay any fresher contact details
+		// captured at booking time (e.g. phone added after the coverage
+		// step). Record fields are kept as the fallback so older standalone
+		// checks still render even if the IntakeRecord lacks a field.
 		if s.SubmissionUUID != "" {
 			if rec, ok := recs[s.SubmissionUUID]; ok && rec != nil {
-				row.FirstName = rec.FirstName
-				row.LastName = rec.LastName
-				row.DateOfBirth = rec.DateOfBirth
-				row.Phone = rec.Phone
-				row.Email = rec.Email
-				row.MemberID = rec.InsuranceMemberID
+				if rec.FirstName != "" {
+					row.FirstName = rec.FirstName
+				}
+				if rec.LastName != "" {
+					row.LastName = rec.LastName
+				}
+				if rec.DateOfBirth != "" {
+					row.DateOfBirth = rec.DateOfBirth
+				}
+				if rec.Phone != "" {
+					row.Phone = rec.Phone
+				}
+				if rec.Email != "" {
+					row.Email = rec.Email
+				}
+				if rec.InsuranceMemberID != "" {
+					row.MemberID = rec.InsuranceMemberID
+				}
 			}
 		}
 		if needle != "" {

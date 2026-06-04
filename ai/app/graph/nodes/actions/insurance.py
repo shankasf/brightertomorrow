@@ -270,11 +270,18 @@ def verify_insurance(state: State) -> dict[str, Any]:
         outcome = "needs_manual_review"
 
     # Best-effort audit row to gateway (non-critical path).
+    # Send the patient PHI the gateway needs to render the admin
+    # /admin/insurance-checks row with name/DOB/member ID. Phone/email
+    # come from booking_fields when the visitor has already shared them.
+    bk = state.get("booking_fields") or {}
     try:
         gateway_post("/internal/coverage/record", {
             "first_name": first_name, "last_name": last_name,
             "date_of_birth": f"{valid_dob[:4]}-{valid_dob[4:6]}-{valid_dob[6:8]}",
             "payer_name": payer.name, "payer_id": payer.id,
+            "member_id": member_id,
+            "phone": (bk.get("phone") or "").strip(),
+            "email": (bk.get("email") or "").strip(),
             "eligible": (outcome == "eligible"),
             "coverage_status": outcome,
             "source": state.get("agent_source", "chat-agent"),

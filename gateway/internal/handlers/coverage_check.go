@@ -8,14 +8,14 @@
 //
 // HIPAA model
 // ===========
-// * No intake_pointers row, no DDB write — this is just a coverage probe,
-//   not a booking. PHI never leaves the visitor's session except for the
-//   single Claim.MD call.
-// * bt.insurance_checks gets non-PHI only: payer, status, eligible flag,
-//   email_hash (sha256 of name|dob when no email is given). §164.502(b).
-// * If the visitor leaves a phone/email, it goes into the audit row's
-//   email_hash bucket so we can correlate a later booking — but the
-//   plaintext contact is NOT persisted here.
+// * No IntakeRecord — this is a coverage probe, not a booking. No
+//   appointment, no therapist assignment.
+// * One InsuranceCheckRecord lands on DynamoDB bt-main (BAA-covered,
+//   CMK-encrypted) carrying the patient PHI the visitor just typed
+//   (name, DOB, payer, member ID, optional phone/email). That's the same
+//   PHI surface the chatbot / voice agent persist via /internal/coverage/record.
+// * Admin reads on /admin/insurance-checks are audited per row via
+//   admin.LogPHIAccessBatch. §164.312(b).
 package handlers
 
 import (
@@ -188,6 +188,12 @@ func (h *CoverageCheckHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			CoverageStatus: CanonicalCoverageStatus(coverageStatus, eligible),
 			Eligible:       eligible,
 			EmailHash:      hash,
+			FirstName:      body.FirstName,
+			LastName:       body.LastName,
+			DateOfBirth:    body.DateOfBirth,
+			Phone:          body.Phone,
+			Email:          body.Email,
+			MemberID:       body.MemberID,
 			CreatedAt:      now,
 			RetainUntil:    now.AddDate(10, 0, 0),
 		}); err != nil {
