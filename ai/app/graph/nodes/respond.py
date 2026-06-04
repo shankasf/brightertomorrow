@@ -25,10 +25,11 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ..config import gateway_base_url, respond_model_name
+from ...data.identifiers import format_dob_pretty
+from ..config import gateway_base_url, respond_model_name, text_base_url
 from ..prompts.persona import persona_block
 from ..prompts._constants import HIPAA_DISCLOSURE_CHAT, HIPAA_DISCLOSURE_VOICE
-from ..prompts.scenes import FIELD_PROMPTS, SCENE_INSTRUCTIONS
+from ..prompts.scenes import FIELD_PROMPTS, FIELD_VERBATIM, SCENE_INSTRUCTIONS
 from ..state import (
     State,
     booking_fields_complete,
@@ -48,7 +49,11 @@ _responder = None
 def _get_responder():
     global _responder
     if _responder is None:
-        _responder = ChatOpenAI(model=respond_model_name(), temperature=0.4)
+        _responder = ChatOpenAI(
+            model=respond_model_name(),
+            temperature=0.4,
+            base_url=text_base_url(),
+        )
     return _responder
 
 
@@ -344,10 +349,11 @@ def _context_for_scene(scene: str, state: State) -> str:
             bits.append(f"availability_for: {state.get('staff_name')}")
     elif scene == "confirm_booking":
         slot = state.get("selected_slot") or {}
+        dob_pretty = format_dob_pretty(ins.get("dob_yyyymmdd"))
         bits.append(
             "recap:\n"
             f"  name: {ins.get('first_name')} {ins.get('last_name')}\n"
-            f"  dob: {ins.get('dob_yyyymmdd')}\n"
+            f"  dob: {dob_pretty or ins.get('dob_yyyymmdd')}\n"
             f"  phone: {bk.get('phone')}\n"
             f"  email: {bk.get('email')}\n"
             f"  address: {bk.get('home_address')}\n"
@@ -448,15 +454,7 @@ def _context_for_scene(scene: str, state: State) -> str:
         bits.append(f"saved_first_name: {first_name}")
         bits.append(f"saved_stage: {stage}")
     elif scene == "confirm_reuse_insurance":
-        dob = (ins.get("dob_yyyymmdd") or "").strip()
-        dob_pretty = ""
-        if len(dob) == 8 and dob.isdigit():
-            from datetime import date
-            try:
-                d = date(int(dob[:4]), int(dob[4:6]), int(dob[6:8]))
-                dob_pretty = d.strftime("%B %-d, %Y")
-            except ValueError:
-                dob_pretty = ""
+        dob_pretty = format_dob_pretty(ins.get("dob_yyyymmdd"))
         bits.append(f"saved_first_name: {ins.get('first_name') or ''}")
         bits.append(f"saved_last_name: {ins.get('last_name') or ''}")
         bits.append(f"saved_dob_pretty: {dob_pretty}")
@@ -564,6 +562,14 @@ def respond(state: State) -> dict[str, Any]:
         else:
             field = first_missing_booking(state) or ""
         scene_instr = scene_instr.format(field_label=FIELD_PROMPTS.get(field, field))
+        # Locked-wording fields: override the blended ask with a verbatim
+        # sentence so no empathy preamble or rephrasing creeps in.
+        if scene in {"ask_booking_field", "ask_callback_field"} and field in FIELD_VERBATIM:
+            scene_instr = (
+                "Output the following sentence EXACTLY as written, with no "
+                "preamble, no empathy lead-in, no rephrasing, and nothing "
+                "added before or after it:\n\n" + FIELD_VERBATIM[field]
+            )
 
     system = SystemMessage(content=f"{persona}\n\n# Scene: {scene}\n{scene_instr}")
     context_msg = HumanMessage(content=f"# Context\n{context}")

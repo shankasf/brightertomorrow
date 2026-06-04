@@ -13,6 +13,8 @@ Env vars consumed:
                                     fast model; defaults to OPENAI_MODEL).
   * OPENAI_RESPOND_MODEL          — override JUST the respond model;
                                     defaults to OPENAI_MODEL.
+  * OPENAI_JUDGE_MODEL            — model used by the LLM-as-judge eval
+                                    (defaults to OPENAI_MODEL).
   * REALTIME_MODEL                — realtime voice model (default
                                     ``gpt-realtime-2``).
   * REALTIME_VOICE                — TTS voice id (default ``marin``).
@@ -40,6 +42,20 @@ DEFAULT_TEXT_MODEL = "gpt-5.5-2026-04-23"
 DEFAULT_REALTIME_MODEL = "gpt-realtime-2"
 DEFAULT_REALTIME_VOICE = "marin"
 DEFAULT_REALTIME_BASE_URL = "wss://us.api.openai.com/v1/realtime"
+# OpenAI pins BT's key to US data residency — every REST call (chat,
+# extract, structured output) MUST hit us.api.openai.com or it 401s with
+# `incorrect_hostname`. ChatOpenAI defaults to api.openai.com, so we must
+# pass this base_url explicitly on every text-model client.
+DEFAULT_TEXT_BASE_URL = "https://us.api.openai.com/v1"
+
+
+def text_base_url() -> str:
+    """REST base URL for all text-model (ChatOpenAI) calls.
+
+    Defaults to the US-region host required by BT's OpenAI key. Override
+    with OPENAI_BASE_URL only if the key's data-residency region changes.
+    """
+    return (os.environ.get("OPENAI_BASE_URL") or DEFAULT_TEXT_BASE_URL).rstrip("/")
 
 
 def text_model_name() -> str:
@@ -63,6 +79,15 @@ def respond_model_name() -> str:
     primary text model here for warmth / fluency.
     """
     return os.environ.get("OPENAI_RESPOND_MODEL") or text_model_name()
+
+
+def judge_model_name() -> str:
+    """Model used by the LLM-as-judge evaluator.
+
+    Reads OPENAI_JUDGE_MODEL; falls back to text_model_name() so the same
+    model pin covers evals when no override is set.
+    """
+    return os.environ.get("OPENAI_JUDGE_MODEL") or text_model_name()
 
 
 def realtime_model_name() -> str:

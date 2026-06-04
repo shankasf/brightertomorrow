@@ -91,6 +91,23 @@ FIELD_PROMPTS: dict[str, str] = {
     "sex":             "how they identify (female, male, non-binary, or another option) for the chart",
 }
 
+# Verbatim phrasings for fields whose wording the practice wants locked down
+# (no LLM-blended empathy preambles, no rephrasing). When the field being asked
+# in an ask_booking_field / ask_callback_field scene has an entry here, the
+# responder is instructed to output this sentence EXACTLY. Channel-agnostic.
+FIELD_VERBATIM: dict[str, str] = {
+    "phone": (
+        "Thank you for sharing that information. To further assist in "
+        "connecting you with a therapist, what is the best phone number to "
+        "reach you at?"
+    ),
+    "sex": (
+        "Thanks — to further assist with establishing you as a client, we will "
+        "need to know how do you identify: female, male, non-binary, or another "
+        "option? This information is also needed when using your insurance."
+    ),
+}
+
 
 SCENE_INSTRUCTIONS: dict[str, str] = {
 
@@ -245,7 +262,7 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "CHAT channel (`channel: chat`): render each detail on its OWN line as "
         "a Markdown bullet with a BOLD label — one bullet per detail, e.g.:\n"
         "  - **Name:** Jane Doe\n"
-        "  - **Date of birth:** ...\n"
+        "  - **Date of birth:** October 2, 1987\n"
         "  - **Phone:** ...\n"
         "  - **Email:** ...\n"
         "  - **Address:** ...\n"

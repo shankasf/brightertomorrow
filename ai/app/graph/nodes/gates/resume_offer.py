@@ -18,7 +18,7 @@ from ....integrations.aws_signer import gateway_post
 
 # Import config directly from its module to avoid traversing graph/__init__.py,
 # which triggers a transitive import chain through actions.py -> core.db -> psycopg.
-from ...config import text_model_name
+from ...config import text_model_name, text_base_url
 from ...state import BookingFields, InsuranceFields, State
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,12 @@ _CARRY_FORWARD_INTENT = True
 
 def _get_llm() -> ChatOpenAI:
     """Lazy singleton for the summary LLM call."""
-    return ChatOpenAI(model=text_model_name(), temperature=0, max_tokens=80)
+    return ChatOpenAI(
+        model=text_model_name(),
+        temperature=0,
+        max_tokens=80,
+        base_url=text_base_url(),
+    )
 
 
 def _fetch_prior_turns(prior_session_id: str) -> list[dict]:

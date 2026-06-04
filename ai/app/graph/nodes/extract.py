@@ -25,7 +25,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ..config import extract_model_name
+from ..config import extract_model_name, text_base_url
 from ..prompts.extract import EXTRACT_SYSTEM_PROMPT, FieldDeltas, TurnExtraction
 from ..state import (
     BookingFields,
@@ -319,6 +319,7 @@ def _get_extractor():
         _extractor = ChatOpenAI(
             model=extract_model_name(),
             temperature=0,
+            base_url=text_base_url(),
         ).with_structured_output(TurnExtraction)
     return _extractor
 
