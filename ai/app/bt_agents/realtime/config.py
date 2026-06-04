@@ -11,18 +11,27 @@ import os
 from agents.realtime import RealtimeRunConfig, RealtimeSessionModelSettings
 
 DEFAULT_REALTIME_MODEL = "gpt-realtime-2"
-# Pin to the 2025-12-15 snapshot — OpenAI's own benchmarks show ~70-90%
-# fewer hallucinations on silence/noise vs. the prior snapshot. The floating
-# `gpt-4o-mini-transcribe` slug already resolves here today, but pinning is
-# what protects us from future drift (whisper-style prompt echoes on PSTN
-# silence are still the dominant failure mode for this model family).
-DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe-2025-12-15"
+# Updated 2026-05-28: bumped from `gpt-4o-mini-transcribe-2025-12-15` to
+# `gpt-realtime-whisper` (released 2026-05-07 — see
+# https://openai.com/index/advancing-voice-intelligence-with-new-models-in-the-api/).
+# It is the only natively streaming transcription model on the Realtime API
+# (the gpt-4o-*-transcribe family is batch-style and adds latency) and is the
+# documented forward path before the `gpt-4o-*-transcribe-2025-*` and
+# `whisper-1` retirements in June 2026. No dated snapshot exists yet (floating
+# slug); revisit and pin once OpenAI publishes one. The base slug is
+# acceptable per their Realtime transcription guide.
+DEFAULT_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
 DEFAULT_REALTIME_VOICE = "marin"
-# Global Realtime endpoint. The project is NO LONGER region-pinned (confirmed
-# 2026-05-23) — the old `us.api.openai.com` host now closes the WS with
-# `invalid_request_error.incorrect_hostname`, while the global host accepts it.
-# Override via REALTIME_BASE_URL only if OpenAI re-pins the project to a region.
-DEFAULT_REALTIME_BASE_URL = "wss://api.openai.com/v1/realtime"
+# US-region Realtime endpoint (updated 2026-05-28). The new OpenAI service-
+# account key is data-residency-pinned to US, so the GLOBAL host now closes
+# the WS with `invalid_request_error.incorrect_hostname` (the inverse of the
+# 2026-05-23 state — the regional pinning flipped when we rotated to the
+# US-restricted key). REST + Realtime both work at us.api.openai.com.
+# Verified via /tmp/realtime_text_test3.py 2026-05-28: 7-turn text session
+# completed cleanly here. Override via REALTIME_BASE_URL if the key changes.
+# IMPORTANT: do NOT send the `OpenAI-Beta: realtime=v1` header — GA removed
+# it; sending it triggers the same `incorrect_hostname` error.
+DEFAULT_REALTIME_BASE_URL = "wss://us.api.openai.com/v1/realtime"
 DEFAULT_TRANSCRIPTION_LANGUAGE = "en"
 # DELIBERATELY EMPTY. The `prompt` field on input_audio_transcription is a
 # vocabulary/style hint for the whisper-family decoder — it is NOT an

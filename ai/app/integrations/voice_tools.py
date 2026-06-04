@@ -231,7 +231,12 @@ def _is_placeholder(val: str) -> bool:
 
 
 # Shared normalizer (single source of truth) — see app/data/identifiers.py.
-from ..data.identifiers import normalize_member_id as _normalize_member_id
+from ..data.identifiers import (
+    normalize_member_id as _normalize_member_id,
+    normalize_email as _normalize_email,
+    normalize_phone as _normalize_phone,
+    normalize_name as _normalize_name,
+)
 
 
 def _is_fake_phone(val: str) -> bool:
@@ -255,6 +260,44 @@ def _is_fake_phone(val: str) -> bool:
     if digits in ("1234567890", "0123456789"):
         return True
     return False
+
+
+def _is_sequential_digits(d: str) -> bool:
+    """True if `d` is a monotonic ascending/descending run (0123456789, 987654…)."""
+    if len(d) < 6:
+        return False
+    asc = all(ord(d[i + 1]) - ord(d[i]) == 1 for i in range(len(d) - 1))
+    desc = all(ord(d[i]) - ord(d[i + 1]) == 1 for i in range(len(d) - 1))
+    return asc or desc
+
+
+def _is_fabricated_member_id(val: str) -> bool:
+    """Detect an insurance member ID the model invented instead of using the
+    value the caller actually read back and confirmed.
+
+    The realtime model sometimes fires verify_coverage/book_appointment with a
+    placeholder digit run (e.g. ``IDKMC0123456789``) even after it verbally
+    confirmed the real ID — the spoken value is right but the tool arg is a
+    fabricated sequence (proven on call CA8a7cc6…, 2026-06-02). Treat a 6+ digit
+    run that is sequential, all-same, or a known dummy as fabricated so the tool
+    rejects it and the agent re-asks with the confirmed digits.
+    """
+    clean = _normalize_member_id(val)
+    if not clean:
+        return False  # emptiness is handled by _is_placeholder
+    digits = "".join(c for c in clean if c.isdigit())
+    if "0123456789" in digits or "1234567890" in digits:
+        return True
+    if len(digits) >= 6 and (len(set(digits)) == 1 or _is_sequential_digits(digits)):
+        return True
+    return False
+
+
+_FABRICATED_MEMBER_ID_ERROR = (
+    "member_id looks fabricated (a placeholder digit run, not a real ID). Do NOT "
+    "invent a member ID. Ask the caller to read their insurance member ID, echo "
+    "the exact characters back, and only retry with the digits they confirm."
+)
 
 
 @function_tool
@@ -282,6 +325,12 @@ def request_intake_callback(
     sex, insurance, etc. and run CLAIM.MD), use the Booking Agent's
     `book_with_insurance` tool instead. This tool is callback-only.
     """
+    # Normalize contact values up-front so every check + the persisted row use
+    # the clean form (ASR inserts stray spaces in names/phones).
+    first_name = _normalize_name(first_name)
+    last_name = _normalize_name(last_name)
+    phone = _normalize_phone(phone)
+
     # ANI fallback: the model sometimes fabricates a fake number
     # (e.g. 555-123-4567) when it didn't actually capture one. The caller is
     # on the line right now, so prefer the Twilio ANI over junk.
@@ -715,6 +764,13 @@ def book_with_insurance(
     Tell the visitor the `next_step` verbatim. If eligible=false, mention that
     we offer out-of-network cash rates and staff will follow up.
     """
+    # Normalize contact values up-front so checks + the persisted intake use
+    # the clean form. Email/phone get all whitespace removed; full_name keeps
+    # single spaces so the first/last split below still works.
+    full_name = _normalize_name(full_name)
+    email = _normalize_email(email)
+    phone = _normalize_phone(phone)
+
     # Validate up-front. member_id is only required when we're actually
     # running an eligibility check (not self-pay).
     always_required = (
@@ -762,6 +818,8 @@ def book_with_insurance(
     # member_id required only when we'll actually call CLAIM.MD.
     if payer.id != "SELF" and _is_placeholder(member_id):
         return {"ok": False, "error": "incomplete: member_id missing or placeholder — ask the visitor"}
+    if payer.id != "SELF" and _is_fabricated_member_id(member_id):
+        return {"ok": False, "error": _FABRICATED_MEMBER_ID_ERROR}
 
     # Convert YYYYMMDD -> YYYY-MM-DD for the gateway.
     dob_iso = f"{dob[:4]}-{dob[4:6]}-{dob[6:8]}"
@@ -884,6 +942,8 @@ def verify_coverage(
     copay if present. If false, reassure them out-of-network cash rates
     are available.
     """
+    first_name = _normalize_name(first_name)
+    last_name = _normalize_name(last_name)
     required = (
         ("first_name", first_name), ("last_name", last_name),
         ("dob", dob), ("payer_name", payer_name), ("member_id", member_id),
@@ -926,6 +986,9 @@ def verify_coverage(
             ),
         }
 
+    if _is_fabricated_member_id(member_id):
+        return {"ok": False, "error": _FABRICATED_MEMBER_ID_ERROR}
+
     try:
         with _log_call("verify_coverage", payer_id=payer.id):
             resp = signed_post("/internal/insurance/verify", {
@@ -946,12 +1009,10 @@ def verify_coverage(
     eligible, coverage, raw_status = _parse_claimmd_response(resp)
     coverage_status = raw_status or ("eligible" if eligible else "needs_review")
 
-    # Persist this check to bt.insurance_checks so it shows up on the
-    # admin /admin/insurance-checks page alongside bookings. Best-effort:
-    # a failed audit write must NOT block the visitor's verification.
-    # We pass first/last/dob so the gateway can hash a stable patient
-    # identifier for the email_hash column — plaintext name/DOB never
-    # lands in Postgres here. §164.502(b)
+    # Persist this check to the InsuranceCheckRecord on DDB bt-main
+    # (BAA-covered) so it shows up on /admin/insurance-checks with the
+    # patient's name, DOB, and member ID. Best-effort — a failed audit
+    # write must NOT block the visitor's verification.
     try:
         with _log_call("coverage_record_audit", payer_id=payer.id):
             gateway_post("/internal/coverage/record", {
@@ -960,6 +1021,7 @@ def verify_coverage(
                 "date_of_birth": f"{valid[:4]}-{valid[4:6]}-{valid[6:8]}",
                 "payer_name": payer.name,
                 "payer_id": payer.id,
+                "member_id": _normalize_member_id(member_id),
                 "eligible": eligible,
                 "coverage_status": coverage_status,
                 "source": agent_source.get(),
@@ -1215,7 +1277,20 @@ def book_appointment(
 
     On slot_taken, surface the alternatives to the visitor and loop back to
     slot selection — do NOT call book_appointment again with the same slot.
+
+    VOICE SEQUENCING (mandatory): when this returns ok, your VERY NEXT action
+    MUST be a spoken turn that reads the `next_step` confirmation to the caller
+    (they need to HEAR they're booked and that a confirmation email is coming).
+    Do NOT call end_call in the same turn/response as this tool — the booking
+    confirmation must be spoken first and the caller given a chance to respond.
     """
+    # Normalize contact values up-front so validation + the persisted booking
+    # use the clean form (ASR inserts stray spaces in names/email/phone).
+    first_name = _normalize_name(first_name)
+    last_name = _normalize_name(last_name)
+    email = _normalize_email(email)
+    phone = _normalize_phone(phone)
+
     # Validate required fields — no PHI logged here.
     required_fields = {
         "first_name": first_name, "last_name": last_name,
@@ -1259,6 +1334,8 @@ def book_appointment(
 
     if payer.id != "SELF" and _is_placeholder(member_id):
         return {"ok": False, "error": "incomplete: member_id missing — ask the visitor"}
+    if payer.id != "SELF" and _is_fabricated_member_id(member_id):
+        return {"ok": False, "error": _FABRICATED_MEMBER_ID_ERROR}
 
     appointment_draft = {
         "firstName": first_name.strip(),
@@ -1488,6 +1565,11 @@ def end_call(reason: str) -> dict[str, Any]:
     caller might still want something. After invoking this tool, the bridge
     waits ~1.5 seconds for your final spoken sentence to finish before
     disconnecting Twilio.
+
+    NEVER call this in the same turn/response as book_appointment. After a
+    successful booking you must FIRST speak the booking confirmation
+    (`next_step`) as its own turn and let the caller respond; only on a later
+    turn — after a goodbye or "nothing else" — may you call end_call.
 
     Has no effect when called from the text chat path (only the Twilio voice
     bridge listens for it). Logs the reason so admin can see why a call

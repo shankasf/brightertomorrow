@@ -53,6 +53,13 @@ _MAX_SESSION_SECONDS = 600  # 10 minutes
 _SILENCE_HANGUP_S = 120.0      # caller silent for 2 minutes → end call
 _SILENCE_TICK_S = 1.0
 _RESPONSE_NUDGE_S = 3.5         # caller turn landed but no reply + no active response → nudge once
+# TPM throttle gate. If the most recent rate_limits.updated reports tokens
+# remaining below this floor, the watchdog skips the nudge — firing another
+# response.create re-processes the full conversation history (no truncation
+# wired yet) and pushes the org TPM further into the red, which guarantees
+# another empty response.done. Default 4000 ≈ one safe small-reply budget on
+# gpt-realtime-2 (250k TPM tier). Override via env REALTIME_NUDGE_TPM_FLOOR.
+_NUDGE_TPM_FLOOR = int(os.environ.get("REALTIME_NUDGE_TPM_FLOOR", "4000"))
 _RESPONSE_NUDGE_INSTRUCTIONS = (
     "Continue now — reply to what the caller just said and move to the next "
     "step. Do NOT repeat the disclosure, and do NOT claim you didn't catch "
@@ -254,6 +261,15 @@ class _SilenceState:
         "awaiting_response",
         "response_nudged",
         "response_active",
+        # Latest snapshot from OpenAI's rate_limits.updated server event.
+        # Token bucket is org-wide and shared across concurrent calls — when
+        # remaining drops near zero, firing another response.create will land
+        # as an empty response.done. Watchdog reads these before nudging.
+        "rl_tokens_remaining",
+        "rl_tokens_limit",
+        "rl_tokens_reset_s",
+        "rl_requests_remaining",
+        "rl_last_updated_at",
     )
 
     def __init__(self) -> None:
@@ -272,6 +288,13 @@ class _SilenceState:
         self.awaiting_response: bool = False
         self.response_nudged: bool = False
         self.response_active: bool = True   # greeting response is in flight
+        # Rate-limit snapshot (populated by rate_limits.updated handler).
+        # None until the first event arrives — watchdog treats unknown as "OK".
+        self.rl_tokens_remaining: int | None = None
+        self.rl_tokens_limit: int | None = None
+        self.rl_tokens_reset_s: float | None = None
+        self.rl_requests_remaining: int | None = None
+        self.rl_last_updated_at: float | None = None
 
     def on_assistant_audio_frame(self) -> None:
         # Assistant is producing audio → caller silence clock pauses.
@@ -382,14 +405,10 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
             silence.on_caller_turn()
             logger.info("voice_turn session=%s role=user text=%r", session_id, text[:200])
             _schedule_persist(session_id, "user", text)
-            await _send_browser_event(
-                client_ws,
-                {
-                    "type": "conversation.item.input_audio_transcription.completed",
-                    "transcript": text,
-                    "item_id": item_id,
-                },
-            )
+            # Website voice chat intentionally does NOT echo the caller's own
+            # spoken transcript back into the on-screen transcript — only the
+            # assistant's turns are shown. We still log + persist the user turn
+            # (PHI audit) above; we just don't emit the browser display event.
         elif role == "assistant":
             logger.info("voice_turn session=%s role=assistant text=%r", session_id, text[:200])
             _schedule_persist(session_id, "assistant", text)
@@ -645,6 +664,59 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                                 "response.failed",
                             ):
                                 silence.response_active = False
+                                # Mirror voice_rt/openai_ws.py: when GA returns
+                                # response.done with no output, log GA's own
+                                # status + status_details so we can see WHY
+                                # (rate_limit_exceeded / cancelled / incomplete
+                                # / content_filter / failed) instead of only
+                                # the downstream voice_response_nudge symptom.
+                                resp = srv.get("response") or {}
+                                out_len = len(resp.get("output") or [])
+                                if srv_type == "response.done" and out_len == 0:
+                                    logger.info(
+                                        "voice_oai_empty_done session=%s status=%s details=%s",
+                                        sid, resp.get("status"),
+                                        resp.get("status_details"),
+                                    )
+                                elif srv_type in ("response.cancelled", "response.failed"):
+                                    logger.info(
+                                        "voice_oai_response_%s session=%s status=%s details=%s",
+                                        srv_type.split(".", 1)[1], sid,
+                                        resp.get("status"),
+                                        resp.get("status_details"),
+                                    )
+                            elif srv_type == "rate_limits.updated":
+                                # GA emits this after every response with the org-wide
+                                # per-model token/request budget. Snapshot the tokens
+                                # bucket on SilenceState so the nudge watchdog can
+                                # back off when remaining < _NUDGE_TPM_FLOOR (else
+                                # the nudge's own response.create just re-processes
+                                # the full history and worsens the throttle).
+                                limits = srv.get("rate_limits") or []
+                                tokens_b: dict | None = None
+                                requests_b: dict | None = None
+                                for b in limits:
+                                    if not isinstance(b, dict):
+                                        continue
+                                    if b.get("name") == "tokens":
+                                        tokens_b = b
+                                    elif b.get("name") == "requests":
+                                        requests_b = b
+                                if tokens_b is not None:
+                                    silence.rl_tokens_remaining = tokens_b.get("remaining")
+                                    silence.rl_tokens_limit = tokens_b.get("limit")
+                                    silence.rl_tokens_reset_s = tokens_b.get("reset_seconds")
+                                if requests_b is not None:
+                                    silence.rl_requests_remaining = requests_b.get("remaining")
+                                silence.rl_last_updated_at = time.monotonic()
+                                logger.info(
+                                    "voice_rate_limits session=%s tokens_remaining=%s tokens_limit=%s tokens_reset_s=%s requests_remaining=%s",
+                                    sid,
+                                    silence.rl_tokens_remaining,
+                                    silence.rl_tokens_limit,
+                                    silence.rl_tokens_reset_s,
+                                    silence.rl_requests_remaining,
+                                )
                     continue
 
                 if isinstance(event, RealtimeHandoffEvent):
@@ -742,8 +814,24 @@ async def run_voice_session(client_ws: WebSocket, session_id: str) -> None:
                     and not silence.response_active
                     and idle >= _RESPONSE_NUDGE_S
                 ):
+                    # Throttle gate: if OAI just told us we're near TPM zero,
+                    # firing another response.create only deepens the throttle.
+                    # Mark as nudged so we don't busy-loop, but skip the emit
+                    # and log the reason so log forensics can confirm cause.
+                    rl_rem = silence.rl_tokens_remaining
+                    if rl_rem is not None and rl_rem < _NUDGE_TPM_FLOOR:
+                        silence.response_nudged = True
+                        logger.info(
+                            "voice_nudge_skip_throttled session=%s waited_s=%.1f tokens_remaining=%s floor=%s reset_s=%s",
+                            sid, idle, rl_rem, _NUDGE_TPM_FLOOR,
+                            silence.rl_tokens_reset_s,
+                        )
+                        continue
                     silence.response_nudged = True
-                    logger.info("voice_response_nudge session=%s waited_s=%.1f", sid, idle)
+                    logger.info(
+                        "voice_response_nudge session=%s waited_s=%.1f tokens_remaining=%s",
+                        sid, idle, silence.rl_tokens_remaining,
+                    )
                     try:
                         await _emit_response_create(session, _RESPONSE_NUDGE_INSTRUCTIONS)
                     except Exception:

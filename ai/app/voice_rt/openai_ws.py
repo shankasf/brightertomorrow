@@ -135,6 +135,15 @@ class OpenAIRealtimeClient:
         # (capped) when it didn't.
         self._resp_had_output = False
         self._empty_retries = 0
+        # Latest rate_limits.updated snapshot. Used by the empty-response
+        # retry path to back off when the org TPM bucket is near zero — re-
+        # firing response.create just re-processes the whole conversation
+        # against an already-exhausted quota, which guarantees another
+        # empty response.done. None until the first event arrives.
+        self._rl_tokens_remaining: int | None = None
+        self._rl_tokens_limit: int | None = None
+        self._rl_tokens_reset_s: float | None = None
+        self._rl_requests_remaining: int | None = None
 
         # Callbacks — set by the bridge. Defaults are no-ops so an unset
         # callback never crashes the recv loop.
@@ -440,6 +449,32 @@ class OpenAIRealtimeClient:
                 await self.on_audio_delta(delta)
             return
 
+        # --- TPM/RPM telemetry from OAI ---------------------------------
+        # GA emits rate_limits.updated after every response with the org-
+        # wide per-model token + request budget. Snapshot here so the
+        # empty-response retry below can back off when remaining < floor
+        # (else the retry's own response.create just re-processes the
+        # whole conversation against an exhausted quota → another empty).
+        if etype == "rate_limits.updated":
+            limits = evt.get("rate_limits") or []
+            tokens_b = next((b for b in limits if isinstance(b, dict) and b.get("name") == "tokens"), None)
+            requests_b = next((b for b in limits if isinstance(b, dict) and b.get("name") == "requests"), None)
+            if tokens_b is not None:
+                self._rl_tokens_remaining = tokens_b.get("remaining")
+                self._rl_tokens_limit = tokens_b.get("limit")
+                self._rl_tokens_reset_s = tokens_b.get("reset_seconds")
+            if requests_b is not None:
+                self._rl_requests_remaining = requests_b.get("remaining")
+            logger.info(
+                "oai_rate_limits call_sid=%s tokens_remaining=%s tokens_limit=%s tokens_reset_s=%s requests_remaining=%s",
+                self._call_sid,
+                self._rl_tokens_remaining,
+                self._rl_tokens_limit,
+                self._rl_tokens_reset_s,
+                self._rl_requests_remaining,
+            )
+            return
+
         # --- response lifecycle -----------------------------------------
         if etype == "response.created":
             resp = evt.get("response") or {}
@@ -489,10 +524,25 @@ class OpenAIRealtimeClient:
             # re-prompts. _empty_retries resets to 0 on any real audio delta.
             if (etype == "response.done" and not self._resp_had_output
                     and not self._is_responding and self._empty_retries < 1):
+                # Throttle gate: skip the retry when OAI just told us tokens
+                # remaining is below the floor. Re-firing response.create
+                # against an exhausted bucket only deepens the throttle and
+                # guarantees the next response.done is also empty.
+                floor = int(os.environ.get("REALTIME_NUDGE_TPM_FLOOR", "4000"))
+                if (self._rl_tokens_remaining is not None
+                        and self._rl_tokens_remaining < floor):
+                    self._empty_retries += 1   # mark as used → don't busy-loop
+                    logger.info(
+                        "oai_empty_retry_skip_throttled call_sid=%s tokens_remaining=%s floor=%s reset_s=%s",
+                        self._call_sid, self._rl_tokens_remaining,
+                        floor, self._rl_tokens_reset_s,
+                    )
+                    return
                 self._empty_retries += 1
                 logger.info(
-                    "oai_empty_response_retry call_sid=%s n=%d (nudged)",
+                    "oai_empty_response_retry call_sid=%s n=%d tokens_remaining=%s (nudged)",
                     self._call_sid, self._empty_retries,
+                    self._rl_tokens_remaining,
                 )
                 await self._emit_response_create(EMPTY_RESPONSE_NUDGE)
             return
