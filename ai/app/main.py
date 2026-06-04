@@ -467,6 +467,47 @@ async def internal_logs_stream(request: Request) -> StreamingResponse:
     )
 
 
+@app.post("/internal/evals/trigger")
+async def internal_evals_trigger(request: Request) -> dict[str, Any]:
+    """Trigger an eval run asynchronously.
+
+    Body: {"kind": "offline"|"online", "sample": int (online only)}
+    Returns: {"run_id": str, "status": "started"} immediately.
+
+    The eval runs in a background task and POSTs results to the gateway
+    when complete. This endpoint is internal-network only (same as other
+    /internal/* — no admin auth; the gateway calls it server-side).
+    """
+    from uuid import uuid4 as _uuid4
+    body: dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    kind = str(body.get("kind") or "offline").strip().lower()
+    if kind not in ("offline", "online"):
+        kind = "offline"
+    sample = int(body.get("sample") or 20)
+    hours = int(body.get("hours") or 24)
+    run_id = str(_uuid4())
+
+    async def _bg_run() -> None:
+        try:
+            if kind == "offline":
+                from .graph.evals.run_evals import run_offline
+                await run_offline(run_id=run_id)
+            else:
+                from .graph.evals.run_evals import run_online
+                await run_online(run_id=run_id, sample=sample, hours=hours)
+        except Exception:
+            logger.exception("evals_trigger_bg_error run_id=%s kind=%s", run_id, kind)
+
+    asyncio.create_task(_bg_run())
+    logger.info("evals_trigger_started run_id=%s kind=%s sample=%d", run_id, kind, sample)
+    return {"run_id": run_id, "status": "started"}
+
+
 @app.post("/internal/embed-faqs")
 async def internal_embed_faqs() -> dict[str, Any]:
     """Re-embed all published FAQs. Called by the Go gateway after any FAQ write.

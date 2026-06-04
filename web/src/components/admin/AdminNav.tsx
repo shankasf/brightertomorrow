@@ -21,6 +21,7 @@ import {
   LuCalendar,
   LuLink,
   LuChartLine,
+  LuTarget,
   LuLogOut,
   LuX,
 } from 'react-icons/lu';
@@ -46,6 +47,7 @@ const I = {
   calendar: ({ className = '' }) => <LuCalendar className={className} strokeWidth={1.7} />,
   link: ({ className = '' }) => <LuLink className={className} strokeWidth={1.7} />,
   chart: ({ className = '' }) => <LuChartLine className={className} strokeWidth={1.7} />,
+  accuracy: ({ className = '' }) => <LuTarget className={className} strokeWidth={1.7} />,
   logout: ({ className = '' }) => <LuLogOut className={className} strokeWidth={1.7} />,
 };
 
@@ -62,6 +64,8 @@ const nav: NavEntry[] = [
   { href: '/admin/contacts', label: 'Enquiries — Website', icon: I.mail },
   { href: '/admin/chat', label: 'Chat Sessions', icon: I.chat },
   { href: '/admin/newsletter', label: 'Newsletter', icon: I.newsletter },
+  { group: 'Agent Accuracy', superadminOnly: true },
+  { href: '/admin/agent-accuracy', label: 'Accuracy Overview', icon: I.accuracy, superadminOnly: true },
   { group: 'HIPAA Compliance', superadminOnly: true },
   { href: '/admin/logs', label: 'Live AI Logs', icon: I.chart, superadminOnly: true },
   { href: '/admin/audit/phi', label: 'PHI Audit Log', icon: I.shield, superadminOnly: true },

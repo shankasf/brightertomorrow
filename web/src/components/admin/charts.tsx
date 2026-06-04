@@ -598,3 +598,289 @@ export function RadialGauge({
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HBarChart — horizontal bars for per-category rates (pass rate by intent/scene).
+// Each row shows a label, an animated bar, and a value. Bars are colored per
+// item or by a default ramp; long label lists scroll inside their card.
+// ─────────────────────────────────────────────────────────────────────────────
+export function HBarChart({
+  items,
+  height,
+  unit = '%',
+}: {
+  items: { label: string; value: number; max?: number; color?: string; sub?: string | number }[];
+  height?: number;
+  /** Suffix on the value label. '%' assumes value is already 0–100. */
+  unit?: string;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="space-y-2.5" style={height ? { maxHeight: height, overflowY: 'auto' } : undefined}>
+      {items.map((it, i) => {
+        const max = it.max ?? 100;
+        const pct = max > 0 ? Math.max(0, Math.min(100, (it.value / max) * 100)) : 0;
+        const color = it.color ?? '#E1B878';
+        return (
+          <div key={`${it.label}-${i}`} className="group">
+            <div className="mb-1 flex items-baseline justify-between gap-3">
+              <span className="truncate text-[12.5px] font-medium text-ink/85" title={it.label}>
+                {it.label}
+              </span>
+              <span className="shrink-0 font-mono text-[11.5px] tabular-nums text-ink-soft">
+                {it.sub !== undefined && (
+                  <span className="mr-1.5 text-ink-faint">{it.sub}</span>
+                )}
+                <span className="font-semibold text-ink">
+                  {Math.round(it.value)}
+                  {unit}
+                </span>
+              </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-cream">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ background: `linear-gradient(90deg, ${color}, ${color}cc)` }}
+                initial={{ width: 0 }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.8, delay: 0.04 * i, ease: [0.22, 1, 0.36, 1] }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ConfusionMatrix — expected (rows) × actual (cols) intent heatmap. Cell
+// intensity scales with count; the correct diagonal is tinted green, off-
+// diagonal misclassifications wine/rose. Counts render inside each cell.
+// ─────────────────────────────────────────────────────────────────────────────
+export function ConfusionMatrix({
+  matrix,
+  labels,
+}: {
+  matrix: Record<string, Record<string, number>>;
+  labels?: string[];
+}) {
+  const allLabels = useMemo(() => {
+    if (labels && labels.length) return labels;
+    const set = new Set<string>();
+    Object.keys(matrix).forEach((exp) => {
+      set.add(exp);
+      Object.keys(matrix[exp] ?? {}).forEach((act) => set.add(act));
+    });
+    return Array.from(set).sort();
+  }, [matrix, labels]);
+
+  const maxCount = useMemo(() => {
+    let m = 0;
+    for (const row of Object.values(matrix)) {
+      for (const v of Object.values(row)) m = Math.max(m, v);
+    }
+    return m || 1;
+  }, [matrix]);
+
+  if (allLabels.length === 0) return null;
+
+  const cellColor = (exp: string, act: string, count: number): string => {
+    if (count === 0) return 'transparent';
+    const t = Math.min(1, 0.18 + (count / maxCount) * 0.82);
+    // Diagonal (correct) → emerald; off-diagonal (error) → wine.
+    return exp === act
+      ? `rgba(58,122,93,${t})` // emerald
+      : `rgba(102,32,42,${t})`; // wine
+  };
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="border-separate border-spacing-1">
+        <thead>
+          <tr>
+            <th className="sticky left-0 z-10 bg-white p-1 text-right align-bottom">
+              <span className="block text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+                exp \ act
+              </span>
+            </th>
+            {allLabels.map((act) => (
+              <th key={act} className="p-1 align-bottom">
+                <span
+                  className="block max-w-[64px] truncate text-[10px] font-medium text-ink-soft"
+                  title={act}
+                >
+                  {act}
+                </span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {allLabels.map((exp, ri) => (
+            <tr key={exp}>
+              <th
+                className="sticky left-0 z-10 bg-white p-1 text-right text-[10px] font-medium text-ink-soft"
+                scope="row"
+              >
+                <span className="block max-w-[120px] truncate" title={exp}>
+                  {exp}
+                </span>
+              </th>
+              {allLabels.map((act, ci) => {
+                const count = matrix[exp]?.[act] ?? 0;
+                const bg = cellColor(exp, act, count);
+                const strong = count > 0 && count / maxCount > 0.5;
+                return (
+                  <td key={act} className="p-0">
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.85 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ duration: 0.25, delay: 0.01 * (ri + ci) }}
+                      className={`flex h-9 w-9 items-center justify-center rounded-md text-[11px] font-mono tabular-nums ring-1 ring-inset ${
+                        exp === act ? 'ring-emerald-200/60' : 'ring-[#EDE6D9]'
+                      } ${strong ? 'font-semibold text-white' : 'text-ink/70'}`}
+                      style={{ background: bg }}
+                      title={`expected "${exp}" → predicted "${act}": ${count}`}
+                    >
+                      {count > 0 ? count : ''}
+                    </motion.div>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PercentileBars — p50 / p95 / p99 latency as three labeled horizontal bars.
+// Bars share a scale (max = p99) so the spread is visually honest.
+// ─────────────────────────────────────────────────────────────────────────────
+export function PercentileBars({
+  p50,
+  p95,
+  p99,
+  unit = 'ms',
+}: {
+  p50: number;
+  p95: number;
+  p99: number;
+  unit?: string;
+}) {
+  const rows = [
+    { label: 'p50', value: p50, color: '#3a7a5d' },
+    { label: 'p95', value: p95, color: '#E1B878' },
+    { label: 'p99', value: p99, color: '#9F2A3A' },
+  ];
+  const max = Math.max(1, p50, p95, p99);
+  return (
+    <div className="space-y-3">
+      {rows.map((r, i) => {
+        const pct = Math.max(2, Math.min(100, (r.value / max) * 100));
+        return (
+          <div key={r.label} className="flex items-center gap-3">
+            <span className="w-9 shrink-0 font-mono text-[11px] font-semibold uppercase tracking-wider text-ink-soft">
+              {r.label}
+            </span>
+            <div className="h-3 flex-1 overflow-hidden rounded-full bg-cream">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ background: `linear-gradient(90deg, ${r.color}, ${r.color}cc)` }}
+                initial={{ width: 0 }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.8, delay: 0.06 * i, ease: [0.22, 1, 0.36, 1] }}
+              />
+            </div>
+            <span className="w-20 shrink-0 text-right font-mono text-[12px] tabular-nums font-semibold text-ink">
+              {Math.round(r.value).toLocaleString()}
+              <span className="ml-0.5 text-[10px] font-normal text-ink-soft">{unit}</span>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gauge — compact 270° radial for a single 0..max headline rate. Threshold
+// color is supplied by the caller (good/amber/bad). Renders the value big in
+// the center with an optional sub-label.
+// ─────────────────────────────────────────────────────────────────────────────
+export function Gauge({
+  value,
+  max = 1,
+  label,
+  sub,
+  color = '#E1B878',
+  size = 168,
+  thickness = 13,
+}: {
+  value: number;
+  max?: number;
+  label: string;
+  sub?: string;
+  color?: string;
+  size?: number;
+  thickness?: number;
+}) {
+  const uid = useId().replace(/:/g, '');
+  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+  const r = size / 2 - thickness;
+  const c = size / 2;
+  const circumference = 2 * Math.PI * r;
+  const span = 0.75; // 270° open arc
+  const arcLen = circumference * span;
+  const valueLen = arcLen * pct;
+  return (
+    <div className="relative inline-flex" style={{ width: size, height: size }}>
+      <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
+        <defs>
+          <linearGradient id={`${uid}-g`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.95" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.6" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx={c}
+          cy={c}
+          r={r}
+          fill="none"
+          stroke="rgba(25,39,53,0.07)"
+          strokeWidth={thickness}
+          strokeLinecap="round"
+          strokeDasharray={`${arcLen} ${circumference}`}
+          transform={`rotate(135 ${c} ${c})`}
+        />
+        <motion.circle
+          cx={c}
+          cy={c}
+          r={r}
+          fill="none"
+          stroke={`url(#${uid}-g)`}
+          strokeWidth={thickness}
+          strokeLinecap="round"
+          strokeDasharray={`0 ${circumference}`}
+          animate={{ strokeDasharray: `${valueLen} ${circumference}` }}
+          transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
+          transform={`rotate(135 ${c} ${c})`}
+          style={{ filter: `drop-shadow(0 2px 5px ${color}55)` }}
+        />
+      </svg>
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+        <div className="font-display text-[28px] font-semibold tracking-tight tabular-nums text-ink">
+          {label}
+        </div>
+        {sub && (
+          <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-ink-soft">
+            {sub}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

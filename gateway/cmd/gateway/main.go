@@ -200,6 +200,8 @@ func main() {
 	}
 	coverageInternalH := &handlers.CoverageInternalHandler{PHI: phiStore}
 	chatInternalH := &handlers.ChatInternalHandler{Pool: pool, PHI: phiStore}
+	internalEvalsH := &handlers.InternalEvalsHandler{PHI: phiStore, Pool: pool}
+	adminAgentAccuracyH := &handlers.AdminAgentAccuracyHandler{PHI: phiStore, AIServiceURL: cfg.AIServiceURL}
 
 	// Clinical-intake gate / handoff handlers — wired to /internal/phi/* and /internal/admin/*.
 	returningLookupH := &handlers.ReturningLookupHandler{PHI: phiStore, Pending: pendingStore}
@@ -290,6 +292,11 @@ func main() {
 		r.Post("/chat/turn", chatInternalH.PutTurn)
 		r.Post("/chat/end", chatInternalH.EndSession)
 		r.Get("/chat/history", chatInternalH.History)
+		// recent sessions: non-PHI pointer metadata for the eval harness.
+		r.Get("/chat/recent", internalEvalsH.RecentSessions)
+
+		// Eval ingest: AI harness posts run summary + per-turn data after eval.
+		r.Post("/evals/run", internalEvalsH.IngestRun)
 
 		// Calendar endpoints for AI agents (X-Internal-Secret gated).
 		r.Post("/calendar/free-slots", internalCalendarH.FreeSlots)
@@ -426,6 +433,13 @@ func main() {
 
 				r.Get("/content/stats", adminContentH.ListStats)
 				r.Put("/content/stats/{id}", adminContentH.UpdateStat)
+
+				// Agent Accuracy eval dashboard — superadmin only because
+				// eval runs expose production transcripts (PHI).
+				r.Get("/agent-accuracy/summary", adminAgentAccuracyH.Summary)
+				r.Get("/agent-accuracy/runs", adminAgentAccuracyH.ListRuns)
+				r.Get("/agent-accuracy/runs/{runId}", adminAgentAccuracyH.GetRun)
+				r.Post("/agent-accuracy/run", adminAgentAccuracyH.TriggerRun)
 			})
 		})
 	})

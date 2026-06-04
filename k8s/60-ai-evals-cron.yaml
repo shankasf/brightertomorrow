@@ -1,0 +1,75 @@
+# Nightly agent-accuracy eval run. Feeds the /admin/agent-accuracy dashboard
+# trend lines. Runs the offline golden-set regression, then samples the last
+# 24h of real chat/voice sessions and judges them (online evals).
+#
+# Image tag is kept in lockstep with the bt-ai Deployment. ops/deploy-changed.sh
+# bumps the Deployment container "ai"; bump this image alongside it so the cron
+# runs the same eval code that shipped. The job itself is idempotent — each run
+# writes a fresh EVALRUN row.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bt-ai-evals
+  namespace: bt
+spec:
+  # 09:00 UTC ≈ 01:00–02:00 America/Los_Angeles — off-peak, low call volume.
+  schedule: "0 9 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Don't let a hung OpenAI/graph run pile up; kill after 30m.
+      activeDeadlineSeconds: 1800
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app: bt-ai-evals }
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: evals
+              image: bt-ai:prod-87dbfc5-1780436957
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - >-
+                  python -m app.graph.evals.run_evals --offline ;
+                  python -m app.graph.evals.run_evals --online --sample 30 --hours 24
+              env:
+                - name: DATABASE_URL
+                  valueFrom: { secretKeyRef: { name: bt-config, key: DATABASE_URL } }
+                - name: OPENAI_API_KEY
+                  valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_API_KEY } }
+                - name: OPENAI_BASE_URL
+                  valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_BASE_URL, optional: true } }
+                - name: OPENAI_MODEL
+                  valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_MODEL, optional: true } }
+                # Optional cheaper judge model (e.g. a mini variant) to cut eval
+                # cost; falls back to OPENAI_MODEL when unset. Must stay an
+                # OpenAI model — only OpenAI carries the signed HIPAA BAA.
+                - name: OPENAI_JUDGE_MODEL
+                  valueFrom: { secretKeyRef: { name: bt-config, key: OPENAI_JUDGE_MODEL, optional: true } }
+                - name: BT_GATEWAY_URL
+                  value: "http://bt-gateway"
+                - name: BT_API_URL
+                  value: "https://api.brightertomorrowtherapy.cloud"
+                - name: BT_BUILD_TAG
+                  value: "prod-87dbfc5-1780436957"
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: bt-config, key: AWS_ACCESS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: bt-config, key: AWS_SECRET_ACCESS_KEY } }
+                - name: AWS_REGION
+                  valueFrom: { secretKeyRef: { name: bt-config, key: AWS_REGION, optional: true } }
+                - name: LANGSMITH_TRACING
+                  valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_TRACING, optional: true } }
+                - name: LANGSMITH_API_KEY
+                  valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_API_KEY, optional: true } }
+                - name: LANGSMITH_PROJECT
+                  valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_PROJECT, optional: true } }
+                - name: LANGSMITH_ENDPOINT
+                  valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_ENDPOINT, optional: true } }
+              resources:
+                requests: { cpu: "50m", memory: "128Mi" }
+                limits:   { cpu: "500m", memory: "512Mi" }
