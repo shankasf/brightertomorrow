@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: bt-web:prod-a012d83-1779923145
+          image: bt-web:prod-87dbfc5-1780525855
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 3000 }]
           env:

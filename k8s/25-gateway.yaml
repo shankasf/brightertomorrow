@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: bt-gateway:prod-a012d83-1779923145
+          image: bt-gateway:prod-87dbfc5-1780449951
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

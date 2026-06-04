@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: ai
-          image: bt-ai:prod-d3d348e-1779922572
+          image: bt-ai:prod-87dbfc5-1780449951
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
           env:
@@ -28,6 +28,8 @@ spec:
             # intentionally NOT set so extract_model_name() falls back to OPENAI_MODEL.
             - name: REALTIME_MODEL
               valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_MODEL, optional: true } }
+            - name: REALTIME_TRANSCRIPTION_MODEL
+              valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_TRANSCRIPTION_MODEL, optional: true } }
             - name: BT_API_URL
               value: "https://api.brightertomorrowtherapy.cloud"
             - name: BT_GATEWAY_URL
