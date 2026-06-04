@@ -70,21 +70,21 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
             className="hidden md:block text-white text-[13.5px] overflow-hidden"
             style={{ backgroundColor: "#66202A" }}
           >
-            <div className="container-x flex items-center justify-between gap-6 py-3">
+            <div className="container-x flex items-center justify-between gap-6 py-2">
               {/* Addresses on left */}
-              <div className="flex items-center gap-5 text-white/95 leading-snug">
-                <span className="flex items-start gap-2 max-w-[300px]">
-                  <FiMapPin size={13} className="text-brand mt-[3px] shrink-0" />
+              <div className="flex items-center gap-5 text-white/95 leading-none min-w-0">
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <FiMapPin size={13} className="text-brand shrink-0" />
                   <span>{OFFICE_1}</span>
                 </span>
-                <span className="hidden xl:flex items-start gap-2 max-w-[300px]">
-                  <FiMapPin size={13} className="text-brand mt-[3px] shrink-0" />
+                <span className="hidden xl:flex items-center gap-2 whitespace-nowrap">
+                  <FiMapPin size={13} className="text-brand shrink-0" />
                   <span>{OFFICE_2}</span>
                 </span>
               </div>
 
               {/* Tagline (centered, hidden on smaller widths) */}
-              <p className="hidden lg:block flex-1 text-center text-white/90 max-w-[700px] leading-snug">
+              <p className="hidden lg:block flex-1 text-center text-white/90 max-w-[700px] leading-none truncate">
                 {UTILITY_TAGLINE}
               </p>
 

@@ -41,6 +41,15 @@ export function startLogin(email: string, password: string): Promise<LoginResult
       onFailure: reject,
       mfaRequired: () => resolve({ kind: 'mfa', user }),
       totpRequired: () => resolve({ kind: 'mfa', user }),
+      // Pool offers both software-token TOTP and WebAuthn, so Cognito can ask
+      // the user to pick. Default to the TOTP path the UI implements; the
+      // selection answer then resolves through mfaRequired/totpRequired.
+      selectMFAType: () => user.sendMFASelectionAnswer('SOFTWARE_TOKEN_MFA', {
+        onSuccess: (session) => resolve({ kind: 'success', session }),
+        onFailure: reject,
+        mfaRequired: () => resolve({ kind: 'mfa', user }),
+        totpRequired: () => resolve({ kind: 'mfa', user }),
+      }),
       newPasswordRequired: (userAttrs, required) => {
         // Strip Cognito read-only fields before confirming.
         delete userAttrs.email_verified;
@@ -62,9 +71,19 @@ export function startLogin(email: string, password: string): Promise<LoginResult
 
 export function completeNewPassword(user: CognitoUser, newPassword: string): Promise<CognitoUserSession> {
   return new Promise((resolve, reject) => {
+    // After the new password is accepted Cognito may immediately follow up with
+    // an MFA challenge. The library invokes whichever callback matches the
+    // returned challenge — so every possible follow-up MUST be defined here or
+    // it throws "n.totpRequired is not a function". For a fresh setup we route
+    // all of them back through a re-login (page.tsx catches the 'TOTP' marker),
+    // which lands on the clean mfaSetup / mfa flow in startLogin().
+    const needsRelogin = () => reject(new Error('TOTP setup required — re-login'));
     user.completeNewPasswordChallenge(newPassword, {}, {
       onSuccess: resolve,
       onFailure: reject,
+      totpRequired: needsRelogin,
+      mfaRequired: needsRelogin,
+      selectMFAType: needsRelogin,
       mfaSetup: () => {
         user.associateSoftwareToken({
           associateSecretCode: () => reject(new Error('TOTP setup required — re-login')),
