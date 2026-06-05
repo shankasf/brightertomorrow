@@ -30,8 +30,8 @@ const RATE_GROUPS: { title: string; rows: Rate[] }[] = [
       { label: "50-minute session with a Licensed Therapist", price: "$150" },
       { label: "With a Pre-Licensed Master's level therapist", price: "$125" },
       { label: "With a Master's Level Student therapist", price: "$25–$60" },
-      { label: "5-session package", price: "$150" },
-      { label: "10-session package (valid 6 months)", price: "$250" },
+      { label: "Student Package — 5 sessions", price: "$150" },
+      { label: "Student Package — 10 sessions (valid 6 months)", price: "$250" },
     ],
   },
   {
@@ -41,13 +41,6 @@ const RATE_GROUPS: { title: string; rows: Rate[] }[] = [
       { label: "75-minute session with a Licensed Therapist", price: "$260" },
       { label: "50-minute with a Pre-Licensed Master's Level Therapist", price: "$150" },
       { label: "75-minute with a Pre-Licensed Master's Level Therapist", price: "$225" },
-    ],
-  },
-  {
-    title: "Life Coaching",
-    rows: [
-      { label: "50-minute session", price: "$75" },
-      { label: "6-session package (valid 3 months)", price: "$440" },
     ],
   },
 ];
