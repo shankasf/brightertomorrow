@@ -1,6 +1,6 @@
 # Build & Deploy (production)
 
-The site runs in the local **k3d cluster `bt`** (3 services + cron jobs, Traefik ingress, cert-manager TLS). Public URL: `https://brightertomorrowtherapy.cloud`.
+The site runs in the local **k3d cluster `bt`** (3 services + cron jobs, Traefik ingress, cert-manager TLS). Public URL: `https://brightertomorrowtherapy.com`.
 
 > No Tilt, no dev image swap, no file sync. Edits land in production only when a new image is built and rolled out.
 

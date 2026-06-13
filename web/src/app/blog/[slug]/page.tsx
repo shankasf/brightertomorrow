@@ -1,11 +1,65 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Reveal from "@/components/Reveal";
 import { getBlogBySlug } from "@/lib/queries";
+import { renderMarkdown, stripMarkdown } from "@/lib/markdown";
+import { SITE_URL, SITE_NAME, TITLE_SUFFIX } from "@/lib/seo";
 import { FiArrowLeft } from "react-icons/fi";
 import ShareButtons from "@/components/ShareButtons";
 
 export const dynamic = "force-dynamic";
+
+/** Build an absolute URL from a possibly-relative path against SITE_URL. */
+function absoluteUrl(pathOrUrl: string | null | undefined): string | undefined {
+  if (!pathOrUrl) return undefined;
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  return `${SITE_URL}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+}
+
+export async function generateMetadata(
+  { params }: { params: Promise<{ slug: string }> },
+): Promise<Metadata> {
+  const { slug } = await params;
+  const post = await getBlogBySlug(slug);
+  // Throw here, not just in the page body: metadata resolves before streaming
+  // starts, so this is what makes the response a real HTTP 404 (not a soft 200).
+  if (!post) notFound();
+
+  const description =
+    (post.excerpt?.trim() || stripMarkdown(post.body_md, 155)) ||
+    `An article from ${SITE_NAME}.`;
+  const canonical = `/blog/${post.slug}`;
+  // cover_url is usually relative (/images/...) → let metadataBase resolve it;
+  // pass through if already absolute (external host).
+  const ogImage = post.cover_url || undefined;
+  const fullTitle = `${post.title} ${TITLE_SUFFIX}`;
+
+  return {
+    // `absolute` so the root layout's title.template isn't re-applied (no
+    // doubled brand suffix), matching the pattern in lib/seo.pageMetadata.
+    title: { absolute: fullTitle },
+    description,
+    alternates: { canonical },
+    openGraph: {
+      type: "article",
+      title: fullTitle,
+      description,
+      url: canonical,
+      siteName: SITE_NAME,
+      locale: "en_US",
+      publishedTime: post.published_at,
+      authors: post.author ? [post.author] : undefined,
+      images: ogImage ? [{ url: ogImage, alt: post.title }] : undefined,
+    },
+    twitter: {
+      card: ogImage ? "summary_large_image" : "summary",
+      title: fullTitle,
+      description,
+      images: ogImage ? [ogImage] : undefined,
+    },
+  };
+}
 
 export default async function BlogPost({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -16,8 +70,36 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
     month: "long", day: "numeric", year: "numeric",
   });
 
+  const html = renderMarkdown(post.body_md);
+  const canonicalUrl = `${SITE_URL}/blog/${post.slug}`;
+  const ogImage = absoluteUrl(post.cover_url);
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    headline: post.title,
+    datePublished: post.published_at,
+    dateModified: post.published_at,
+    description: post.excerpt?.trim() || stripMarkdown(post.body_md, 155),
+    ...(ogImage ? { image: [ogImage] } : {}),
+    author: { "@type": "Person", name: post.author || SITE_NAME },
+    publisher: {
+      "@type": "Organization",
+      name: SITE_NAME,
+      url: SITE_URL,
+    },
+    mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
+    url: canonicalUrl,
+  };
+
   return (
     <article>
+      {/* JSON-LD structured data for the BlogPosting */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
       {/* Page header */}
       <section className="bg-cream-alt relative overflow-hidden">
         <div aria-hidden className="absolute inset-0 bg-grid opacity-[0.06]" />
@@ -65,38 +147,11 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
 
       {/* Body */}
       <section className="container-narrow pb-16 sm:pb-20 lg:pb-24">
-        <Reveal className="text-lg leading-[1.85] text-ink-muted break-words">
-          {(post.body_md ?? "").split("\n").map((line, i) => {
-            if (line.startsWith("## ")) {
-              return (
-                <h2
-                  key={i}
-                  className="font-display text-3xl text-ink mt-12 mb-4 leading-tight"
-                >
-                  {line.slice(3)}
-                </h2>
-              );
-            }
-            if (line.startsWith("# ")) {
-              return (
-                <h2
-                  key={i}
-                  className="font-display text-3xl text-ink mt-12 mb-4 leading-tight"
-                >
-                  {line.slice(2)}
-                </h2>
-              );
-            }
-            if (line.startsWith("- ")) {
-              return (
-                <li key={i} className="ml-6 list-disc my-2">
-                  {line.slice(2)}
-                </li>
-              );
-            }
-            if (!line.trim()) return <div key={i} className="h-3" />;
-            return <p key={i} className="my-5">{line}</p>;
-          })}
+        <Reveal className="block">
+          <div
+            className="blog-prose"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
         </Reveal>
 
         {/* Footer */}

@@ -28,6 +28,10 @@ type chatTurnRequest struct {
 	SessionID string `json:"session_id"`
 	Role      string `json:"role"`
 	Content   string `json:"content"`
+	// LatencyMs is optional — voice/AI callers may report the time taken to
+	// produce an assistant turn so online evals can chart real latency. 0 when
+	// omitted (user turns, or callers that don't measure it).
+	LatencyMs int `json:"latency_ms"`
 }
 
 // PutTurn handles POST /internal/chat/turn.
@@ -51,7 +55,7 @@ func (h *ChatInternalHandler) PutTurn(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "phi store not configured")
 		return
 	}
-	if err := recordTurn(r.Context(), h.Pool, h.PHI, body.SessionID, body.Role, body.Content); err != nil {
+	if err := recordTurn(r.Context(), h.Pool, h.PHI, body.SessionID, body.Role, body.Content, body.LatencyMs); err != nil {
 		slog.Error("internal chat turn", "err", err, "session_id", body.SessionID)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -105,13 +109,14 @@ func (h *ChatInternalHandler) History(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Reverse to oldest-first.
-	out := make([]map[string]string, 0, len(turns))
+	out := make([]map[string]any, 0, len(turns))
 	for i := len(turns) - 1; i >= 0; i-- {
 		t := turns[i]
-		out = append(out, map[string]string{
+		out = append(out, map[string]any{
 			"role":       t.Role,
 			"content":    t.Content,
 			"created_at": t.CreatedAt.UTC().Format(time.RFC3339),
+			"latency_ms": t.LatencyMs,
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"messages": out})

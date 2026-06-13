@@ -112,6 +112,10 @@ DOCS: tuple[Doc, ...] = (
             "  - Health Plan of Nevada\n"
             "  - Aetna\n"
             "\n"
+            "Please note: we are NOT able to accept Medicaid plans at this time. "
+            "If you have Medicaid, we'd still be glad to see you on a self-pay or "
+            "out-of-network basis.\n"
+            "\n"
             "If you don't see your carrier, most plans cover a significant portion of "
             "out-of-network behavioral health services; the practice provides monthly "
             "invoices for self-submitted reimbursement.\n"
@@ -226,6 +230,26 @@ DOCS: tuple[Doc, ...] = (
             "\n"
             "Licensure note: Nevada-only. If you'll be traveling out of state during a "
             "session window, mention it during booking and the team will work around it."
+        ),
+    ),
+    Doc(
+        slug="cancellation-policy",
+        title="Cancellation and reschedule policy",
+        section="practice-info",
+        content=(
+            "Brighter Tomorrow Therapy cancellation and reschedule policy:\n"
+            "\n"
+            "If you are no longer able to make your appointment, you can cancel from your "
+            "My Account page at https://brightertomorrow.janeapp.com/login — or just let "
+            "us know in chat, call 725-238-6990, or reply to your confirmation email and "
+            "the team will take care of it.\n"
+            "\n"
+            "Cancellations within 48 hours of your appointment are subject to a "
+            "cancellation fee. To avoid the fee, please cancel or reschedule at least 48 "
+            "hours before your appointment time.\n"
+            "\n"
+            "Rescheduling works the same way — move your appointment to a new time through "
+            "My Account, in chat, or by phone. The same 48-hour notice applies to changes."
         ),
     ),
 )

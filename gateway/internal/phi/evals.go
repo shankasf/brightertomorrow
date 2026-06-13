@@ -46,16 +46,25 @@ import (
 type EvalRun struct {
 	RunID         string             `dynamodbav:"runId"`
 	Kind          string             `dynamodbav:"kind"`           // "offline" | "online"
+	Channel       string             `dynamodbav:"channel"`        // "chat" | "voice" | "phone"; empty (legacy) means chat
 	Model         string             `dynamodbav:"model"`          // model string, e.g. "gpt-5.5-2026-04-23"
 	PromptVersion string             `dynamodbav:"promptVersion"`  // e.g. "dev" | "v1.2"
 	CreatedAt     time.Time          `dynamodbav:"createdAt"`
 	RetainUntil   time.Time          `dynamodbav:"retainUntil"`
 	Counts        map[string]int     `dynamodbav:"counts"`
+	MetricCounts  map[string]int     `dynamodbav:"metricCounts"`
 	Metrics       map[string]float64 `dynamodbav:"metrics"`
 	// BreakdownsJSON is stored raw so mixed-type nested maps survive the
 	// DynamoDB round-trip without reflection gymnastics. Callers decode via
 	// BreakdownsDecoded(). Exported so attributevalue can marshal it.
 	BreakdownsJSON string `dynamodbav:"breakdownsJson"`
+	// DatasetVersion is a content hash of the golden dataset used for this run,
+	// e.g. "ds_a1b2c3d4". Empty string on old rows (backward-compatible).
+	DatasetVersion string `dynamodbav:"datasetVersion"`
+	// RegressionJSON is a raw JSON string of the regression-vs-baseline verdict
+	// (arbitrary nested object). Stored the same way as BreakdownsJSON.
+	// Callers decode via RegressionDecoded(). Empty string on old rows.
+	RegressionJSON string `dynamodbav:"regressionJson"`
 }
 
 // EvalTurn is the per-turn drill-down record for one eval run.
@@ -71,6 +80,7 @@ type EvalTurn struct {
 	UserSays                string    `dynamodbav:"userSays"`
 	Reply                   string    `dynamodbav:"reply"`
 	Scene                   string    `dynamodbav:"scene"`
+	Split                   string    `dynamodbav:"split"`
 	Intent                  string    `dynamodbav:"intent"`
 	ExpectedIntent          string    `dynamodbav:"expectedIntent"`
 	Passed                  bool      `dynamodbav:"passed"`
@@ -171,6 +181,7 @@ func (s *Store) PutEvalRun(ctx context.Context, run EvalRun) error {
 	if len(pending) > 0 {
 		return fmt.Errorf("phi: put eval run: unprocessed items after retries")
 	}
+	s.auditPHI("eval_runs", "INSERT", run.RunID, actorFromContext(ctx), "")
 	return nil
 }
 
@@ -184,6 +195,9 @@ func (s *Store) PutEvalTurns(ctx context.Context, runID string, turns []EvalTurn
 	if len(turns) == 0 {
 		return nil
 	}
+	// Capture actor + count before sub-contexts are created.
+	actor := actorFromContext(ctx)
+	turnCount := len(turns)
 
 	now := time.Now().UTC()
 
@@ -248,6 +262,8 @@ func (s *Store) PutEvalTurns(ctx context.Context, runID string, turns []EvalTurn
 			return fmt.Errorf("phi: put eval turns: %d items unprocessed after retries", len(pending))
 		}
 	}
+	s.auditPHI("eval_turns", "INSERT", runID, actor,
+		fmt.Sprintf(`{"count":%d}`, turnCount))
 	return nil
 }
 
@@ -365,6 +381,19 @@ func (r *EvalRun) BreakdownsDecoded() (map[string]any, error) {
 	var v map[string]any
 	if err := json.Unmarshal([]byte(r.BreakdownsJSON), &v); err != nil {
 		return nil, fmt.Errorf("phi: decode breakdowns: %w", err)
+	}
+	return v, nil
+}
+
+// RegressionDecoded unmarshals RegressionJSON into map[string]any.
+// Returns nil (not an error) if empty.
+func (r *EvalRun) RegressionDecoded() (map[string]any, error) {
+	if r.RegressionJSON == "" {
+		return nil, nil
+	}
+	var v map[string]any
+	if err := json.Unmarshal([]byte(r.RegressionJSON), &v); err != nil {
+		return nil, fmt.Errorf("phi: decode regression: %w", err)
 	}
 	return v, nil
 }

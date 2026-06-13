@@ -25,10 +25,12 @@ from html import escape
 from typing import Any, Dict, List
 
 # ── Brand constants (single source of truth for the look) ────────────────────
-LOGO_URL = "https://brightertomorrowtherapy.cloud/brand/logo-email.png"  # white wordmark for the navy header
-SITE_URL = "https://brightertomorrowtherapy.cloud"
+LOGO_URL = "https://brightertomorrowtherapy.com/brand/logo-email.png"  # white wordmark for the navy header
+SITE_URL = "https://brightertomorrowtherapy.com"
 PHONE_DISPLAY = "725-238-6990"
 PHONE_HREF = "tel:7252386990"
+# Patient self-service portal where appointments can be cancelled.
+MY_ACCOUNT_URL = "https://brightertomorrow.janeapp.com/login"
 
 C_NAVY = "#192735"     # header bg + headings
 C_GOLD = "#E1B878"     # accent rule + CTA
@@ -74,17 +76,51 @@ def _paragraph(text: str) -> str:
     )
 
 
-def render_html(heading: str, paragraphs: List[str], details: List[List[str]] | None = None) -> str:
+# Cancellation policy appended to cancel/reschedule emails. The "My Account"
+# wording is hyperlinked to the patient self-service portal. Set via the
+# payload's cancel_notice flag (gateway controls which emails carry it).
+def _cancellation_policy_html() -> str:
+    link = (
+        f'<a href="{MY_ACCOUNT_URL}" style="color:{C_BURGUNDY};font-weight:600;'
+        f'text-decoration:underline;">My Account</a>'
+    )
+    return (
+        f'<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:{C_BODY};">'
+        f"If you are no longer able to make this appointment, please visit your "
+        f"{link} page to cancel.</p>"
+        f'<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:{C_BODY};">'
+        f"Please note that cancellations within 48 hours of your appointment are "
+        f"subject to a cancellation fee.</p>"
+    )
+
+
+def _cancellation_policy_text() -> str:
+    return (
+        "If you are no longer able to make this appointment, please visit your "
+        f"My Account page to cancel: {MY_ACCOUNT_URL}\n\n"
+        "Please note that cancellations within 48 hours of your appointment are "
+        "subject to a cancellation fee."
+    )
+
+
+def render_html(
+    heading: str,
+    paragraphs: List[str],
+    details: List[List[str]] | None = None,
+    cancel_notice: bool = False,
+) -> str:
     details = details or []
     paragraphs = paragraphs or []
 
-    # first paragraph → details box → remaining paragraphs
+    # first paragraph → details box → remaining paragraphs → cancellation policy
     inner_parts: List[str] = []
     if paragraphs:
         inner_parts.append(_paragraph(paragraphs[0]))
     inner_parts.append(_details_box(details))
     for p in paragraphs[1:]:
         inner_parts.append(_paragraph(p))
+    if cancel_notice:
+        inner_parts.append(_cancellation_policy_html())
     inner = "".join(inner_parts)
 
     return (
@@ -122,12 +158,17 @@ def render_html(heading: str, paragraphs: List[str], details: List[List[str]] | 
         f'<strong style="color:{C_NAVY};">Brighter Tomorrow Therapy</strong><br>'
         f'{escape(ADDR_1)}<br>{escape(ADDR_2)}<br>'
         f'<a href="{SITE_URL}" style="color:{C_BURGUNDY};text-decoration:none;">'
-        f'brightertomorrowtherapy.cloud</a></p></td></tr>'
+        f'brightertomorrowtherapy.com</a></p></td></tr>'
         '</table></td></tr></table></body></html>'
     )
 
 
-def render_text(heading: str, paragraphs: List[str], details: List[List[str]] | None = None) -> str:
+def render_text(
+    heading: str,
+    paragraphs: List[str],
+    details: List[List[str]] | None = None,
+    cancel_notice: bool = False,
+) -> str:
     details = details or []
     paragraphs = paragraphs or []
     lines: List[str] = [heading, ""]
@@ -139,6 +180,8 @@ def render_text(heading: str, paragraphs: List[str], details: List[List[str]] | 
     for p in paragraphs[1:]:
         lines.append("")
         lines.append(p)
+    if cancel_notice:
+        lines += ["", _cancellation_policy_text()]
     lines += ["", f"Call us: {PHONE_DISPLAY}", "", FOOTER_TEXT,
               "", "Brighter Tomorrow Therapy", ADDR_1, ADDR_2, SITE_URL]
     return "\n".join(lines)
@@ -156,4 +199,9 @@ def render_from_payload(body: Dict[str, Any]) -> tuple[str, str, str]:
     heading = body.get("heading", "")
     paragraphs = body.get("paragraphs") or []
     details = body.get("details") or []
-    return subject, render_html(heading, paragraphs, details), render_text(heading, paragraphs, details)
+    cancel_notice = bool(body.get("cancel_notice"))
+    return (
+        subject,
+        render_html(heading, paragraphs, details, cancel_notice),
+        render_text(heading, paragraphs, details, cancel_notice),
+    )

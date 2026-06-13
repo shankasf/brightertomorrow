@@ -9,7 +9,7 @@ _HEADERS = {
     "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
-    "Access-Control-Allow-Origin": "https://admin.brightertomorrowtherapy.cloud",
+    "Access-Control-Allow-Origin": "https://admin.brightertomorrowtherapy.com",
     "Access-Control-Allow-Credentials": "true",
     "Vary": "Origin",
 }

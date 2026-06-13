@@ -235,7 +235,7 @@ func (h *InternalCalendarHandler) CancelAppointment(w http.ResponseWriter, r *ht
 				// NOT that it's already done (even though the backend applied it).
 				subj, heading, paragraphs, details := buildCancelRequestedContent(greeting)
 				dedupeKey := fmt.Sprintf("apptcancel:%s:email", body.AppointmentID)
-				emailQueued = enqueueEmail(ctx, h.Notify, email, subj, heading, paragraphs, details, dedupeKey, body.AppointmentID)
+				emailQueued = enqueueEmail(ctx, h.Notify, email, subj, heading, paragraphs, details, true, dedupeKey, body.AppointmentID)
 				slog.Info("cancel_appointment: cancellation email enqueue",
 					"appointment_id", body.AppointmentID, "channel", "email", "enqueued", emailQueued)
 			}
@@ -429,7 +429,7 @@ func (h *InternalCalendarHandler) RescheduleAppointment(w http.ResponseWriter, r
 				// New time in the dedupe key so moving again to a different
 				// slot still sends, while an exact-duplicate retry is deduped.
 				dedupeKey := fmt.Sprintf("apptreschedule:%s:%s:email", body.AppointmentID, newTime.Format(time.RFC3339))
-				emailQueued = enqueueEmail(ctx, h.Notify, email, subj, heading, paragraphs, details, dedupeKey, body.AppointmentID)
+				emailQueued = enqueueEmail(ctx, h.Notify, email, subj, heading, paragraphs, details, true, dedupeKey, body.AppointmentID)
 				slog.Info("reschedule_appointment: confirmation email enqueue",
 					"appointment_id", body.AppointmentID, "channel", "email", "enqueued", emailQueued)
 			}

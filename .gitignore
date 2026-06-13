@@ -71,3 +71,7 @@ image.png
 # versioned via Git LFS. Keep this scoped to web/public/downloads only.
 !web/public/downloads/*.pdf
 !web/public/downloads/*.docx
+
+# GCP service-account keys — never commit
+brighter-tomorrow-*.json
+*-service-account*.json

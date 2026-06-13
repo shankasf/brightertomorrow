@@ -14,6 +14,7 @@ metadata:
 spec:
   # 09:00 UTC ≈ 01:00–02:00 America/Los_Angeles — off-peak, low call volume.
   schedule: "0 9 * * *"
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -29,13 +30,19 @@ spec:
           restartPolicy: Never
           containers:
             - name: evals
-              image: bt-ai:prod-87dbfc5-1780436957
+              image: bt-ai:prod-214c9cb-1781112674
               imagePullPolicy: IfNotPresent
               command: ["/bin/sh", "-c"]
               args:
+                # Offline golden-set regression + online production sample, for
+                # each agent channel: chat (website chatbot), voice (browser voice
+                # bot), phone (Twilio phone calls). Each run writes its own
+                # per-channel EVALRUN row the dashboard scopes by channel.
                 - >-
-                  python -m app.graph.evals.run_evals --offline ;
-                  python -m app.graph.evals.run_evals --online --sample 30 --hours 24
+                  for ch in chat voice phone ; do
+                    python -m app.graph.evals.run_evals --offline --channel "$ch" ;
+                    python -m app.graph.evals.run_evals --online --channel "$ch" --sample 0 --hours 24 ;
+                  done
               env:
                 - name: DATABASE_URL
                   valueFrom: { secretKeyRef: { name: bt-config, key: DATABASE_URL } }
@@ -53,9 +60,9 @@ spec:
                 - name: BT_GATEWAY_URL
                   value: "http://bt-gateway"
                 - name: BT_API_URL
-                  value: "https://api.brightertomorrowtherapy.cloud"
+                  value: "https://api.brightertomorrowtherapy.com"
                 - name: BT_BUILD_TAG
-                  value: "prod-87dbfc5-1780436957"
+                  value: "prod-214c9cb-1781112674"
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom: { secretKeyRef: { name: bt-config, key: AWS_ACCESS_KEY_ID } }
                 - name: AWS_SECRET_ACCESS_KEY

@@ -292,6 +292,11 @@ def _context_for_scene(scene: str, state: State) -> str:
         # as a coverage check, which confuses callers who just asked to
         # book an appointment.
         bits.append(f"is_first_insurance_turn: {not present}")
+    elif scene == "offer_self_pay":
+        # Surface a declined plan (e.g. Medicaid) so the scene declines it
+        # plainly before pivoting to the self-pay offer.
+        if ins.get("outcome") == "medicaid_not_accepted":
+            bits.append(f"declined_plan: {(ins.get('payer_name') or 'Medicaid')}")
     elif scene == "ask_booking_field":
         field = first_missing_booking(state)
         bits.append(f"field_to_ask: {field}")

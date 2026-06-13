@@ -13,7 +13,14 @@ import { LuSearch, LuMail } from 'react-icons/lu';
 type Contact = {
   id: number; full_name: string; email: string; phone: string | null;
   subject: string | null; source: string | null; created_at: string; purged_at: string | null;
+  first_name: string | null; last_name: string | null; help_topic: string | null;
+  preferred_contact_method: string | null; best_time: string | null; therapist_requested: string | null;
 };
+
+// Renders a cell value or a muted em-dash when the field was left blank.
+function val(v: string | null | undefined) {
+  return v && v.trim() ? v : <span className="text-ink-faint">—</span>;
+}
 
 function relativeTime(iso: string): string {
   const t = Date.parse(iso);
@@ -44,7 +51,9 @@ export default function AdminContactsPage() {
       (c) =>
         c.full_name.toLowerCase().includes(q) ||
         c.email.toLowerCase().includes(q) ||
-        (c.subject ?? '').toLowerCase().includes(q),
+        (c.phone ?? '').toLowerCase().includes(q) ||
+        (c.help_topic ?? c.subject ?? '').toLowerCase().includes(q) ||
+        (c.therapist_requested ?? '').toLowerCase().includes(q),
     );
   }, [data, query]);
 
@@ -57,7 +66,7 @@ export default function AdminContactsPage() {
             <div className="relative">
               <LuSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={2} />
               <Input
-                placeholder="Search name, email, subject…"
+                placeholder="Search name, email, phone, topic…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="!w-64 !pl-9"
@@ -67,7 +76,7 @@ export default function AdminContactsPage() {
         />
 
         {!data ? (
-          <SkeletonRows rows={6} cols={6} />
+          <SkeletonRows rows={6} cols={9} />
         ) : filtered && filtered.length === 0 ? (
           <EmptyState
             title={query ? 'No matches' : 'No contact submissions yet'}
@@ -81,7 +90,11 @@ export default function AdminContactsPage() {
                 <tr>
                   <TH>Name</TH>
                   <TH className="bt-col-hide-sm">Email</TH>
-                  <TH className="bt-col-hide-md">Subject</TH>
+                  <TH className="bt-col-hide-sm">Phone</TH>
+                  <TH className="bt-col-hide-md">Help topic</TH>
+                  <TH className="bt-col-hide-lg">Preferred contact</TH>
+                  <TH className="bt-col-hide-lg">Best time</TH>
+                  <TH className="bt-col-hide-lg">Therapist requested</TH>
                   <TH className="bt-col-hide-lg">Received</TH>
                   <TH>Status</TH>
                 </tr>
@@ -105,9 +118,13 @@ export default function AdminContactsPage() {
                       </Link>
                     </TD>
                     <TD className="bt-col-hide-sm break-all">{c.email}</TD>
-                    <TD className="bt-col-hide-md max-w-[280px] truncate" title={c.subject ?? ''}>
-                      {c.subject ?? <span className="text-ink-faint">—</span>}
+                    <TD className="bt-col-hide-sm whitespace-nowrap">{val(c.phone)}</TD>
+                    <TD className="bt-col-hide-md max-w-[240px] truncate" title={c.help_topic ?? c.subject ?? ''}>
+                      {val(c.help_topic ?? c.subject)}
                     </TD>
+                    <TD className="bt-col-hide-lg whitespace-nowrap">{val(c.preferred_contact_method)}</TD>
+                    <TD className="bt-col-hide-lg max-w-[160px] truncate" title={c.best_time ?? ''}>{val(c.best_time)}</TD>
+                    <TD className="bt-col-hide-lg max-w-[160px] truncate" title={c.therapist_requested ?? ''}>{val(c.therapist_requested)}</TD>
                     <TD className="bt-col-hide-lg whitespace-nowrap text-[12.5px] text-ink-soft" title={formatPT(c.created_at)}>
                       {relativeTime(c.created_at)}
                     </TD>

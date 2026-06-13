@@ -27,11 +27,14 @@ PAYERS: tuple[Payer, ...] = (
     Payer("60054", "Aetna"),
     Payer("62308", "Cigna", ("Cigna Healthcare",)),
     Payer("00590", "Humana"),
-    Payer("BCBSF", "Blue Cross Blue Shield", ("BCBS", "Blue Cross", "Blue Shield")),
+    # In Nevada, Anthem is the Blue Cross Blue Shield licensee, so generic
+    # "BCBS" / "Blue Cross" / "Blue Shield" resolve to Anthem's CLAIM.MD id
+    # (45302). The old "BCBSF" id was BCBS of *Florida* and returned
+    # needs_manual_review for every NV member — do not reintroduce it.
+    Payer("45302", "Blue Cross Blue Shield", ("BCBS", "Blue Cross", "Blue Shield")),
     Payer("45302", "Anthem", ("Anthem Blue Cross", "Anthem BCBS", "Anthem BCBS NV")),
     Payer("SB580", "Kaiser Permanente", ("Kaiser",)),
     Payer("MCARE", "Medicare", ("Original Medicare", "Medicare Part B")),
-    Payer("MCAID", "Medicaid"),
     Payer("TRICR", "Tricare", ("TriCare", "Tri Care")),
     Payer("87815", "Molina Healthcare", ("Molina",)),
     Payer("56205", "WellCare"),
@@ -47,9 +50,47 @@ PAYERS: tuple[Payer, ...] = (
 )
 
 
+# Plans the practice does NOT accept. Matched separately from PAYERS so the
+# assistant can give a clear, honest "we don't accept Medicaid" answer and
+# pivot to self-pay — instead of routing the caller to manual review or
+# failing to resolve the payer. Added 2026-06-13: Medicaid excluded practice-
+# wide.
+#
+# NOTE: this only fires when the caller explicitly names Medicaid (or Medi-Cal,
+# California's Medicaid). Commercial plans that ALSO run Medicaid managed-care
+# lines (Molina, Centene, WellCare, Ambetter) stay on the accepted roster above
+# and are unaffected — a member naming the carrier still verifies normally.
+DECLINED_PAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Medicaid", (
+        "medicaid", "medi-caid", "medi caid",
+        "medi-cal", "medical assistance",
+        "straight medicaid", "state medicaid",
+        "title 19", "title xix",
+    )),
+)
+
+
 def list_for_dropdown() -> list[dict[str, str]]:
     """Shape consumed by the chat widget dropdown."""
     return [{"id": p.id, "name": p.name} for p in PAYERS]
+
+
+def is_declined_payer(spoken_or_typed: str) -> str | None:
+    """Return the canonical name of a NOT-accepted plan (e.g. 'Medicaid') if the
+    input names one, else None.
+
+    Checked BEFORE resolve_payer_id so the agent declines clearly and offers
+    self-pay rather than calling CLAIM.MD or routing to manual review. Uses the
+    same case-insensitive substring match as resolve_payer_id.
+    """
+    if not spoken_or_typed:
+        return None
+    needle = spoken_or_typed.strip().lower()
+    for canonical, aliases in DECLINED_PAYERS:
+        for c in (canonical.lower(), *aliases):
+            if c in needle or needle in c:
+                return canonical
+    return None
 
 
 def resolve_payer_id(spoken_or_typed: str) -> Payer | None:

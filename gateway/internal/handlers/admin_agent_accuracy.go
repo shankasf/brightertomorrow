@@ -41,16 +41,22 @@ type AdminAgentAccuracyHandler struct {
 // ---------------------------------------------------------------------------
 
 type runSummaryJSON struct {
-	RunID         string             `json:"run_id"`
-	Kind          string             `json:"kind"`
-	Model         string             `json:"model"`
-	PromptVersion string             `json:"prompt_version"`
-	CreatedAt     time.Time          `json:"created_at"`
-	Counts        map[string]int     `json:"counts"`
-	Metrics       map[string]float64 `json:"metrics"`
+	RunID          string             `json:"run_id"`
+	Kind           string             `json:"kind"`
+	Channel        string             `json:"channel"` // "chat" | "voice" | "phone" (legacy empty → chat)
+	Model          string             `json:"model"`
+	PromptVersion  string             `json:"prompt_version"`
+	DatasetVersion string             `json:"dataset_version"`
+	CreatedAt      time.Time          `json:"created_at"`
+	Counts         map[string]int     `json:"counts"`
+	MetricCounts   map[string]int     `json:"metric_counts"`
+	Metrics        map[string]float64 `json:"metrics"`
 	// Breakdowns is emitted as raw JSON (any nested shape) so the frontend
 	// receives exactly what the AI harness produced — no schema enforcement.
 	Breakdowns any `json:"breakdowns"`
+	// Regression is the decoded regression-vs-baseline verdict object; nil if
+	// not stored (old runs or runs without a baseline comparison).
+	Regression any `json:"regression"`
 }
 
 type turnDetailJSON struct {
@@ -61,6 +67,7 @@ type turnDetailJSON struct {
 	UserSays       string    `json:"user_says"`
 	Reply          string    `json:"reply"`
 	Scene          string    `json:"scene"`
+	Split          string    `json:"split"`
 	Intent         string    `json:"intent"`
 	ExpectedIntent string    `json:"expected_intent"`
 	Passed         bool      `json:"passed"`
@@ -82,15 +89,27 @@ func runSummaryFromPHI(r phi.EvalRun) runSummaryJSON {
 	if bd, err := r.BreakdownsDecoded(); err == nil {
 		breakdowns = bd
 	}
+	var regression any
+	if reg, err := r.RegressionDecoded(); err == nil {
+		regression = reg
+	}
+	channel := r.Channel
+	if channel == "" {
+		channel = "chat" // legacy rows predate the channel split
+	}
 	return runSummaryJSON{
-		RunID:         r.RunID,
-		Kind:          r.Kind,
-		Model:         r.Model,
-		PromptVersion: r.PromptVersion,
-		CreatedAt:     r.CreatedAt,
-		Counts:        r.Counts,
-		Metrics:       r.Metrics,
-		Breakdowns:    breakdowns,
+		RunID:          r.RunID,
+		Kind:           r.Kind,
+		Channel:        channel,
+		Model:          r.Model,
+		PromptVersion:  r.PromptVersion,
+		DatasetVersion: r.DatasetVersion,
+		CreatedAt:      r.CreatedAt,
+		Counts:         r.Counts,
+		MetricCounts:   r.MetricCounts,
+		Metrics:        r.Metrics,
+		Breakdowns:     breakdowns,
+		Regression:     regression,
 	}
 }
 
@@ -112,6 +131,7 @@ func turnDetailFromPHI(t phi.EvalTurn) turnDetailJSON {
 		UserSays:            t.UserSays,
 		Reply:               t.Reply,
 		Scene:               t.Scene,
+		Split:               t.Split,
 		Intent:              t.Intent,
 		ExpectedIntent:      t.ExpectedIntent,
 		Passed:              t.Passed,
@@ -135,16 +155,35 @@ func (h *AdminAgentAccuracyHandler) Summary(w http.ResponseWriter, r *http.Reque
 	}
 	admin.LogPHIAccess(r.Context(), h.PHI, r, u, "view_eval_summary", "eval_runs", "summary")
 
-	runs, err := h.PHI.ListEvalRuns(r.Context(), 30)
+	// Channel scope (default chat). Runs share one DDB partition, so we
+	// over-fetch then filter in Go and keep the newest 30 of this channel.
+	channel := r.URL.Query().Get("channel")
+	if channel == "" {
+		channel = "chat"
+	}
+	if channel != "chat" && channel != "voice" && channel != "phone" {
+		httpx.WriteValidationError(w, "channel must be 'chat', 'voice', or 'phone'")
+		return
+	}
+
+	runs, err := h.PHI.ListEvalRuns(r.Context(), 100)
 	if err != nil {
 		slog.Error("agent accuracy: list runs for summary", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
-	trend := make([]runSummaryJSON, 0, len(runs))
+	const trendCap = 30
+	trend := make([]runSummaryJSON, 0, trendCap)
 	for _, run := range runs {
-		trend = append(trend, runSummaryFromPHI(run))
+		s := runSummaryFromPHI(run) // Channel already defaulted to chat here
+		if s.Channel != channel {
+			continue
+		}
+		trend = append(trend, s)
+		if len(trend) >= trendCap {
+			break
+		}
 	}
 
 	var latest *runSummaryJSON
@@ -255,8 +294,9 @@ func (h *AdminAgentAccuracyHandler) GetRun(w http.ResponseWriter, r *http.Reques
 // ---------------------------------------------------------------------------
 
 type triggerEvalRequest struct {
-	Kind   string `json:"kind"`
-	Sample *int   `json:"sample,omitempty"`
+	Kind    string `json:"kind"`
+	Channel string `json:"channel,omitempty"` // chat | voice | phone (default chat)
+	Sample  *int   `json:"sample,omitempty"`
 }
 
 // TriggerRun forwards a trigger request to the AI service and returns its
@@ -277,6 +317,13 @@ func (h *AdminAgentAccuracyHandler) TriggerRun(w http.ResponseWriter, r *http.Re
 	}
 	if req.Kind != "offline" && req.Kind != "online" {
 		httpx.WriteValidationError(w, "kind must be 'offline' or 'online'")
+		return
+	}
+	if req.Channel == "" {
+		req.Channel = "chat"
+	}
+	if req.Channel != "chat" && req.Channel != "voice" && req.Channel != "phone" {
+		httpx.WriteValidationError(w, "channel must be 'chat', 'voice', or 'phone'")
 		return
 	}
 	if h.AIServiceURL == "" {

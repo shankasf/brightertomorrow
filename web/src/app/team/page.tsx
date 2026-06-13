@@ -1,7 +1,14 @@
+import type { Metadata } from "next";
 import TeamFilter from "@/components/TeamFilter";
 import { getTeamGroups, getTeamMembers } from "@/lib/queries";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata = { title: "Our Team — Brighter Tomorrow Therapy" };
+export const metadata: Metadata = pageMetadata({
+  title: "Our Team",
+  description:
+    "Meet the licensed therapists, social workers, and clinicians at Brighter Tomorrow Therapy Collective, serving Las Vegas and North Las Vegas, NV.",
+  path: "/team",
+});
 
 // Team data lives in Postgres (editable via /admin) and isn't available at
 // build time — render on demand so the roster always reflects the live DB.

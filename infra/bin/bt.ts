@@ -11,7 +11,7 @@ import { ObservabilityStack } from "../lib/observability-stack";
 import { NotificationsRetryStack } from "../lib/notifications-retry-stack";
 import { CostDigestStack } from "../lib/cost-digest-stack";
 import { AppLogsStack } from "../lib/app-logs-stack";
-import { ACCOUNT, REGION, BOOTSTRAP_ADMIN_EMAIL, DDB_GSI1 } from "../lib/constants";
+import { ACCOUNT, REGION, BOOTSTRAP_ADMIN_EMAIL, DDB_GSI1, PHI_LOGS_BUCKET } from "../lib/constants";
 
 const app = new cdk.App();
 const env = { account: ACCOUNT, region: REGION };
@@ -80,11 +80,11 @@ new ApiStack(app, "BtApi", {
 // (security team); pass their ARNs as CDK context keys:
 //   cdk deploy BtNotificationsRetry \
 //     --context phiLogsBucketArn=arn:aws:s3:::bt-phi-logs \
-//     --context sesFromIdentityArn=arn:aws:ses:us-east-1:689517798275:identity/brightertomorrowtherapy.cloud
+//     --context sesFromIdentityArn=arn:aws:ses:us-east-1:502263855065:identity/mail.brightertomorrowtherapy.com
 const phiLogsBucketArn = app.node.tryGetContext("phiLogsBucketArn")
-  || `arn:aws:s3:::bt-phi-logs`;
+  || `arn:aws:s3:::${PHI_LOGS_BUCKET}`;
 const sesFromIdentityArn = app.node.tryGetContext("sesFromIdentityArn")
-  || `arn:aws:ses:us-east-1:${ACCOUNT}:identity/mail.brightertomorrowtherapy.cloud`;
+  || `arn:aws:ses:us-east-1:${ACCOUNT}:identity/mail.brightertomorrowtherapy.com`;
 
 const notificationsRetry = new NotificationsRetryStack(app, "BtNotificationsRetry", {
   env,
@@ -110,9 +110,12 @@ appLogs.addDependency(security);
 // Phase 7 — Daily AWS cost digest email.
 new CostDigestStack(app, "BtCostDigest", {
   env,
-  recipientEmail: "sagar@callsphere.ai",
-  fromEmail: "noreply@mail.callsphere.ai",
-  sesFromIdentityArn: `arn:aws:ses:${REGION}:${ACCOUNT}:identity/mail.callsphere.ai`,
+  recipientEmail: "sagar@callsphere.tech",
+  // Sender uses the practice's own verified SES identity — callsphere.ai DNS
+  // is not manageable from this Hostinger account, so its identity can't be
+  // DKIM-verified here.
+  fromEmail: "noreply@mail.brightertomorrowtherapy.com",
+  sesFromIdentityArn: `arn:aws:ses:${REGION}:${ACCOUNT}:identity/mail.brightertomorrowtherapy.com`,
   accountLabel: "BT",
 });
 

@@ -146,6 +146,13 @@ def _route_after_insurance(state: State) -> str:
         # Caller has no insurance on file; offer self-pay.
         return _route(state, N.OFFER_SELF_PAY, "insurance_outcome_no_insurance")
 
+    if outcome == "medicaid_not_accepted":
+        # We don't accept Medicaid. Reuse the self-pay machinery: respond's
+        # offer_self_pay scene declines Medicaid plainly (via context) and
+        # offers self-pay; the caller's yes/no is handled by the existing
+        # offer_self_pay affirmation branch.
+        return _route(state, N.OFFER_SELF_PAY, "insurance_outcome_medicaid")
+
     # outcome is None or unrecognised — treat as needs_manual_review.
     return _route(state, N.HANDOFF_ADMIN_VERIFICATION, "insurance_outcome_unknown")
 
@@ -409,6 +416,22 @@ def planner(state: State) -> str:
     # not abandon a half-finished booking.
     if intent == "out_of_scope" and not mid_booking:
         return _route(state, N.RESPOND, "out_of_scope")
+
+    # ---- 11b. Ready-to-verify takes priority over same-turn info detours --
+    # The caller asked us to check their coverage (intent insurance_check /
+    # booking) and has now supplied EVERY insurance field but we haven't
+    # verified yet. Run verification before the chat info fast-paths below —
+    # otherwise a same-turn false-positive (an address in the intake dump read
+    # as a "where are your offices?" locations FAQ) hijacks the flow and the
+    # caller gets an office list instead of the coverage answer they asked for.
+    # Honour the explicit intent: consider the details given, then proceed.
+    # (chat session 2026-06-09)
+    if (
+        intent in ("booking", "insurance_check")
+        and insurance_complete(state)
+        and needs_verification(state)
+    ):
+        return _route(state, N.VERIFY, "fields_complete_run_verify_priority")
 
     # ---- 12. Info path ------------------------------------------------
     # On CHAT we answer KB/FAQ questions at ANY point — even mid-booking —

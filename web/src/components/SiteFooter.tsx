@@ -101,7 +101,7 @@ export default function SiteFooter({ settings, nav }: { settings: SiteSettings; 
                 <img
                   src={settings.logo_url}
                   alt={settings.brand_name}
-                  className="h-14 w-auto brightness-0 invert opacity-95"
+                  className="h-14 w-auto opacity-95"
                 />
               ) : (
                 <span className="font-display text-2xl font-bold tracking-[-0.01em] text-white">
@@ -167,7 +167,7 @@ export default function SiteFooter({ settings, nav }: { settings: SiteSettings; 
                 <ColumnHeading>Important Links</ColumnHeading>
                 <ul className="space-y-2.5">
                   <ExternalFooterLink href={JOTFORM_MATCH_URL} label="Find My Therapist" />
-                  <FooterLink href="/privacy" label="Privacy Policy" />
+                  <FooterLink href="/privacy-policy" label="Privacy Policy" />
                   <FooterLink href="/contact" label="Contact" />
                   <FooterLink href="/faqs" label="FAQs" />
                 </ul>
@@ -293,7 +293,7 @@ export default function SiteFooter({ settings, nav }: { settings: SiteSettings; 
               © {year} {settings.brand_name} Counseling Services. All rights reserved.
             </span>
           </div>
-          <div className="flex items-center gap-5">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
             <span className="inline-flex items-center gap-2 text-white/65">
               <span
                 aria-hidden
@@ -303,7 +303,7 @@ export default function SiteFooter({ settings, nav }: { settings: SiteSettings; 
               In-person &amp; online therapy across Nevada
             </span>
             <a
-              href="https://admin.brightertomorrowtherapy.cloud"
+              href={process.env.ADMIN_HOST_URL || "https://admin.brightertomorrowtherapy.com"}
               aria-label="Admin login"
               className="group inline-flex items-center gap-1.5 text-white/65 hover:text-white transition"
             >

@@ -1,10 +1,32 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import Reveal from "@/components/Reveal";
+import { pageMetadata } from "@/lib/seo";
 import { getServiceBySlug } from "@/lib/queries";
 import { FiArrowLeft, FiArrowUpRight, FiClock, FiShield, FiStar } from "react-icons/fi";
 
+// DB-driven fallback for service detail pages. Bespoke hand-built pages
+// (e.g. services/teletherapy/) take precedence over this dynamic segment.
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata(
+  { params }: { params: Promise<{ slug: string }> },
+): Promise<Metadata> {
+  const { slug } = await params;
+  const svc = await getServiceBySlug(slug);
+  // Throw here, not just in the page body: metadata resolves before streaming
+  // starts, so this is what makes the response a real HTTP 404 (not a soft 200).
+  if (!svc) notFound();
+  return pageMetadata({
+    title: svc.title,
+    description:
+      svc.short_desc ??
+      `${svc.title} at Brighter Tomorrow Therapy Collective in Las Vegas, NV. Compassionate, in-person and online care.`,
+    path: `/services/${slug}`,
+    ogImage: svc.image_url ?? undefined,
+  });
+}
 
 export default async function ServiceDetail({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;

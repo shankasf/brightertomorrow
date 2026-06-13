@@ -89,7 +89,7 @@ type ChatHandler struct {
 
 // recordTurn writes a chat turn to DynamoDB and bumps the non-PHI counters
 // on bt.chat_sessions. Postgres never sees the message body.
-func recordTurn(ctx context.Context, pool chatDB, store *phi.Store, sessionID, role, content string) error {
+func recordTurn(ctx context.Context, pool chatDB, store *phi.Store, sessionID, role, content string, latencyMs int) error {
 	if store == nil {
 		// Fail-closed: PHI store must be configured for chat to write.
 		return errors.New("phi store not configured")
@@ -100,6 +100,7 @@ func recordTurn(ctx context.Context, pool chatDB, store *phi.Store, sessionID, r
 		Role:      role,
 		Content:   content,
 		CreatedAt: now,
+		LatencyMs: latencyMs,
 	}); err != nil {
 		return err
 	}
@@ -177,25 +178,28 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// an opener. The AI-generated greeting is still persisted below.
 	const greetMarker = "__BT_GREET__"
 	if body.Message != greetMarker {
-		if err := recordTurn(ctx, h.Pool, h.PHI, sessionID, "user", body.Message); err != nil {
+		if err := recordTurn(ctx, h.Pool, h.PHI, sessionID, "user", body.Message, 0); err != nil {
 			slog.Error("chat: ddb put user turn", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 	}
 
-	// Call the AI service; fall back gracefully on any error.
+	// Call the AI service; fall back gracefully on any error. Time it so the
+	// assistant turn carries its end-to-end latency for online evals.
+	aiStart := time.Now()
 	reply, err := h.AIClient.Chat(ctx, sessionID, body.Message)
 	if err != nil {
 		slog.Warn("chat: ai service error, using fallback", "err", err)
 		reply = chatFallback
 	}
+	latencyMs := int(time.Since(aiStart).Milliseconds())
 
 	// Persist the assistant reply using a background context so a client
 	// disconnect after the AI call cannot leave history in a torn state.
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
-	if err := recordTurn(persistCtx, h.Pool, h.PHI, sessionID, "assistant", reply); err != nil {
+	if err := recordTurn(persistCtx, h.Pool, h.PHI, sessionID, "assistant", reply, latencyMs); err != nil {
 		slog.Warn("chat: ddb put assistant turn", "err", err)
 	}
 

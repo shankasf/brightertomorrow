@@ -89,16 +89,21 @@ type emailStructured struct {
 	Heading    string      `json:"heading"`
 	Paragraphs []string    `json:"paragraphs"`
 	Details    [][2]string `json:"details,omitempty"`
+	// CancelNotice, when true, tells the Lambda to append the cancellation
+	// policy (48-hour fee + "My Account" link). Set ONLY for cancel/reschedule
+	// emails — never booking-request / contact acks.
+	CancelNotice bool `json:"cancel_notice,omitempty"`
 }
 
 // emailPayload marshals the structured content payload that EnqueueNotification
 // expects. Returns ("", false) if marshalling somehow fails.
-func emailPayload(subject, heading string, paragraphs []string, details [][2]string) (string, bool) {
+func emailPayload(subject, heading string, paragraphs []string, details [][2]string, cancelNotice bool) (string, bool) {
 	b, err := json.Marshal(emailStructured{
-		Subject:    subject,
-		Heading:    heading,
-		Paragraphs: paragraphs,
-		Details:    details,
+		Subject:      subject,
+		Heading:      heading,
+		Paragraphs:   paragraphs,
+		Details:      details,
+		CancelNotice: cancelNotice,
 	})
 	if err != nil {
 		return "", false
@@ -119,9 +124,10 @@ func enqueueEmail(
 	recipient, subject, heading string,
 	paragraphs []string,
 	details [][2]string,
+	cancelNotice bool,
 	dedupeKey, logID string,
 ) bool {
-	payload, ok := emailPayload(subject, heading, paragraphs, details)
+	payload, ok := emailPayload(subject, heading, paragraphs, details, cancelNotice)
 	if !ok {
 		slog.Warn("notify: email payload marshal failed", "log_id", logID)
 		return false
@@ -150,6 +156,21 @@ func buildBookingRequestAckContent(greeting string) (subject, heading string, pa
 		"If anything's urgent, just call us using the button below.",
 	}
 	// details intentionally nil — the booking is not framed as confirmed.
+	return
+}
+
+// buildContactAckContent returns content for the acknowledgement email sent to
+// a visitor immediately after they submit the public website contact form.
+// No appointment, no read-back of what was submitted — minimum-necessary: a
+// greeting, "request received, our team will be in touch", and a call CTA.
+func buildContactAckContent(greeting string) (subject, heading string, paragraphs []string, details [][2]string) {
+	subject = "We've received your request — Brighter Tomorrow Therapy"
+	heading = "Your request has been submitted"
+	paragraphs = []string{
+		fmt.Sprintf("%s, thank you for reaching out to Brighter Tomorrow Therapy. Your request has been submitted and a member of our team will be in touch with you shortly.", greeting),
+		"If anything's urgent, you can reach us anytime using the button below.",
+	}
+	// details intentionally nil — no health info or submitted values echoed back.
 	return
 }
 

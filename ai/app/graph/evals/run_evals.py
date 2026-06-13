@@ -32,14 +32,21 @@ from langchain_core.messages import HumanMessage
 from ..config import gateway_base_url, text_model_name
 from ..graph import get_app
 from ..state import initial_state
-from ..tracing import configure_tracing, langsmith_client
-from .datasets import GOLDEN, Conversation
+from ..tracing import configure_tracing
+from .compare import compare_to_baseline
+from .datasets import Conversation, dataset_version, golden_for
 from .evaluators import Score, clinical_advice_guard, grade_turn, phi_leak_guard
 from .gateway_client import list_recent_sessions, get_session_turns, post_run
 from .judge import judge_turn, JudgeResult
+from .judge_calibration import run_calibration
 from .metrics import aggregate
 
 logger = logging.getLogger(__name__)
+
+# Same sentinel the chat/voice runtimes send to trigger the one-time HIPAA
+# disclosure opener (see runtime/chat.py SESSION_OPEN_TOKEN). The graph's
+# disclosure gate recognises it and never shows it to the user.
+SESSION_OPEN_TOKEN = "__session_open__"
 
 
 # ---------------------------------------------------------------------------
@@ -80,14 +87,39 @@ def _context_snippet(state: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Channel helpers
+# ---------------------------------------------------------------------------
+
+# API channel → gateway chat_sessions.source. Used to scope online sampling.
+_CHANNEL_TO_SOURCE = {
+    "chat": "chat-agent",
+    "voice": "voice-agent",
+    "phone": "voice-phone",
+}
+
+# A synthetic caller ANI for offline PHONE simulation so the realtime prompt's
+# ANI block is exercised. Voice (browser widget) has no ANI → None.
+_PHONE_SIM_ANI = "+17025550142"
+
+
+def _channel_to_source(channel: str) -> str:
+    return _CHANNEL_TO_SOURCE.get((channel or "chat").lower(), "chat-agent")
+
+
+# ---------------------------------------------------------------------------
 # Offline: run GOLDEN through the graph
 # ---------------------------------------------------------------------------
 
 async def _run_convo_offline(
-    app: Any, convo: Conversation, seq_start: int
+    app: Any, convo: Conversation, seq_start: int, rep: int = 0
 ) -> tuple[list[dict[str, Any]], int]:
-    """Run one golden conversation; return (turn_dicts, next_seq)."""
-    sid = f"eval-{convo.name}"
+    """Run one golden conversation once; return (turn_dicts, next_seq).
+
+    ``rep`` is the repetition index — each repetition uses a fresh thread id
+    so runs are independent (LangSmith num_repetitions pattern: average over
+    repeats to absorb LLM non-determinism).
+    """
+    sid = f"eval-{convo.name}-r{rep}"
     cfg = {"configurable": {"thread_id": sid}}
     try:
         await app.aupdate_state(cfg, initial_state("chat", sid, "eval"))
@@ -95,21 +127,27 @@ async def _run_convo_offline(
         pass
 
     turns: list[dict[str, Any]] = []
-    seed = initial_state("chat", sid, "eval")
-    seeded = False
     seq = seq_start
+
+    # Mirror production: emit the one-time HIPAA disclosure opener (the
+    # __session_open__ sentinel) BEFORE the user's first real message so the
+    # disclosure gate flips disclosure_done up front. Without this the gate
+    # consumes turn 1 and the user's first message goes unanswered — an
+    # artifact of invoking the graph directly, NOT how the chat widget / voice
+    # runtimes behave (both call the session-open flow first).
+    seed = initial_state("chat", sid, "eval")
+    seed["messages"] = [HumanMessage(content=SESSION_OPEN_TOKEN)]
+    try:
+        await app.ainvoke(seed, config=cfg)
+    except Exception:
+        logger.exception("eval_session_open_failed convo=%s", convo.name)
 
     for turn in convo.turns:
         t0 = time.perf_counter()
-        if not seeded:
-            seed["messages"] = [HumanMessage(content=turn.user_says)]
-            result = await app.ainvoke(seed, config=cfg)
-            seeded = True
-        else:
-            result = await app.ainvoke(
-                {"messages": [HumanMessage(content=turn.user_says)]},
-                config=cfg,
-            )
+        result = await app.ainvoke(
+            {"messages": [HumanMessage(content=turn.user_says)]},
+            config=cfg,
+        )
         latency_ms = (time.perf_counter() - t0) * 1000
         reply = result.get("last_reply_text") or ""
 
@@ -125,6 +163,8 @@ async def _run_convo_offline(
             "seq": seq,
             "session_id": sid,
             "convo_name": convo.name,
+            "rep": rep,
+            "split": convo.split,
             "is_production": False,
             "user_says": turn.user_says,
             "reply": reply,
@@ -141,55 +181,212 @@ async def _run_convo_offline(
     return turns, seq
 
 
-async def run_offline(run_id: str | None = None) -> dict[str, Any]:
-    """Run the full GOLDEN suite through the live graph.
+# ---------------------------------------------------------------------------
+# Offline: voice / phone — text-simulate the realtime agent
+# ---------------------------------------------------------------------------
+#
+# The realtime voice + Twilio phone agents are SEPARATE from the LangGraph chat
+# graph (bt_agents/realtime). They cannot be replayed turn-by-turn through the
+# graph. So for offline voice/phone we TEXT-SIMULATE the agent: we feed the
+# agent's ACTUAL realtime system prompt (build_realtime_triage(...).instructions
+# — the same instructions the production speech-to-speech agent runs) plus the
+# scripted user turns to a text model, then grade the reply with the same
+# guards + LLM judge as chat. This exercises the real voice INSTRUCTIONS, not
+# live audio and not tool execution — graph scene/intent assertions don't apply,
+# so voice/phone fixtures only carry reply assertions.
+
+def _build_voice_sim_llm() -> Any:
+    """Text client used to simulate the realtime agent's textual responses.
+
+    Same US-region base URL + primary text model as production text agents.
+    """
+    from langchain_openai import ChatOpenAI  # lazy: keep module import light
+    from ..config import text_base_url
+
+    return ChatOpenAI(
+        model=text_model_name(),
+        temperature=0.3,
+        base_url=text_base_url(),
+        timeout=120,
+        max_retries=3,
+    )
+
+
+def _realtime_instructions(channel: str) -> str:
+    """The production realtime agent's system prompt for this channel.
+
+    Phone passes a synthetic ANI so the prompt's caller-phone block is included;
+    browser voice has no ANI.
+    """
+    # Lazy import — the realtime stack pulls in the agents SDK + voice tools.
+    from ...bt_agents.realtime.triage import build_realtime_triage
+
+    caller_phone = _PHONE_SIM_ANI if channel == "phone" else None
+    agent = build_realtime_triage(caller_phone=caller_phone)
+    instructions = getattr(agent, "instructions", "") or ""
+    return instructions if isinstance(instructions, str) else str(instructions)
+
+
+def _run_convo_offline_voice(
+    convo: Conversation, seq_start: int, channel: str, llm: Any, instructions: str
+) -> tuple[list[dict[str, Any]], int]:
+    """Text-simulate one voice/phone conversation; return (turn_dicts, next_seq)."""
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    history: list[Any] = [SystemMessage(content=instructions)]
+    turns: list[dict[str, Any]] = []
+    seq = seq_start
+
+    for turn in convo.turns:
+        history.append(HumanMessage(content=turn.user_says))
+        t0 = time.perf_counter()
+        try:
+            resp = llm.invoke(history)
+            reply = getattr(resp, "content", "") or ""
+            if isinstance(reply, list):  # some models return content parts
+                reply = " ".join(str(p) for p in reply)
+        except Exception:
+            logger.exception("voice_sim_invoke_failed convo=%s seq=%d", convo.name, seq)
+            reply = ""
+        latency_ms = (time.perf_counter() - t0) * 1000
+        history.append(AIMessage(content=reply))
+
+        # No graph state for the realtime agent → grade against an empty state.
+        # Voice/phone fixtures only set reply assertions, so grade_turn yields
+        # just the contains/not_contains scores; add the safety guards.
+        det_scores = grade_turn(turn, {}, reply)
+        det_scores.append(phi_leak_guard(reply))
+        det_scores.append(clinical_advice_guard(reply))
+        det_all_pass = all(s.passed for s in det_scores)
+
+        judge_result = judge_turn(
+            turn.user_says, reply,
+            context=f"channel={channel} (text-simulated realtime voice agent)",
+        )
+
+        turns.append({
+            "seq": seq,
+            "session_id": f"eval-{channel}-{convo.name}",
+            "convo_name": convo.name,
+            "split": convo.split,
+            "is_production": False,
+            "user_says": turn.user_says,
+            "reply": reply,
+            # Realtime agent has no graph scene/intent — left blank (the UI
+            # hides intent/scene breakdowns for non-chat channels).
+            "scene": "",
+            "intent": "",
+            "expected_intent": "",
+            "passed": det_all_pass,
+            "deterministic_scores": _scores_to_dicts(det_scores),
+            "judge": _judge_to_dict(judge_result),
+            "latency_ms": int(round(latency_ms)),
+        })
+        seq += 1
+
+    return turns, seq
+
+
+async def run_offline(run_id: str | None = None, channel: str = "chat") -> dict[str, Any]:
+    """Run the channel's golden suite offline.
+
+    chat  → replay through the live LangGraph graph.
+    voice / phone → text-simulate the realtime agent's prompt (see above).
 
     Returns the completed run payload dict and POSTs it to the gateway.
     """
     if run_id is None:
         run_id = str(uuid4())
+    channel = (channel or "chat").lower()
 
     configure_tracing()
-    app = get_app()
+    convos = golden_for(channel)
     all_turns: list[dict[str, Any]] = []
     seq = 0
     failures = 0
 
-    for convo in GOLDEN:
+    # LangSmith num_repetitions pattern: run the whole golden set R times and
+    # aggregate across all repeats so per-metric means (esp. tone/judge scores)
+    # are stable instead of single-shot noise. Default 1; override with
+    # OFFLINE_EVAL_REPETITIONS (clamped 1..10).
+    try:
+        repetitions = int(os.environ.get("OFFLINE_EVAL_REPETITIONS", "1"))
+    except ValueError:
+        repetitions = 3
+    repetitions = max(1, min(repetitions, 10))
+
+    if channel == "chat":
+        app = get_app()
+        for rep in range(repetitions):
+            for convo in convos:
+                try:
+                    turns, seq = await _run_convo_offline(app, convo, seq, rep=rep)
+                    all_turns.extend(turns)
+                except Exception as exc:
+                    logger.error(
+                        "offline_convo_error channel=%s convo=%s rep=%d error=%s",
+                        channel, convo.name, rep, exc,
+                    )
+                    failures += 1
+    else:
+        # Build the realtime prompt + text client once, reuse across convos.
         try:
-            turns, seq = await _run_convo_offline(app, convo, seq)
-            all_turns.extend(turns)
-        except Exception as exc:
-            logger.error("offline_convo_error convo=%s error=%s", convo.name, exc)
-            failures += 1
+            instructions = _realtime_instructions(channel)
+            llm = _build_voice_sim_llm()
+        except Exception:
+            logger.exception("offline_voice_setup_failed channel=%s", channel)
+            instructions, llm = "", None
+        for rep in range(repetitions):
+            for convo in convos:
+                if llm is None:
+                    failures += 1
+                    continue
+                try:
+                    turns, seq = _run_convo_offline_voice(convo, seq, channel, llm, instructions)
+                    all_turns.extend(turns)
+                except Exception as exc:
+                    logger.error(
+                        "offline_voice_convo_error channel=%s convo=%s rep=%d error=%s",
+                        channel, convo.name, rep, exc,
+                    )
+                    failures += 1
 
     agg = aggregate(all_turns)
+    metrics = agg["metrics"]
+    breakdowns = agg["breakdowns"]
+    metric_counts = agg.get("counts_by_metric", {})
+
+    # Judge calibration vs the fixed human-labeled gold set. The agreement
+    # score tells the dashboard how much to trust the judge's other numbers.
+    calibration = run_calibration()
+    metrics["judge_agreement"] = calibration["judge_agreement"]
+    metric_counts["judge_agreement"] = calibration.get("n_cases", 0)
+    breakdowns["judge_calibration"] = calibration
+
+    ds_version = dataset_version(channel)
+
+    # Regression vs the previous comparable offline baseline (same channel).
+    regression = compare_to_baseline(run_id, ds_version, metrics, channel=channel)
 
     payload: dict[str, Any] = {
         "run_id": run_id,
         "kind": "offline",
+        "channel": channel,
         "model": text_model_name(),
         "prompt_version": _prompt_version(),
+        "dataset_version": ds_version,
         "created_at": _now_iso(),
         "counts": {
-            "conversations": len(GOLDEN),
+            "conversations": len(convos) * repetitions,
             "turns": len(all_turns),
+            "repetitions": repetitions,
         },
-        "metrics": agg["metrics"],
-        "breakdowns": agg["breakdowns"],
+        "metrics": metrics,
+        "metric_counts": metric_counts,
+        "breakdowns": breakdowns,
+        "regression": regression,
         "turns": all_turns,
     }
-
-    # LangSmith dataset logging (best-effort)
-    client = langsmith_client()
-    if client is not None:
-        try:
-            client.create_dataset(
-                "bt-langgraph-golden",
-                description="Golden conversations for the BT LangGraph stack",
-            )
-        except Exception:
-            pass
 
     # POST to gateway — warn but never crash
     try:
@@ -198,11 +395,13 @@ async def run_offline(run_id: str | None = None) -> dict[str, Any]:
         logger.warning("offline_post_run_failed run_id=%s", run_id)
 
     logger.info(
-        "offline_run_done run_id=%s conversations=%d turns=%d failures=%d "
-        "intent_accuracy=%.3f overall_pass_rate=%.3f",
-        run_id, len(GOLDEN), len(all_turns), failures,
-        agg["metrics"].get("intent_accuracy", 0),
-        agg["metrics"].get("overall_pass_rate", 0),
+        "offline_run_done run_id=%s channel=%s dataset=%s conversations=%d turns=%d failures=%d "
+        "intent_accuracy=%.3f overall_pass_rate=%.3f judge_agreement=%.3f regression=%s",
+        run_id, channel, ds_version, len(convos) * repetitions, len(all_turns), failures,
+        metrics.get("intent_accuracy", 0),
+        metrics.get("overall_pass_rate", 0),
+        metrics.get("judge_agreement", 0),
+        regression.get("status", "?"),
     )
     return payload
 
@@ -211,26 +410,47 @@ async def run_offline(run_id: str | None = None) -> dict[str, Any]:
 # Online: sample production sessions from the gateway
 # ---------------------------------------------------------------------------
 
+# Hard ceiling on sessions judged in one online run — protects cost if traffic
+# spikes (LangSmith pattern: take all in-window, but cap, then sample if over).
+MAX_ONLINE_SESSIONS = 500
+
+
 async def run_online(
     run_id: str | None = None,
-    sample: int = 20,
+    sample: int = 0,
     hours: int = 24,
+    channel: str = "chat",
 ) -> dict[str, Any]:
-    """Sample recent production sessions, judge each assistant turn.
+    """Judge recent production sessions for one channel; one judge call per turn.
+
+    sample <= 0  → take ALL sessions in the last `hours` (full coverage),
+                   bounded by MAX_ONLINE_SESSIONS so a traffic spike can't blow
+                   up cost; if the window exceeds the cap we randomly sample
+                   down to it.
+    sample  > 0  → take at most `sample` sessions (explicit cap / sampling).
+
+    Only sessions whose source matches the channel are sampled
+    (chat→chat-agent, voice→voice-agent, phone→voice-phone).
 
     Returns the completed run payload dict and POSTs it to the gateway.
     """
     if run_id is None:
         run_id = str(uuid4())
+    channel = (channel or "chat").lower()
+    source = _channel_to_source(channel)
 
-    sessions = list_recent_sessions(limit=max(sample * 3, 100), hours=hours)
+    cap = MAX_ONLINE_SESSIONS if sample <= 0 else min(sample, MAX_ONLINE_SESSIONS)
+    sessions = list_recent_sessions(limit=cap, hours=hours, source=source)
     if not sessions:
-        logger.warning("online_run_no_sessions run_id=%s hours=%d", run_id, hours)
+        logger.warning("online_run_no_sessions run_id=%s channel=%s hours=%d", run_id, channel, hours)
         sessions = []
 
-    # Random sample without replacement; handle case where pool < sample.
-    if len(sessions) > sample:
-        sessions = random.sample(sessions, sample)
+    # Pool is already limited to `cap` by the gateway; only downsample if the
+    # window somehow returned more than the cap.
+    if len(sessions) > cap:
+        sessions = random.sample(sessions, cap)
+    logger.info("online_run_sessions run_id=%s judging=%d hours=%d cap=%d",
+                run_id, len(sessions), hours, cap)
 
     all_turns: list[dict[str, Any]] = []
     seq = 0
@@ -251,8 +471,11 @@ async def run_online(
             if role in ("user", "human"):
                 prior_user = content
             elif role in ("assistant", "ai") and prior_user:
-                # Judge this assistant turn
-                judge_result = judge_turn(prior_user, content, context=f"session={sid}")
+                # Judge this assistant turn. Production transcript = PHI —
+                # stays on OpenAI (the only BAA-covered provider).
+                judge_result = judge_turn(
+                    prior_user, content, context=f"session={sid}", for_production=True
+                )
                 phi_score = phi_leak_guard(content)
                 clinical_score = clinical_advice_guard(content)
 
@@ -269,7 +492,9 @@ async def run_online(
                     "passed": phi_score.passed and clinical_score.passed,
                     "deterministic_scores": _scores_to_dicts([phi_score, clinical_score]),
                     "judge": _judge_to_dict(judge_result),
-                    "latency_ms": 0,
+                    # Real per-turn latency captured by the gateway at chat time
+                    # (0 for turns written before latency capture existed).
+                    "latency_ms": int(raw.get("latency_ms") or 0),
                 })
                 seq += 1
                 prior_user = ""  # consume; next assistant turn needs a new user turn
@@ -279,6 +504,7 @@ async def run_online(
     payload: dict[str, Any] = {
         "run_id": run_id,
         "kind": "online",
+        "channel": channel,
         "model": text_model_name(),
         "prompt_version": _prompt_version(),
         "created_at": _now_iso(),
@@ -287,6 +513,7 @@ async def run_online(
             "turns": len(all_turns),
         },
         "metrics": agg["metrics"],
+        "metric_counts": agg.get("counts_by_metric", {}),
         "breakdowns": agg["breakdowns"],
         "turns": all_turns,
     }
@@ -297,9 +524,9 @@ async def run_online(
         logger.warning("online_post_run_failed run_id=%s", run_id)
 
     logger.info(
-        "online_run_done run_id=%s sessions=%d turns=%d "
+        "online_run_done run_id=%s channel=%s sessions=%d turns=%d "
         "overall_pass_rate=%.3f",
-        run_id, len(sessions), len(all_turns),
+        run_id, channel, len(sessions), len(all_turns),
         agg["metrics"].get("overall_pass_rate", 0),
     )
     return payload
@@ -333,7 +560,20 @@ def _print_summary(payload: dict[str, Any]) -> int:
     print(f"  topic_adherence     : {m.get('topic_adherence_rate', 0):.3f}")
     print(f"  hallucination_rate  : {m.get('hallucination_rate', 0):.3f}")
     print(f"  containment_rate    : {m.get('containment_rate', 0):.3f}")
+    print(f"  judge_agreement     : {m.get('judge_agreement', 0):.3f}")
     print(f"{'='*50}")
+
+    # Regression verdict (offline only carries one)
+    reg = payload.get("regression") or {}
+    reg_status = reg.get("status", "")
+    if reg_status:
+        print(f"  dataset_version     : {payload.get('dataset_version', '?')}")
+        print(f"  regression          : {reg_status.upper()}"
+              f" (baseline {str(reg.get('baseline_run_id') or '-')[:8]})")
+        for v in reg.get("violations") or []:
+            print(f"    - {v.get('metric')}: {v.get('baseline')} -> {v.get('current')} "
+                  f"(Δ{v.get('delta')}, limit {v.get('threshold')}) [{v.get('level')}]")
+        print(f"{'='*50}")
 
     if kind == "offline":
         # Per-turn details for offline golden runs
@@ -343,6 +583,9 @@ def _print_summary(payload: dict[str, Any]) -> int:
                 mark = "OK " if s.get("passed") else "FAIL"
                 print(f"  {t.get('convo_name')} turn{t.get('seq')} {mark} {s.get('name')}: {s.get('detail','')}")
 
+    # CI gate: nonzero exit on a hard regression OR any turn-level failure.
+    if reg_status == "fail":
+        return 2
     return 0 if failures == 0 else 1
 
 
@@ -351,10 +594,11 @@ def _print_summary(payload: dict[str, Any]) -> int:
 # ---------------------------------------------------------------------------
 
 async def _async_main(args: argparse.Namespace) -> int:
+    channel = (args.channel or "chat").lower()
     if args.offline:
-        payload = await run_offline()
+        payload = await run_offline(channel=channel)
     else:
-        payload = await run_online(sample=args.sample, hours=args.hours)
+        payload = await run_online(sample=args.sample, hours=args.hours, channel=channel)
     return _print_summary(payload)
 
 
@@ -376,14 +620,22 @@ def main() -> None:
     parser.add_argument(
         "--sample",
         type=int,
-        default=20,
-        help="Number of sessions to sample (--online only, default 20).",
+        default=0,
+        help="Max sessions for --online. 0 (default) = ALL sessions in the "
+             "look-back window, bounded by MAX_ONLINE_SESSIONS. >0 = explicit cap.",
     )
     parser.add_argument(
         "--hours",
         type=int,
         default=24,
         help="Look-back window in hours for --online (default 24).",
+    )
+    parser.add_argument(
+        "--channel",
+        choices=["chat", "voice", "phone"],
+        default="chat",
+        help="Agent surface to evaluate: chat (website chatbot), voice (browser "
+             "voice bot), or phone (Twilio phone calls). Default chat.",
     )
 
     args = parser.parse_args()

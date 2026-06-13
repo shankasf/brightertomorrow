@@ -222,7 +222,7 @@ func (h *IntakeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		subj, heading, paragraphs, details := buildRequestAckContent(greeting)
 		dedupeKey := fmt.Sprintf("intakeack:%s:email", resp.SubmissionUUID)
 		enqueued := enqueueEmail(r.Context(), h.Notify, strings.TrimSpace(body.Email),
-			subj, heading, paragraphs, details, dedupeKey, resp.SubmissionUUID)
+			subj, heading, paragraphs, details, false, dedupeKey, resp.SubmissionUUID)
 		slog.Info("intake: ACK email enqueue",
 			"submission_uuid", resp.SubmissionUUID, "channel", "email", "enqueued", enqueued)
 		if enqueued {

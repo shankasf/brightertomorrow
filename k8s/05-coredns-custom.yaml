@@ -1,0 +1,16 @@
+# In-cluster DNS override for our own domain. The host VPS uses Hostinger's
+# resolver (153.92.2.6), which still answers brightertomorrowtherapy.com from
+# the old (inaccessible) Hostinger DNS zone instead of the public Squarespace
+# zone — indefinitely, not a TTL issue. Without this, cert-manager self-checks
+# and any in-cluster call to the public hostname hit the old WordPress IPs.
+# k3s CoreDNS imports /etc/coredns/custom/*.server from this configmap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  brightertomorrowtherapy.server: |
+    brightertomorrowtherapy.com:53 {
+        forward . 8.8.8.8 1.1.1.1
+    }

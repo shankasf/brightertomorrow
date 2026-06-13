@@ -358,7 +358,7 @@ h6 {
   position: sticky;
   top: 0;
   z-index: 2;
-  padding: 0.85rem 0.9rem;
+  padding: 0.8rem 0.7rem;
   text-align: left;
   font-size: 0.7rem;
   font-weight: 800;
@@ -367,10 +367,14 @@ h6 {
   color: var(--ink);
   background: linear-gradient(180deg, #faedd5 0%, #f4ead0 100%);
   border-bottom: 1.5px solid #e5d6b7;
-  white-space: nowrap;
+  /* Allow multi-word headers ("Member ID", "Interested therapist") to stack
+     instead of nowrap — keeps wide tables inside the viewport. */
+  white-space: normal;
+  line-height: 1.2;
+  vertical-align: bottom;
 }
-.bt-table thead th:first-child { padding-left: 1.25rem; }
-.bt-table thead th:last-child  { padding-right: 1.25rem; }
+.bt-table thead th:first-child { padding-left: 1.1rem; }
+.bt-table thead th:last-child  { padding-right: 1.1rem; }
 
 .bt-table tbody tr {
   transition: background-color 140ms ease;
@@ -380,18 +384,18 @@ h6 {
 .bt-table tbody tr + tr td { border-top: 1px solid #f1ece2; }
 
 .bt-table tbody td {
-  padding: 0.95rem 0.9rem;
+  padding: 0.85rem 0.7rem;
   vertical-align: middle;
   color: rgba(25, 39, 53, 0.88);
   font-size: 0.875rem;
   line-height: 1.45;
 }
 .bt-table tbody td:first-child {
-  padding-left: 1.25rem;
+  padding-left: 1.1rem;
   font-weight: 700;
   color: var(--ink);
 }
-.bt-table tbody td:last-child { padding-right: 1.25rem; }
+.bt-table tbody td:last-child { padding-right: 1.1rem; }
 
 /* Numeric / mono cells get tabular figures */
 .bt-table tbody td.num,
@@ -550,3 +554,99 @@ html.a11y-big-cursor,
 html.a11y-big-cursor * {
   cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'><path d='M6 4 L6 34 L14 26 L19 38 L24 36 L19 24 L30 24 Z' fill='%23FFEB3B' stroke='%23000000' stroke-width='2' stroke-linejoin='round'/></svg>") 4 4, auto !important;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Blog article body. Migrated WordPress markdown (bt.blog_posts.body_md) is
+   rendered to sanitized HTML and dropped into .blog-prose. These rules mirror
+   the prior hand-rolled renderer's look (text-lg / leading-[1.85] / ink-muted,
+   font-display h2 at text-3xl) and extend it to h1/h3/h4, links, ol, italics,
+   blockquotes so nothing renders as raw markdown.
+   ────────────────────────────────────────────────────────────────────────── */
+.blog-prose {
+  font-size: 1.125rem;          /* text-lg */
+  line-height: 1.85;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+.blog-prose > :first-child { margin-top: 0; }
+.blog-prose p { margin-block: 1.25rem; }       /* my-5 */
+.blog-prose h1,
+.blog-prose h2 {
+  font-family: var(--font-karla), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.875rem;          /* text-3xl */
+  line-height: 1.25;
+  color: var(--ink);
+  margin-top: 3rem;             /* mt-12 */
+  margin-bottom: 1rem;          /* mb-4 */
+}
+.blog-prose h3 {
+  font-family: var(--font-karla), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.4rem;
+  line-height: 1.3;
+  color: var(--ink);
+  margin-top: 2.25rem;
+  margin-bottom: 0.75rem;
+}
+.blog-prose h4 {
+  font-family: var(--font-karla), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--ink);
+  margin-top: 1.75rem;
+  margin-bottom: 0.5rem;
+}
+.blog-prose ul,
+.blog-prose ol {
+  margin-block: 1.25rem;
+  padding-left: 1.5rem;         /* ml-6 */
+}
+.blog-prose ul { list-style: disc; }
+.blog-prose ol { list-style: decimal; }
+.blog-prose li { margin-block: 0.5rem; }       /* my-2 */
+.blog-prose li::marker { color: var(--brand-700); }
+.blog-prose strong,
+.blog-prose b { font-weight: 700; color: var(--ink); }
+.blog-prose em,
+.blog-prose i { font-style: italic; }
+.blog-prose a {
+  color: var(--brand-700);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+.blog-prose a:hover { color: var(--brand); }
+.blog-prose blockquote {
+  margin-block: 1.5rem;
+  padding-left: 1.25rem;
+  border-left: 3px solid var(--brand);
+  color: var(--ink);
+  font-style: italic;
+}
+.blog-prose hr {
+  margin-block: 2.5rem;
+  border: 0;
+  border-top: 1px solid var(--cream-deep);
+}
+.blog-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 1rem;
+  margin-block: 1.5rem;
+}
+.blog-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--cream);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3rem;
+}
+.blog-prose pre {
+  margin-block: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: var(--cream);
+  border-radius: 0.75rem;
+  overflow-x: auto;
+}
+.blog-prose pre code { background: transparent; padding: 0; }

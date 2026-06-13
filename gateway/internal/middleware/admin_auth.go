@@ -6,6 +6,7 @@ import (
 
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/admin"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -32,6 +33,7 @@ func RequireAdmin(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 				return
 			}
 			ctx := context.WithValue(r.Context(), adminCtxKey{}, u)
+			ctx = phi.WithActor(ctx, u.Email)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

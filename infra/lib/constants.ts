@@ -1,7 +1,7 @@
-export const ACCOUNT = "689517798275";
+export const ACCOUNT = "502263855065";
 export const REGION = "us-east-1";
 
-export const ROOT_DOMAIN = "brightertomorrowtherapy.cloud";
+export const ROOT_DOMAIN = "brightertomorrowtherapy.com";
 export const ADMIN_DOMAIN = `admin.${ROOT_DOMAIN}`;
 export const API_DOMAIN = `api.${ROOT_DOMAIN}`;
 
@@ -32,11 +32,13 @@ export const DDB_SAFETY_QUEUE_TABLE = "bt-safety-queue";
 export const SECRET_TWILIO = "bt/twilio/credentials";
 
 // S3 bucket for PHI logs written by the s3_phi channel.
-export const PHI_LOGS_BUCKET = "bt-phi-logs";
+// Account-suffixed: S3 names are global and the old account (689517798275)
+// still owns the unsuffixed names until it is decommissioned.
+export const PHI_LOGS_BUCKET = `bt-phi-logs-${ACCOUNT}`;
 
 // S3 bucket for operational app logs (frontend + gateway + bt-ai) shipped by
 // Vector. CMK-encrypted, partitioned by service/yyyy/mm/dd/hh, Parquet.
-export const APP_LOGS_BUCKET = "bt-app-logs";
+export const APP_LOGS_BUCKET = `bt-app-logs-${ACCOUNT}`;
 
 // Glue + Athena names for app-log analytics.
 export const GLUE_LOG_DATABASE = "bt_logs";

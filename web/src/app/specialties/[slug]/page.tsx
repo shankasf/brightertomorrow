@@ -2,10 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Reveal from "@/components/Reveal";
+import { pageMetadata } from "@/lib/seo";
 import { getSpecialtyBySlug } from "@/lib/queries";
 import { FiArrowLeft, FiClock, FiShield, FiStar } from "react-icons/fi";
 import MatchTrigger from "./MatchTrigger";
 
+// DB-driven fallback for specialty detail pages. Bespoke hand-built pages
+// (e.g. specialties/anxiety-therapy/) take precedence over this dynamic segment.
 export const dynamic = "force-dynamic";
 
 const JOTFORM_MATCH_URL = "https://form.jotform.com/253014448330448";
@@ -15,11 +18,24 @@ export async function generateMetadata(
 ): Promise<Metadata> {
   const { slug } = await params;
   const sp = await getSpecialtyBySlug(slug);
-  if (!sp) return { title: "Specialty — Brighter Tomorrow Therapy" };
-  return {
-    title: `${sp.title} — Brighter Tomorrow Therapy`,
-    description: sp.short_desc ?? sp.subheadline ?? undefined,
-  };
+  // Throw here, not just in the page body: metadata resolves before streaming
+  // starts, so this is what makes the response a real HTTP 404 (not a soft 200).
+  if (!sp) notFound();
+  // sp.title may carry inline HTML (rendered via dangerouslySetInnerHTML) —
+  // strip tags & decode the few entities we use for a clean document title.
+  const title = sp.title
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .trim();
+  return pageMetadata({
+    title,
+    description:
+      sp.short_desc ??
+      sp.subheadline ??
+      `${title} at Brighter Tomorrow Therapy Collective in Las Vegas, NV. Compassionate, in-person and online care.`,
+    path: `/specialties/${slug}`,
+    ogImage: sp.image_url ?? undefined,
+  });
 }
 
 function renderInline(text: string, keyPrefix: string) {
@@ -98,7 +114,7 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
         <div className="container-x relative py-16 sm:py-20 lg:py-24">
           <Link
             href="/specialties"
-            className="inline-flex items-center gap-2 text-sm text-brand-700 hover:text-brand transition mb-8"
+            className="inline-flex items-center gap-2 text-sm text-brand-700 hover:text-brand transition mb-8 py-2 -my-2"
           >
             <FiArrowLeft /> All specialties
           </Link>

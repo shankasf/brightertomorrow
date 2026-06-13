@@ -12,6 +12,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -39,6 +40,14 @@ var validHandoffSeverities = map[string]struct{}{
 	"normal": {},
 }
 
+// knownHandoffFields are the top-level keys mapped onto adminHandoffRequest.
+// Any other top-level key the AI sends (timestamp, insurance_payer,
+// member_id_suffix, …) is swept into Extra rather than rejected.
+var knownHandoffFields = map[string]struct{}{
+	"type": {}, "reason": {}, "request_id": {}, "session_id": {},
+	"caller_phone": {}, "caller_email": {}, "severity": {}, "extra": {},
+}
+
 // AdminHandoffHandler serves POST /internal/admin/handoff_queue.
 type AdminHandoffHandler struct {
 	PHI        *phi.Store
@@ -57,12 +66,38 @@ type adminHandoffRequest struct {
 }
 
 func (h *AdminHandoffHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		slog.Warn("admin_handoff: read body", "err", err)
+		httpx.WriteJSON(w, http.StatusCreated, map[string]string{"queued_id": uuid.NewString()})
+		return
+	}
+
+	// Lenient decode: the AI pod sends node-specific fields at the top level
+	// (timestamp, insurance_payer, member_id_suffix, …). A strict decoder
+	// (DisallowUnknownFields) rejected the whole body, so the handoff was
+	// silently dropped for every node. Decode the known fields, then sweep
+	// any remaining top-level key into Extra so nothing is lost.
 	var body adminHandoffRequest
-	if err := httpx.ReadJSON(w, r, &body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		slog.Warn("admin_handoff: bad json body", "err", err)
 		// Fail gracefully: still issue a queued_id so the AI doesn't retry.
 		httpx.WriteJSON(w, http.StatusCreated, map[string]string{"queued_id": uuid.NewString()})
 		return
+	}
+	if allFields := map[string]json.RawMessage{}; json.Unmarshal(raw, &allFields) == nil {
+		for k, v := range allFields {
+			if _, known := knownHandoffFields[k]; known {
+				continue
+			}
+			if body.Extra == nil {
+				body.Extra = map[string]any{}
+			}
+			var val any
+			if json.Unmarshal(v, &val) == nil {
+				body.Extra[k] = val
+			}
+		}
 	}
 
 	// Normalise and sanitise — never trust free-form strings from the AI pod

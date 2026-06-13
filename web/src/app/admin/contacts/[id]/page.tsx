@@ -12,6 +12,9 @@ type ContactDetail = {
   id: number; full_name: string; email: string; phone: string | null;
   subject: string | null; message: string; source: string | null;
   created_at: string; retain_until: string | null; purged_at: string | null;
+  first_name: string | null; last_name: string | null; help_topic: string | null;
+  other_describe: string | null; preferred_contact_method: string | null;
+  best_time: string | null; therapist_requested: string | null;
 };
 
 export default function ContactDetailPage() {
@@ -62,9 +65,14 @@ export default function ContactDetailPage() {
             <Card padded={false} className="divide-y divide-slate-100">
               {(
                 [
+                  ['First name', contact.first_name ?? '—'],
+                  ['Last name', contact.last_name ?? '—'],
                   ['Email', contact.email],
                   ['Phone', contact.phone ?? '—'],
-                  ['Subject', contact.subject ?? '—'],
+                  ['Help topic', contact.help_topic ?? contact.subject ?? '—'],
+                  ['Preferred contact', contact.preferred_contact_method ?? '—'],
+                  ['Best time to reach', contact.best_time ?? '—'],
+                  ['Therapist requested', contact.therapist_requested ?? '—'],
                   ['Source', contact.source ?? '—'],
                   ['Received', formatPT(contact.created_at)],
                   ['Retain until', formatPTDate(contact.retain_until)],

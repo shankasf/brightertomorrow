@@ -80,20 +80,48 @@ def _no_feed_names() -> str:
     return ", ".join(sorted(t["name"] for t in THERAPISTS_WITHOUT_FEEDS))
 
 
+def _spaced_digits(digits: str) -> str:
+    """Render digits as a slow, dictation-friendly run ('8 4 5 3 8 8 4 2 6 7')
+    so the model reads back the EXACT caller number instead of recalling one."""
+    return " ".join(digits)
+
+
 def _ani_block(caller_phone: str | None) -> str:
     """Instruction snippet so the agent CONFIRMS the caller's known number
-    (Twilio ANI) instead of asking them to recite it / fabricating one."""
+    (Twilio ANI) instead of asking them to recite it / fabricating one.
+
+    CRITICAL: we inject the FULL ANI digits (not just the last 4). With only
+    the last 4 the model had to recall the rest of the number when reading it
+    back, and it grabbed the practice line (725-238-6990) that appears
+    elsewhere in the prompt. Grounding it on the exact digits removes the
+    recall step entirely.
+    """
     if not caller_phone:
         return ""
     digits = "".join(c for c in caller_phone if c.isdigit())
-    last4 = digits[-4:] if len(digits) >= 4 else digits
+    # Normalize to the 10-digit national number (drop a leading US "1").
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) < 4:
+        return ""
+    last4 = digits[-4:]
     return (
         "CALLER'S PHONE ON FILE — this caller is phoning in, and we already "
-        f"have the number they're calling from (ending {last4}). For the phone "
-        "field (booking OR callback), do NOT ask them to recite their number "
-        "and NEVER invent one. Say: 'I have the number you're calling from, "
-        f"ending {last4} — should I use that?' and use it on a yes. Only ask "
-        "for digits if the caller wants to be reached at a DIFFERENT number.\n\n"
+        "have the EXACT number they're calling from. Their callback number is, "
+        f"digit for digit: {_spaced_digits(digits)} (ending {last4}). When you "
+        "need the phone field (booking OR callback): do NOT ask them to recite "
+        "their number and NEVER invent, guess, or recall one from memory. Say: "
+        f"'I have the number you're calling from, ending {last4} — should I use "
+        "that?' On a yes, read it back EXACTLY as the digits above and submit "
+        f"those exact 10 digits ({digits}). Only ask for digits if the caller "
+        "explicitly wants to be reached at a DIFFERENT number, and then use "
+        "what THEY state.\n"
+        "NEVER use the practice line 725-238-6990 (7252386990) as the caller's "
+        "phone / callback number — that is OUR number, not theirs. The caller's "
+        "callback number is the digits above, or a different number the caller "
+        f"states; it is NEVER 7252386990. If you ever almost read back "
+        "725-238-6990 as their number, STOP and use the on-file digits above "
+        "instead.\n\n"
     )
 
 
@@ -369,7 +397,12 @@ def build_realtime_triage(caller_phone: str | None = None) -> RealtimeAgent:
             "  • error 'need_phone'/'invalid_dob' -> speak the `say` hint.\n"
             "STEP 3 — Only after an explicit yes, call cancel_appointment("
             "appointment_id, email_hash) using the values from lookup. On "
-            "ok:true: confirm it's cancelled. If RESCHEDULING, then go straight "
+            "ok:true: confirm it's cancelled, then state the cancellation policy "
+            "in ONE warm sentence — that cancellations within 48 hours of the "
+            "appointment are subject to a cancellation fee, and that the My "
+            "Account link to cancel is in their confirmation email. NEVER read "
+            "out a web address or URL aloud — point them to the email for the "
+            "link. If RESCHEDULING, then go straight "
             "into the BOOKING FLOW to find a new time (reuse the same therapist "
             "from the lookup unless they want someone else) — you already know "
             "the therapist. On ok:false: say you couldn't complete it and offer "

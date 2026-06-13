@@ -6,11 +6,11 @@ End-to-end picture:
   PSTN caller
       │  dial +1 (XXX) XXX-XXXX
       ▼
-  Twilio number  ──webhook──►  POST https://brightertomorrowtherapy.cloud/v1/twilio/voice
+  Twilio number  ──webhook──►  POST https://brightertomorrowtherapy.com/v1/twilio/voice
                                   │
                                   ▼   (TwiML returned)
                                <Connect><Stream
-                                   url="wss://brightertomorrowtherapy.cloud/v1/twilio/media"/>
+                                   url="wss://brightertomorrowtherapy.com/v1/twilio/media"/>
                                   │
                                   ▼   (bidirectional mulaw 8 kHz frames)
   Twilio Media Stream  ◄──►  bt-gateway  ◄──ws──►  bt-ai
@@ -48,7 +48,7 @@ widget answers the call, and transcripts persist to the same DynamoDB PHI store.
 2. After purchase, open the number's configuration page.
 3. Under **Voice & Fax → "A CALL COMES IN"** set:
    - Type: **Webhook**
-   - URL:  `https://brightertomorrowtherapy.cloud/v1/twilio/voice`
+   - URL:  `https://brightertomorrowtherapy.com/v1/twilio/voice`
    - HTTP method: **HTTP POST**
 4. Under **"PRIMARY HANDLER FAILS"** (optional) set the same URL — Twilio will
    replay the webhook if it gets a 5xx.
@@ -62,8 +62,8 @@ Edit `k8s/10-secrets.yaml` (gitignored), add the four keys:
 stringData:
   # ... existing keys ...
   TWILIO_AUTH_TOKEN:    "<copy from Twilio Console → Account → API keys & tokens>"
-  TWILIO_PUBLIC_HOST:   "brightertomorrowtherapy.cloud"
-  BT_PUBLIC_WS_BASE:    "wss://brightertomorrowtherapy.cloud"
+  TWILIO_PUBLIC_HOST:   "brightertomorrowtherapy.com"
+  BT_PUBLIC_WS_BASE:    "wss://brightertomorrowtherapy.com"
 ```
 
 Apply:
@@ -77,7 +77,7 @@ Verify the rollout:
 
 ```bash
 kubectl -n bt logs deploy/bt-gateway | grep -i twilio
-# Expect: "twilio voice enabled public_host=brightertomorrowtherapy.cloud"
+# Expect: "twilio voice enabled public_host=brightertomorrowtherapy.com"
 ```
 
 If the log says `twilio voice disabled — TWILIO_AUTH_TOKEN not set`, the

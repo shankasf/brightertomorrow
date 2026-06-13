@@ -112,6 +112,10 @@ type ChatTurn struct {
 	Content     string    `dynamodbav:"content"` // plaintext message body
 	CreatedAt   time.Time `dynamodbav:"createdAt"`
 	RetainUntil time.Time `dynamodbav:"retainUntil"` // 10y from CreatedAt
+	// LatencyMs is the end-to-end time taken to produce this turn (assistant
+	// turns only). 0 for user/system turns and for historical rows written
+	// before this field existed. omitempty keeps those items lean.
+	LatencyMs int `dynamodbav:"latencyMs,omitempty"`
 }
 
 // Store is the gateway-facing API. Construct with New.
@@ -225,6 +229,7 @@ func (s *Store) PutIntake(ctx context.Context, r IntakeRecord) error {
 		}
 		return fmt.Errorf("phi: put intake: %w", err)
 	}
+	s.auditPHI("intakes", "INSERT", r.SubmissionUUID, actorFromContext(ctx), "")
 	return nil
 }
 
@@ -382,6 +387,7 @@ func (s *Store) DeleteIntake(ctx context.Context, emailHash, submissionUUID stri
 	if err != nil {
 		return fmt.Errorf("phi: delete intake: %w", err)
 	}
+	s.auditPHI("intakes", "DELETE", submissionUUID, actorFromContext(ctx), "")
 	return nil
 }
 
@@ -509,6 +515,7 @@ func (s *Store) PutChatTurn(ctx context.Context, t ChatTurn) error {
 	}); err != nil {
 		return fmt.Errorf("phi: put chat turn: %w", err)
 	}
+	s.auditPHI("chat_turns", "INSERT", t.SessionID+"#"+chatSK(t.CreatedAt, t.Role), actorFromContext(ctx), "")
 	return nil
 }
 
@@ -563,6 +570,8 @@ func (s *Store) DeleteChatSession(ctx context.Context, sessionID string) (int, e
 	if sessionID == "" {
 		return 0, errors.New("phi: SessionID is required")
 	}
+	// Capture actor before any timeout-wrapped sub-context is created.
+	actor := actorFromContext(ctx)
 	deleted := 0
 	// Outer cap: at 25 deletes per batch, this would handle ~2500 turns —
 	// far more than any realistic chat session — without an unbounded loop.
@@ -585,6 +594,8 @@ func (s *Store) DeleteChatSession(ctx context.Context, sessionID string) (int, e
 			return deleted, fmt.Errorf("phi: delete chat: query: %w", err)
 		}
 		if len(out.Items) == 0 {
+			s.auditPHI("chat_sessions", "DELETE", sessionID, actor,
+				fmt.Sprintf(`{"deleted_turns":%d}`, deleted))
 			return deleted, nil
 		}
 

@@ -29,7 +29,7 @@ import httpx
 from botocore.exceptions import ClientError
 
 from ....integrations.aws_signer import gateway_post, signed_post
-from ....data.payers import resolve_payer_id
+from ....data.payers import resolve_payer_id, is_declined_payer
 from ....integrations.tools import _validate_dob
 from ...state import State
 from ...tracing import traced
@@ -102,6 +102,7 @@ _DISPLAY_TEXT: dict[str, str] = {
     "wc_auto_eap": "Your {payer} coverage looks like workers' comp, auto, or EAP — our team handles those manually and will follow up.",
     "self_pay": "Got it — you're on self-pay.",
     "no_insurance": "Got it — no insurance on file, we'll continue self-pay.",
+    "medicaid_not_accepted": "We're not able to accept {payer} plans, but we'd be glad to see you on a self-pay / out-of-network basis.",
 }
 
 
@@ -154,6 +155,23 @@ def verify_insurance(state: State) -> dict[str, Any]:
             "last_action": "verify_insurance",
             "last_node": "verify_insurance",
             "audit_event": _build_audit_event("verify_insurance", session_id, outcome="no_insurance"),
+        }
+
+    # --- declined-plan short-circuit (e.g. Medicaid) -----------------------
+    # We don't accept these plans. Decline clearly and pivot to self-pay
+    # rather than calling CLAIM.MD or routing to admin manual review. Routed
+    # by the planner to offer_self_pay (same machinery as `ineligible`).
+    declined = is_declined_payer(ins.get("payer_name") or "")
+    if declined:
+        logger.info("action verify_insurance session=%s outcome=medicaid_not_accepted payer=%r",
+                    session_id, declined)
+        return {
+            "insurance_fields": {**ins, "outcome": "medicaid_not_accepted"},
+            "verify_result": _build_verify_result("medicaid_not_accepted", declined),
+            "last_action": "verify_insurance",
+            "last_node": "verify_insurance",
+            "audit_event": _build_audit_event("verify_insurance", session_id,
+                                              outcome="medicaid_not_accepted"),
         }
 
     first_name = (ins.get("first_name") or "").strip()

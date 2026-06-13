@@ -1,6 +1,6 @@
 # Brighter Tomorrow Therapy — Voice & Chat Agents
 
-The AI assistant behind **brightertomorrowtherapy.cloud**. One LangGraph agent serves three surfaces — text chat, browser voice, and Twilio phone — with HIPAA-safe persistence on AWS.
+The AI assistant behind **brightertomorrowtherapy.com**. One LangGraph agent serves three surfaces — text chat, browser voice, and Twilio phone — with HIPAA-safe persistence on AWS.
 
 This README has two halves:
 
@@ -379,7 +379,7 @@ Hostinger Postgres is **not** under a BAA. None of the 18 HIPAA identifiers may 
 - `insurance_checks`: audit row per probe — payer, eligible, `email_hash`. No plaintext PHI.
 - KB, FAQs, services, specialties, locations, team metadata.
 
-**AWS (account 689517798275, region us-east-1) — HIPAA BAA.**
+**AWS (account 502263855065, region us-east-1) — HIPAA BAA.**
 
 DynamoDB tables (every table KMS-encrypted with the `alias/bt-phi` CMK, point-in-time-recovery on, deletion protection on):
 
@@ -510,7 +510,7 @@ The AWS HIPAA stack is deployed via CDK from `infra/`:
 cd infra && npm install && npx cdk deploy --all
 ```
 
-Account 689517798275, region us-east-1. See `infra/README.md` for stack-specific details.
+Account 502263855065, region us-east-1. See `infra/README.md` for stack-specific details.
 
 ---
 

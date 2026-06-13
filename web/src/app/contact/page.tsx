@@ -2,12 +2,14 @@ import {
   FiPhone, FiMail, FiClock, FiMapPin, FiFacebook, FiInstagram,
 } from "react-icons/fi";
 import ContactReplicaForm from "@/components/ContactReplicaForm";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata = {
-  title: "Contact Us",
+export const metadata = pageMetadata({
+  title: "Contact Us in Las Vegas, NV",
   description:
-    "Get in touch with Brighter Tomorrow Therapy. Call, email, or send us a message — two Las Vegas offices plus telehealth. We'll contact you shortly to book an appointment.",
-};
+    "Get in touch with Brighter Tomorrow Therapy. Call, email, or send a message — two Las Vegas offices plus telehealth. We'll reach out shortly to book your appointment.",
+  path: "/contact",
+});
 
 const FACEBOOK = "https://web.facebook.com/Forabettertomorrowlv";
 const INSTAGRAM = "https://www.instagram.com/brightertomorrowlv/";

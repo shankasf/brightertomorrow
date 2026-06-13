@@ -74,7 +74,7 @@ func (h *IntakeInternalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			greeting := notifyGreeting(strings.TrimSpace(body.FirstName))
 			subj, heading, paragraphs, details := buildRequestAckContent(greeting)
 			dedupeKey := fmt.Sprintf("intakeack:%s:email", resp.SubmissionUUID)
-			enqueueEmail(r.Context(), h.Notify, email, subj, heading, paragraphs, details, dedupeKey, resp.SubmissionUUID)
+			enqueueEmail(r.Context(), h.Notify, email, subj, heading, paragraphs, details, false, dedupeKey, resp.SubmissionUUID)
 			slog.Info("intake internal: ACK email enqueued",
 				"submission_uuid", resp.SubmissionUUID, "channel", "email")
 		}

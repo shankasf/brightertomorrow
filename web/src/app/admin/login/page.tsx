@@ -307,7 +307,7 @@ export default function AdminLoginPage() {
                     transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
                     className="space-y-4"
                   >
-                    <Field label="Email" type="email" value={email} onChange={setEmail} required autoComplete="username" placeholder="you@brightertomorrow.cloud" disabled={busy || !configured} />
+                    <Field label="Email" type="email" value={email} onChange={setEmail} required autoComplete="username" placeholder="you@brightertomorrowtherapy.com" disabled={busy || !configured} />
                     <Field
                       label="Password"
                       type="password"
@@ -342,7 +342,7 @@ export default function AdminLoginPage() {
                     transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
                     className="space-y-4"
                   >
-                    <Field label="Email" type="email" value={email} onChange={setEmail} required autoFocus autoComplete="username" placeholder="you@brightertomorrow.cloud" disabled={busy} />
+                    <Field label="Email" type="email" value={email} onChange={setEmail} required autoFocus autoComplete="username" placeholder="you@brightertomorrowtherapy.com" disabled={busy} />
                     <Submit busy={busy} label="Send code" busyLabel="Sending…" />
                     <button
                       type="button"
@@ -464,6 +464,12 @@ export default function AdminLoginPage() {
    Left brand panel — big business name, logo, decorative warmth
    ───────────────────────────────────────────────────────────────── */
 function BrandPanel() {
+  // Hostname is resolved client-side so the label stays correct across the
+  // .cloud → .com domain cutover without a rebuild.
+  const [host, setHost] = useState('brightertomorrowtherapy.com');
+  useEffect(() => {
+    setHost(window.location.hostname);
+  }, []);
   return (
     <div className="relative hidden overflow-hidden bg-gradient-to-br from-[#192735] via-[#1d2c3d] to-[#253A4D] lg:block">
       {/* Glows */}
@@ -497,7 +503,7 @@ function BrandPanel() {
           </div>
           <div className="leading-tight">
             <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-brand">Admin Console</div>
-            <div className="text-[12px] text-cream/70">brightertomorrowtherapy.cloud</div>
+            <div className="text-[12px] text-cream/70">{host}</div>
           </div>
         </motion.div>
 

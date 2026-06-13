@@ -100,7 +100,7 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Persist the user message to DynamoDB — skip the synthetic greeting marker.
 	const greetMarker = "__BT_GREET__"
 	if body.Message != greetMarker {
-		if err := recordTurn(ctx, h.Pool, h.PHI, sessionID, "user", body.Message); err != nil {
+		if err := recordTurn(ctx, h.Pool, h.PHI, sessionID, "user", body.Message, 0); err != nil {
 			slog.Error("chat_stream: ddb put user turn", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -135,7 +135,7 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSSEEvent(w, "message", chatFallback)
 		writeSSEEvent(w, "done", "")
 		flusher.Flush()
-		h.persistReply(sessionID, chatFallback)
+		h.persistReply(sessionID, chatFallback, int(time.Since(start).Milliseconds()))
 		return
 	}
 	defer upstreamResp.Body.Close()
@@ -145,7 +145,7 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSSEEvent(w, "message", chatFallback)
 		writeSSEEvent(w, "done", "")
 		flusher.Flush()
-		h.persistReply(sessionID, chatFallback)
+		h.persistReply(sessionID, chatFallback, int(time.Since(start).Milliseconds()))
 		return
 	}
 
@@ -219,7 +219,7 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"client_disconnected", clientGone,
 	)
 
-	h.persistReply(sessionID, reply)
+	h.persistReply(sessionID, reply, int(time.Since(start).Milliseconds()))
 }
 
 // fallback is used when the ResponseWriter doesn't support http.Flusher.
@@ -242,15 +242,15 @@ func (h *ChatStreamHandler) fallback(w http.ResponseWriter, ctx context.Context,
 
 	writeSSEEvent(w, "message", reply)
 	writeSSEEvent(w, "done", "")
-	h.persistReply(sessionID, reply)
+	h.persistReply(sessionID, reply, int(time.Since(start).Milliseconds()))
 }
 
 // persistReply records the assistant reply in DynamoDB using a background
 // context so a disconnected client can't leave history in a torn state.
-func (h *ChatStreamHandler) persistReply(sessionID, reply string) {
+func (h *ChatStreamHandler) persistReply(sessionID, reply string, latencyMs int) {
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer persistCancel()
-	if err := recordTurn(persistCtx, h.Pool, h.PHI, sessionID, "assistant", reply); err != nil {
+	if err := recordTurn(persistCtx, h.Pool, h.PHI, sessionID, "assistant", reply, latencyMs); err != nil {
 		slog.Error("chat_stream: persist assistant reply", "err", err, "session_id", sessionID)
 	}
 }

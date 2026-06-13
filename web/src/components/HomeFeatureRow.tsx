@@ -94,7 +94,7 @@ export default function HomeFeatureRow({ settings }: { settings: SiteSettings })
           {/* Card 2 — Service Areas (wine) */}
           <Reveal delay={0.06}>
             <article
-              className="h-full p-8 lg:p-9 text-center text-white"
+              className="h-full p-6 sm:p-8 lg:p-9 text-center text-white"
               style={{
                 backgroundColor: "#66202A",
                 borderRadius: "20px 0 20px 20px",

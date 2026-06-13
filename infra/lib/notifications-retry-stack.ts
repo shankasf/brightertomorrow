@@ -81,15 +81,15 @@ export class NotificationsRetryStack extends Stack {
         // SES_FROM_EMAIL is overridden post-deploy:
         //   aws lambda update-function-configuration \
         //     --function-name bt-notifications-retry \
-        //     --environment Variables='{..., "SES_FROM_EMAIL":"noreply@brightertomorrowtherapy.cloud"}'
+        //     --environment Variables='{..., "SES_FROM_EMAIL":"noreply@mail.brightertomorrowtherapy.com"}'
         // From a verified SES domain identity (mail. subdomain isolates
         // deliverability/DMARC from the website apex). See bt.ts sesFromIdentityArn.
-        SES_FROM_EMAIL: "noreply@mail.brightertomorrowtherapy.cloud",
+        SES_FROM_EMAIL: "noreply@mail.brightertomorrowtherapy.com",
         // Admin/practice inbox BCC'd on EVERY patient email (booking,
         // reschedule, cancel, status changes) so staff keep a copy. Internal
         // disclosure to the covered entity; minimum-necessary content only.
         ADMIN_BCC_EMAIL: "sagar@callsphere.tech",
-        // SES is LIVE (domain mail.brightertomorrowtherapy.cloud verified +
+        // SES is LIVE (domain mail.brightertomorrowtherapy.com verified +
         // DKIM in Hostinger DNS, account out of sandbox). Twilio/SMS stays
         // disabled until A2P 10DLC registration completes — those rows are
         // marked status="service_unavailable" for manual follow-up.
@@ -133,12 +133,20 @@ export class NotificationsRetryStack extends Stack {
       resources: [phiKey.keyArn],
     }));
 
-    // SES: SendEmail from the verified domain identity only.
+    // SES: SendEmail locked to our approved From address (not the identity ARN).
+    // Scoping by ses:FromAddress (Resource:*) is the AWS-recommended pattern: it
+    // restricts WHO we send as, without denying when a recipient happens to be a
+    // verified SES identity (a sandbox-only quirk — identity-ARN scoping fails the
+    // authz check on the *recipient* identity). props.sesFromIdentityArn is kept
+    // for documentation/derivation of the From address.
     this.retryFn.addToRolePolicy(new iam.PolicyStatement({
       sid: "SesSendEmail",
       effect: iam.Effect.ALLOW,
       actions: ["ses:SendEmail"],
-      resources: [props.sesFromIdentityArn],
+      resources: ["*"],
+      conditions: {
+        StringEquals: { "ses:FromAddress": "noreply@mail.brightertomorrowtherapy.com" },
+      },
     }));
 
     // S3: PutObject on bt-phi-logs only.

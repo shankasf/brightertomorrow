@@ -574,10 +574,14 @@ func enqueuePatientNotifications(
 
 	count := 0
 
+	// Cancel/reschedule emails carry the cancellation policy (48-hour fee +
+	// My Account link); booking confirmations and completions do not.
+	cancelNotice := status == "cancelled" || status == "cancel_requested" || status == "reschedule_requested"
+
 	// Email — structured content payload; the Lambda renders the branded HTML.
 	if email := strings.TrimSpace(rec.Email); email != "" {
 		dedupeKey := fmt.Sprintf("apptstatus:%s:%s:email", submissionUUID, status)
-		if enqueueEmail(ctx, store, email, emailSubject, emailHeading, emailParagraphs, emailDetails, dedupeKey, submissionUUID) {
+		if enqueueEmail(ctx, store, email, emailSubject, emailHeading, emailParagraphs, emailDetails, cancelNotice, dedupeKey, submissionUUID) {
 			count++
 		}
 	}

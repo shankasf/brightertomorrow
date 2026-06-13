@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiPhone, FiPhoneOff } from "react-icons/fi";
+import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiPhone, FiPhoneOff, FiRefreshCw } from "react-icons/fi";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -45,7 +45,6 @@ const INSURANCE_OPTIONS: string[] = [
   "Anthem",
   "Kaiser Permanente",
   "Medicare",
-  "Medicaid",
   "Tricare",
   "Molina Healthcare",
   "WellCare",
@@ -366,11 +365,40 @@ export default function ChatWidget() {
     return () => clearTimeout(t);
   }, [msgs, sessionId]);
 
-  async function send(override?: string) {
+  // Wipe the current conversation and start a brand-new one. Mirrors the idle
+  // auto-flush: end the server-side session, clear the localStorage caches,
+  // reset local state, then immediately re-greet on a fresh session. Passing
+  // freshSession forces the greet to post with no session id so the server
+  // mints a new thread (setSessionId(null) won't be visible in this tick).
+  function startFresh() {
+    if (loading) return;
+    const sid = sessionId;
+    clearMsgsCache();
+    clearSession(CHAT_SID_KEY);
+    clearSession(VOICE_SID_KEY);
+    if (sid) {
+      try {
+        void fetch("/v1/chat/end", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ session_id: sid }),
+          keepalive: true,
+        });
+      } catch {
+        // best-effort — TTL eviction is the backstop
+      }
+    }
+    setMsgs([]);
+    setSessionId(null);
+    greetedRef.current = true; // we greet explicitly below; block the open-effect
+    void send(GREET_MARKER, { freshSession: true });
+  }
+
+  async function send(override?: string, opts?: { freshSession?: boolean }) {
     const text = (override ?? input).trim();
     if (!text || loading) return;
     if (override === undefined) setInput("");
-    const sid = sessionId;
+    const sid = opts?.freshSession ? null : sessionId;
     // The greet marker is a synthetic prompt — never render it as a user
     // bubble; the visitor never typed it. Everything else echoes normally.
     const isGreet = text === GREET_MARKER;
@@ -768,7 +796,17 @@ export default function ChatWidget() {
                 <div className="font-display font-semibold truncate">Brighter Tomorrow</div>
                 <div className="text-xs opacity-80 truncate">Las Vegas therapy for kids, teens &amp; adults</div>
               </div>
-              <div className="flex items-center gap-0.5 shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={startFresh}
+                  disabled={loading}
+                  className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-white/15 hover:bg-white/25 disabled:opacity-50 disabled:cursor-not-allowed px-3 h-8 text-[13px] font-bold transition"
+                  aria-label="Start a fresh conversation"
+                  title="Start a fresh conversation"
+                >
+                  <FiRefreshCw size={14} />
+                  Start fresh
+                </button>
                 <button
                   onClick={() => setMuted((m) => !m)}
                   className="opacity-80 hover:opacity-100 transition shrink-0 grid place-items-center w-11 h-11 -mr-1 rounded-full hover:bg-white/10"
@@ -912,24 +950,7 @@ export default function ChatWidget() {
                 other.
               */}
               <div className="mt-1 px-3 flex items-center justify-between gap-2 text-[10.5px] text-ink-soft">
-                <span>🔒 Private &amp; HIPAA-protected. Don&apos;t continue on a shared device.</span>
-                {sessionId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      clearSession(CHAT_SID_KEY);
-                      clearSession(VOICE_SID_KEY);
-                      clearMsgsCache();
-                      setSessionId(null);
-                      setMsgs([]);
-                      greetedRef.current = false;
-                    }}
-                    className="underline underline-offset-2 hover:text-ink"
-                    aria-label="Start a new conversation"
-                  >
-                    Start fresh
-                  </button>
-                )}
+                <span>🔒 Private &amp; HIPAA-protected.</span>
               </div>
             </form>
           </motion.div>
@@ -1063,6 +1084,11 @@ function TherapistPicker({ onPick }: { onPick: (name: string) => void }) {
 function InsurancePicker({ onPick }: { onPick: (name: string) => void }) {
   return (
     <div className="mt-2.5">
+      <p className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] leading-snug text-amber-900">
+        We can verify and accept most major insurances. Please note we are
+        unable to accept <strong>Medicaid</strong> plans at this time, but
+        self-pay / out-of-network options are available.
+      </p>
       <label
         htmlFor="bt-insurance-picker"
         className="block text-[11px] uppercase tracking-[0.08em] text-ink-soft mb-1"

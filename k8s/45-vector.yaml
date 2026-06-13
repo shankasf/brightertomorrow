@@ -1,5 +1,5 @@
 # Vector DaemonSet — ships container logs from bt-ai / bt-gateway / bt-web
-# to s3://bt-app-logs as gzipped JSONL, partitioned by service/yyyy/mm/dd/hh.
+# to s3://bt-app-logs-502263855065 as gzipped JSONL, partitioned by service/yyyy/mm/dd/hh.
 #
 # Dedup strategy:
 #   - Vector tracks file offsets in /var/lib/vector (hostPath). Pod restart
@@ -148,7 +148,7 @@ data:
       s3:
         type: aws_s3
         inputs: [enrich]
-        bucket: bt-app-logs
+        bucket: bt-app-logs-502263855065
         region: us-east-1
         # Partitioned prefix — matches the Glue partition projection.
         key_prefix: "logs/service={{ service }}/year={{ p_year }}/month={{ p_month }}/day={{ p_day }}/hour={{ p_hour }}/"

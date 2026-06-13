@@ -36,6 +36,18 @@ _LOCATIONS_RX = re.compile(
     r"\b(locations?|address(?:es)?|where (?:are|is)|directions?|office)\b", re.I
 )
 
+# Markers that this message is the user PROVIDING details (an intake/coverage
+# form, a field answer) rather than asking a canned FAQ. When any of these is
+# present the message must go through the agent graph — otherwise an intake
+# dump containing an "Address:" line (or the word "office"/"address") gets
+# hijacked into the locations FAQ mid insurance-check/booking, bypassing the
+# planner entirely (chat session 2026-06-09).
+_INTAKE_MARKER_RX = re.compile(
+    r"\b(member\s*id|subscriber|policy|group\s*(?:number|#|id)|dob|date\s+of\s+birth|"
+    r"insurance|payer|reason\s+for\s+visit|first\s+name|last\s+name)\b|[:#]\s*\S",
+    re.I,
+)
+
 
 def detect_intent(message: str) -> str | None:
     """Return a cacheable intent id if the message is a canned info question, else None.
@@ -45,6 +57,13 @@ def detect_intent(message: str) -> str | None:
     """
     msg = message.strip()
     if not msg:
+        return None
+
+    # Canned answers are ONLY for short, standalone FAQ questions. A long or
+    # multi-line message, or one that carries intake/field markers, is the user
+    # providing details — it must go through the graph so the planner can act on
+    # their actual intent (e.g. verify insurance), not get a canned office list.
+    if len(msg) > 80 or "\n" in msg or _INTAKE_MARKER_RX.search(msg):
         return None
 
     has_hours = bool(_HOURS_RX.search(msg))

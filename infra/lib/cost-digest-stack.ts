@@ -54,8 +54,20 @@ export class CostDigestStack extends Stack {
         FROM_EMAIL: props.fromEmail,
         ACCOUNT_LABEL: props.accountLabel ?? "BT",
         LOG_LEVEL: "INFO",
+        // Main DDB table — queried (EVALRUNS partition) to estimate the
+        // nightly agent-eval LLM spend (OpenAI/Anthropic, off the AWS bill).
+        EVAL_TABLE: "bt-main",
       },
     });
+
+    // DynamoDB — read-only query on the EVALRUNS partition of bt-main to
+    // estimate external (OpenAI/Anthropic) eval spend for the digest.
+    this.digestFn.addToRolePolicy(new iam.PolicyStatement({
+      sid: "EvalRunsRead",
+      effect: iam.Effect.ALLOW,
+      actions: ["dynamodb:Query"],
+      resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/bt-main`],
+    }));
 
     // Cost Explorer — read-only, single API call. No resource-level ARNs.
     this.digestFn.addToRolePolicy(new iam.PolicyStatement({
@@ -65,12 +77,17 @@ export class CostDigestStack extends Stack {
       resources: ["*"],
     }));
 
-    // SES — scoped to the verified From identity only.
+    // SES — locked to our approved From address via ses:FromAddress (Resource:*),
+    // not the identity ARN. Identity-ARN scoping fails the authz check when the
+    // recipient is itself a verified SES identity (sandbox-only quirk).
     this.digestFn.addToRolePolicy(new iam.PolicyStatement({
       sid: "SesSendFromIdentity",
       effect: iam.Effect.ALLOW,
       actions: ["ses:SendEmail"],
-      resources: [props.sesFromIdentityArn],
+      resources: ["*"],
+      conditions: {
+        StringEquals: { "ses:FromAddress": props.fromEmail },
+      },
     }));
 
     // ── EventBridge Scheduler — 11:00 America/Los_Angeles ───────────────────

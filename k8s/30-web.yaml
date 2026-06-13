@@ -12,10 +12,20 @@ spec:
     spec:
       containers:
         - name: web
-          image: bt-web:prod-99a1650-1780690087
+          image: bt-web:prod-214c9cb-1781330174
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 3000 }]
           env:
+            - name: SITE_URL
+              # Canonical host since the 2026-06-12 DNS cutover; .cloud now 301s here
+              value: "https://brightertomorrowtherapy.com"
+            - name: ADMIN_HOST_URL
+              value: "https://admin.brightertomorrowtherapy.com"
+            # GA4 Measurement ID — public (ships in the gtag URL), so a plain
+            # value, not a secret. The layout mounts GA only on the canonical
+            # host and never on /admin. Empty = GA disabled.
+            - name: GA4_MEASUREMENT_ID
+              value: "G-H30MK1JCXN"
             - name: DATABASE_URL
               valueFrom: { secretKeyRef: { name: bt-config, key: DATABASE_URL } }
             - name: AI_SERVICE_URL

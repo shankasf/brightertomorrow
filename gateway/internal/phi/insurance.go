@@ -117,6 +117,7 @@ func (s *Store) PutInsuranceCheck(ctx context.Context, r InsuranceCheckRecord) e
 		}
 		return fmt.Errorf("phi: put insurance check: %w", err)
 	}
+	s.auditPHI("insurance_checks", "INSERT", r.CheckUUID, actorFromContext(ctx), "")
 	return nil
 }
 

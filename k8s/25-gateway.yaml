@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: bt-gateway:prod-99a1650-1780690087
+          image: bt-gateway:prod-214c9cb-1781335724
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -88,7 +88,7 @@ spec:
             # mandatory-report handoffs publish here). Non-secret; topic
             # ARN is stable and provisioned by BtObservability CDK stack.
             - name: SNS_ALERT_TOPIC_ARN
-              value: "arn:aws:sns:us-east-1:689517798275:bt-alerts"
+              value: "arn:aws:sns:us-east-1:502263855065:bt-alerts"
             # Patient appointment notifications (email via SES, queued to
             # bt-notifications-outbox → bt-notifications-retry Lambda).
             # Enabled 2026-05-25: SES domain mail.brightertomorrowtherapy.cloud

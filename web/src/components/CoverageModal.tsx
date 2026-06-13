@@ -32,7 +32,6 @@ const PAYERS: Payer[] = [
   { id: "humana", name: "Humana" },
   { id: "kaiser", name: "Kaiser Permanente" },
   { id: "medicare", name: "Medicare" },
-  { id: "medicaid", name: "Medicaid" },
   { id: "tricare", name: "Tricare" },
   { id: "molina", name: "Molina Healthcare" },
   { id: "oscar", name: "Oscar Health" },
@@ -304,9 +303,14 @@ export default function CoverageModal({
 function PickPayer({ onPick }: { onPick: (p: Payer) => void }) {
   return (
     <div>
-      <p className="text-sm text-ink-soft leading-relaxed mb-5">
+      <p className="text-sm text-ink-soft leading-relaxed mb-3">
         Pick your insurance plan. We&rsquo;ll verify eligibility in real time
         through your payer&rsquo;s system.
+      </p>
+      <p className="mb-5 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[13px] leading-snug text-amber-900">
+        We accept most major insurances. Please note we are unable to accept{" "}
+        <strong>Medicaid</strong> plans at this time &mdash; self-pay /
+        out-of-network options are available.
       </p>
       <ul className="grid gap-2">
         {PAYERS.map((p) => (

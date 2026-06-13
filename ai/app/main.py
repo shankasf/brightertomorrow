@@ -49,6 +49,24 @@ logger.info("startup: compiling LangGraph stack")
 _lg_app = get_langgraph_app()
 logger.info("startup: LangGraph compiled — agent is bt-prod (langsmith project)")
 
+# Pre-warm the phone voice bridge at startup. The realtime stack
+# (bt_agents.realtime) costs ~4.5s to import cold; doing it lazily inside the
+# /twilio/media handler made the FIRST caller after every pod restart wait ~4.5s
+# before the OpenAI session even opened (≈7s to first audio). Importing it here
+# moves that cost to boot, so every call — including the first — connects fast.
+try:
+    _vb = (os.environ.get("VOICE_BRIDGE") or "sdk").strip().lower()
+    _t0 = time.perf_counter()
+    if _vb == "hc":
+        from .voice_hc.bridge import run_twilio_session as _warm_bridge  # noqa: F401
+    elif _vb == "raw_ws":
+        from .voice_rt.twilio_bridge import run_twilio_session as _warm_bridge  # noqa: F401
+    else:
+        from .twilio_voice import run_twilio_session as _warm_bridge  # noqa: F401
+    logger.info("startup: voice bridge '%s' pre-warmed in %.2fs", _vb, time.perf_counter() - _t0)
+except Exception:
+    logger.warning("startup: voice bridge pre-warm failed (will lazy-import on first call)", exc_info=True)
+
 
 class ChatRequest(BaseModel):
     session_id: str | None = Field(default=None)
@@ -488,6 +506,9 @@ async def internal_evals_trigger(request: Request) -> dict[str, Any]:
     kind = str(body.get("kind") or "offline").strip().lower()
     if kind not in ("offline", "online"):
         kind = "offline"
+    channel = str(body.get("channel") or "chat").strip().lower()
+    if channel not in ("chat", "voice", "phone"):
+        channel = "chat"
     sample = int(body.get("sample") or 20)
     hours = int(body.get("hours") or 24)
     run_id = str(_uuid4())
@@ -496,15 +517,15 @@ async def internal_evals_trigger(request: Request) -> dict[str, Any]:
         try:
             if kind == "offline":
                 from .graph.evals.run_evals import run_offline
-                await run_offline(run_id=run_id)
+                await run_offline(run_id=run_id, channel=channel)
             else:
                 from .graph.evals.run_evals import run_online
-                await run_online(run_id=run_id, sample=sample, hours=hours)
+                await run_online(run_id=run_id, sample=sample, hours=hours, channel=channel)
         except Exception:
-            logger.exception("evals_trigger_bg_error run_id=%s kind=%s", run_id, kind)
+            logger.exception("evals_trigger_bg_error run_id=%s kind=%s channel=%s", run_id, kind, channel)
 
     asyncio.create_task(_bg_run())
-    logger.info("evals_trigger_started run_id=%s kind=%s sample=%d", run_id, kind, sample)
+    logger.info("evals_trigger_started run_id=%s kind=%s channel=%s sample=%d", run_id, kind, channel, sample)
     return {"run_id": run_id, "status": "started"}
 
 
@@ -624,7 +645,7 @@ async def twilio_voice() -> Any:
 
     ws_base = (
         os.environ.get("BT_PUBLIC_WS_BASE")
-        or "wss://brightertomorrowtherapy.cloud"
+        or "wss://brightertomorrowtherapy.com"
     ).rstrip("/")
     stream_url = f"{ws_base}/v1/twilio/media"
     twiml = (
@@ -658,7 +679,13 @@ async def twilio_media_ws(ws: WebSocket) -> None:
     #   * "sdk" (default) → app.twilio_voice (OpenAI Agents SDK RealtimeRunner).
     # Default to "sdk" so prod is unchanged until we flip the env.
     bridge = (os.environ.get("VOICE_BRIDGE") or "sdk").strip().lower()
-    if bridge == "raw_ws":
+    if bridge == "hc":
+        # Healthcare-style lean raw-WS bridge (port of healthcare_prior_auth).
+        # Self-contained in app.voice_hc; sdk/raw_ws paths are untouched, so
+        # setting VOICE_BRIDGE back to raw_ws rolls this out instantly.
+        from .voice_hc.bridge import run_twilio_session
+        logger.info("twilio_bridge_selected bridge=hc")
+    elif bridge == "raw_ws":
         from .voice_rt.twilio_bridge import run_twilio_session
         logger.info("twilio_bridge_selected bridge=raw_ws")
     else:

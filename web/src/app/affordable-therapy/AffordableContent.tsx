@@ -67,7 +67,7 @@ export default function AffordableContent() {
       </section>
 
       {/* SECTION 2 — LOW COST therapy + image */}
-      <section className="bg-white">
+      <section className="bg-white overflow-hidden">
         <div className="container-x py-20 lg:py-24">
           <div className="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
             <Reveal className="lg:col-span-7">
@@ -185,7 +185,7 @@ export default function AffordableContent() {
       </section>
 
       {/* SECTION 4 — Clinical Internship Program with photo */}
-      <section className="bg-white">
+      <section className="bg-white overflow-hidden">
         <div className="container-x py-20 lg:py-24">
           <div className="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
             <Reveal className="lg:col-span-5 order-2 lg:order-1">

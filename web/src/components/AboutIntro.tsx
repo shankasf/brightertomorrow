@@ -29,7 +29,7 @@ export default function AboutIntro() {
           </p>
 
           <Link
-            href="/our-story"
+            href="/story"
             className="mt-8 inline-flex items-center gap-2 text-brand-700 hover:text-brand font-semibold border-b border-brand-300 hover:border-brand pb-1 transition-colors"
           >
             Read our story <FiArrowRight />

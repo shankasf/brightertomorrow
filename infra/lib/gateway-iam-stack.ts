@@ -161,7 +161,7 @@ export class GatewayIamStack extends Stack {
         sid: "InvokeNotificationsRetryLambda",
         effect: iam.Effect.ALLOW,
         actions: ["lambda:InvokeFunction"],
-        resources: ["arn:aws:lambda:us-east-1:689517798275:function:bt-notifications-retry"],
+        resources: [`arn:aws:lambda:${this.region}:${this.account}:function:bt-notifications-retry`],
       }),
 
       // Direct (non-ViaService) CMK encrypt for the notifications outbox.

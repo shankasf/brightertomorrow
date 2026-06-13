@@ -49,7 +49,7 @@ type TwilioHandler struct {
 	// token disables verification and causes every request to be rejected.
 	AuthToken string
 	// PublicHost — the host Twilio reaches us on, e.g.
-	// "brightertomorrowtherapy.cloud". Used both to build the wss:// stream
+	// "brightertomorrowtherapy.com". Used both to build the wss:// stream
 	// URL in the TwiML response and to reconstruct the canonical URL used
 	// in Twilio's signature calculation when behind TLS-terminating proxies.
 	PublicHost string

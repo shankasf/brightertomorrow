@@ -101,7 +101,7 @@ func Load() (*Config, error) {
 		AppointmentNotifyEnabled: parseBool(os.Getenv("BT_APPOINTMENT_NOTIFY_ENABLED")),
 		InternalAPISecret:        os.Getenv("INTERNAL_API_SECRET"),
 		TwilioAuthToken:      os.Getenv("TWILIO_AUTH_TOKEN"),
-		TwilioPublicHost:     envOr("TWILIO_PUBLIC_HOST", "brightertomorrowtherapy.cloud"),
+		TwilioPublicHost:     envOr("TWILIO_PUBLIC_HOST", "brightertomorrowtherapy.com"),
 		TwilioAccountSid:     os.Getenv("TWILIO_ACCOUNT_SID"),
 		TwilioAPIKeySid:      os.Getenv("TWILIO_API_KEY_SID"),
 		TwilioAPIKeySecret:   os.Getenv("TWILIO_API_KEY_SECRET"),

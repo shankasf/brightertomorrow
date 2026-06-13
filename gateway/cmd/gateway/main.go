@@ -249,7 +249,7 @@ func main() {
 	// API v1.
 	r.Route("/v1", func(r chi.Router) {
 		r.Get("/faqs", (&handlers.FAQsHandler{Pool: pool}).ServeHTTP)
-		r.With(httprate.LimitByIP(10, time.Minute)).Post("/contact", (&handlers.ContactHandler{Pool: pool}).ServeHTTP)
+		r.With(httprate.LimitByIP(10, time.Minute)).Post("/contact", (&handlers.ContactHandler{Pool: pool, Notify: notifyStore, NotifyEnabled: cfg.AppointmentNotifyEnabled}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/intake", intakeH.ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/newsletter", (&handlers.NewsletterHandler{Pool: pool}).ServeHTTP)
 		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat", (&handlers.ChatHandler{Pool: pool, PHI: phiStore, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
@@ -297,6 +297,8 @@ func main() {
 
 		// Eval ingest: AI harness posts run summary + per-turn data after eval.
 		r.Post("/evals/run", internalEvalsH.IngestRun)
+		// Eval list: AI harness fetches recent run metadata for baseline queries.
+		r.Get("/evals/runs", internalEvalsH.RecentRuns)
 
 		// Calendar endpoints for AI agents (X-Internal-Secret gated).
 		r.Post("/calendar/free-slots", internalCalendarH.FreeSlots)

@@ -235,6 +235,8 @@ func (s *Store) UpdateIntakeWorkflowStatus(
 		}
 		return fmt.Errorf("phi: update intake workflow status: %w", err)
 	}
+	s.auditPHI("intakes", "UPDATE", submissionUUID, by,
+		fmt.Sprintf(`{"workflow_status":%q}`, status))
 	return nil
 }
 
@@ -286,5 +288,8 @@ func (s *Store) UpdateIntakeAppointment(
 		}
 		return fmt.Errorf("phi: update intake appointment: %w", err)
 	}
+	s.auditPHI("intakes", "UPDATE", submissionUUID, actorFromContext(ctx),
+		fmt.Sprintf(`{"appointment_time":%q,"therapist_staff_id":%d}`,
+			appointmentTime.UTC().Format(time.RFC3339), therapistStaffID))
 	return nil
 }

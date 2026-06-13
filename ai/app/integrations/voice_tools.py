@@ -579,7 +579,7 @@ AWS_TOOLS = [verify_insurance, save_chat_turn]
 # ---------------------------------------------------------------------------
 # Booking flow — combines eligibility check + intake callback into one call.
 # ---------------------------------------------------------------------------
-from ..data.payers import PAYERS, resolve_payer_id  # noqa: E402
+from ..data.payers import PAYERS, resolve_payer_id, is_declined_payer  # noqa: E402
 
 
 @function_tool
@@ -624,6 +624,22 @@ def check_insurance_support(payer_name: str) -> dict[str, Any]:
     """
     with _log_call("check_insurance_support", query=payer_name[:40]):
         all_names = [p.name for p in PAYERS if p.id != "SELF"]
+        # Plans we don't accept (e.g. Medicaid) — give a clear no + self-pay
+        # pivot. Checked before resolve_payer_id, which no longer knows them.
+        declined = is_declined_payer(payer_name)
+        if declined:
+            return {
+                "query": payer_name,
+                "supported": False,
+                "canonical": None,
+                "self_pay": False,
+                "all_supported": all_names,
+                "note": (
+                    f"I'm sorry, we're not able to accept **{declined}** plans "
+                    "at this time. We'd still be glad to see you on a self-pay "
+                    "or out-of-network basis if you'd like."
+                ),
+            }
         payer = resolve_payer_id(payer_name)
         if payer is None:
             return {
@@ -636,7 +652,7 @@ def check_insurance_support(payer_name: str) -> dict[str, Any]:
                     f"We can't auto-verify **{payer_name.strip()}** with our "
                     "tool right now. We accept most major plans (UnitedHealthcare, "
                     "Aetna, Cigna, Blue Cross Blue Shield, Anthem, Kaiser, Medicare, "
-                    "Medicaid, Tricare, and more) — and we offer out-of-network "
+                    "Tricare, and more) — and we offer out-of-network "
                     "cash rates if your plan isn't on the list."
                 ),
             }
@@ -807,6 +823,18 @@ def book_with_insurance(
         }
     dob = valid_dob
 
+    # Plans we don't accept (e.g. Medicaid) — never book or verify them.
+    declined = is_declined_payer(payer_name)
+    if declined:
+        return {
+            "ok": False,
+            "error": (
+                f"declined_plan: we do not accept {declined}. Tell the visitor "
+                "we're not able to accept that plan and offer self-pay / "
+                "out-of-network instead — do not retry verification."
+            ),
+        }
+
     # Resolve payer_name -> CLAIM.MD payer_id.
     payer = resolve_payer_id(payer_name)
     if payer is None:
@@ -959,6 +987,17 @@ def verify_coverage(
             "error": (
                 f"invalid_dob: '{dob}' is not a valid 8-digit YYYYMMDD. "
                 "Convert the DOB (e.g., August 19, 1998 -> 19980819) and call again."
+            ),
+        }
+
+    declined = is_declined_payer(payer_name)
+    if declined:
+        return {
+            "ok": False,
+            "error": (
+                f"declined_plan: we do not accept {declined}. Tell the visitor "
+                "we're not able to accept that plan and offer self-pay / "
+                "out-of-network instead — do not retry verification."
             ),
         }
 
@@ -1304,6 +1343,23 @@ def book_appointment(
             "ok": False,
             "error": f"incomplete: {missing} — ask the visitor before retrying",
         }
+
+    # ANI fallback: the model sometimes submits the practice line (it has the
+    # practice number in its prompt/KB and confuses it with the caller's own
+    # number) or a fabricated number. The caller is on the line right now, so
+    # prefer the real Twilio ANI over junk instead of bouncing the booking.
+    ani = caller_phone.get()
+    ani_digits = "".join(c for c in (ani or "") if c.isdigit())
+    if len(ani_digits) == 11 and ani_digits.startswith("1"):
+        ani_digits = ani_digits[1:]
+    ani_usable = (
+        bool(ani_digits)
+        and not _is_practice_phone(ani_digits)
+        and not _is_fake_phone(ani_digits)
+    )
+    if ani_usable and (_is_practice_phone(phone) or _is_fake_phone(phone)):
+        logger.info("book_appointment_ani_fallback orig=%r", (phone or "")[:20])
+        phone = ani_digits
 
     if _is_practice_phone(phone):
         return {

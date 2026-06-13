@@ -113,6 +113,7 @@ func (s *Store) PutCallback(ctx context.Context, r CallbackRecord) error {
 		}
 		return fmt.Errorf("phi: put callback: %w", err)
 	}
+	s.auditPHI("callbacks", "INSERT", r.CallbackID, actorFromContext(ctx), "")
 	return nil
 }
 

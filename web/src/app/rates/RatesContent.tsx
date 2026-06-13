@@ -215,7 +215,7 @@ export default function RatesContent() {
       </section>
 
       {/* ── LOW COST intro + photo ── */}
-      <section className="bg-white py-16 lg:py-24">
+      <section className="bg-white py-16 lg:py-24 overflow-hidden">
         <div className="container-x grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
           <Reveal direction="left">
             <h2
@@ -287,7 +287,7 @@ export default function RatesContent() {
       </section>
 
       {/* ── FAQs + photo ── */}
-      <section className="bg-white py-16 lg:py-24">
+      <section className="bg-white py-16 lg:py-24 overflow-hidden">
         <div className="container-x grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
           <Reveal direction="left">
             <FramedPhoto

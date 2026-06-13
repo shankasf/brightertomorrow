@@ -6,7 +6,7 @@ import {
   PageHeader, PageWrap, TableCard, THead, TH, TD,
   Pill, Pagination, EmptyState, Input, SkeletonRows, Button, ErrorBanner,
 } from '@/components/admin/ui';
-import { formatPT } from '@/lib/time-pt';
+import { formatPTDate, formatPTTime } from '@/lib/time-pt';
 import { LuCalendar, LuChevronDown } from 'react-icons/lu';
 
 type SortKey =
@@ -114,8 +114,16 @@ function normalizeStatus(s: string | undefined | null): WorkflowStatus {
 // Status filter: 'active' is the default (no param → server hides archived).
 type StatusFilter = 'active' | 'all' | WorkflowStatus;
 
-function fmtDateTime(iso: string): string {
-  return formatPT(iso);
+/** Received timestamp as a compact two-line stack: date over time.
+ *  Keeps the last column from being clipped while staying readable. */
+function ReceivedCell({ iso }: { iso: string }) {
+  if (!iso) return <span className="text-ink-faint">—</span>;
+  return (
+    <div className="leading-tight">
+      <div className="whitespace-nowrap text-[12.5px] text-ink-soft">{formatPTDate(iso)}</div>
+      <div className="whitespace-nowrap text-[11.5px] text-ink-faint">{formatPTTime(iso)}</div>
+    </div>
+  );
 }
 
 function sourceTone(src: string): 'amber' | 'violet' | 'cyan' | 'blue' | 'slate' {
@@ -537,7 +545,7 @@ export default function AdminAppointmentsPage() {
                 <SortableTH label="Sex" col="sex" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('sex')} />
                 <SortableTH label="Insurance" col="insurance_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_name')} />
                 <SortableTH label="Member ID" col="insurance_member_id" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('insurance_member_id')} />
-                <TH>Interested therapist</TH>
+                <TH>Therapist</TH>
                 <TH>Source</TH>
                 <SortableTH label="Received" col="created_at" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('created_at')} />
               </tr>
@@ -568,8 +576,8 @@ export default function AdminAppointmentsPage() {
                   </TD>
                   <TD className="tabular-nums whitespace-nowrap">{a.phone || '—'}</TD>
                   <TD className="tabular-nums whitespace-nowrap">{a.date_of_birth || '—'}</TD>
-                  <TD className="whitespace-nowrap">{a.email || '—'}</TD>
-                  <TD className="whitespace-nowrap" title={a.home_address}>{a.home_address || '—'}</TD>
+                  <TD className="break-words">{a.email || '—'}</TD>
+                  <TD className="break-words min-w-[9rem]" title={a.home_address}>{a.home_address || '—'}</TD>
                   <TD className="whitespace-nowrap">{a.sex || '—'}</TD>
                   <TD className="whitespace-nowrap">
                     {a.insurance_name || (a.payment_method === 'self_pay' ? <Pill tone="slate">Self-pay</Pill> : '—')}
@@ -581,8 +589,8 @@ export default function AdminAppointmentsPage() {
                   <TD>
                     <Pill tone={sourceTone(a.source)} dot>{a.source_label}</Pill>
                   </TD>
-                  <TD className="whitespace-nowrap text-[12.5px] text-ink-soft" title={a.created_at}>
-                    {fmtDateTime(a.created_at)}
+                  <TD title={a.created_at}>
+                    <ReceivedCell iso={a.created_at} />
                   </TD>
                 </motion.tr>
                 );

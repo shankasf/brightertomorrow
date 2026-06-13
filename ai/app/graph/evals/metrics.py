@@ -87,6 +87,7 @@ def aggregate(turn_results: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "metrics": _empty_metrics(),
             "breakdowns": _empty_breakdowns(),
+            "counts_by_metric": {},
         }
 
     # ---- Per-session grouping -------------------------------------------
@@ -108,12 +109,14 @@ def aggregate(turn_results: list[dict[str, Any]]) -> dict[str, Any]:
     containment_rate = contained_count / n_sessions
 
     # ---- Intent accuracy -----------------------------------------------
+    # Only turns that ASSERT an expected intent count. Empty string ("") means
+    # "no expectation for this turn" — it must not inflate the denominator.
     intent_hits = [
         t for t in turn_results
-        if t.get("expected_intent") is not None
+        if t.get("expected_intent") not in (None, "")
         and t.get("intent") == t.get("expected_intent")
     ]
-    intent_total = [t for t in turn_results if t.get("expected_intent") is not None]
+    intent_total = [t for t in turn_results if t.get("expected_intent") not in (None, "")]
     intent_accuracy = len(intent_hits) / len(intent_total) if intent_total else 0.0
 
     # ---- Judge aggregates -----------------------------------------------
@@ -217,7 +220,7 @@ def aggregate(turn_results: list[dict[str, Any]]) -> dict[str, Any]:
         bucket["count"] += 1
         if turn_passed:
             bucket["_pass"] += 1
-        if expected is not None:
+        if expected not in (None, ""):
             bucket["_acc_total"] += 1
             if intent == expected:
                 bucket["_acc"] += 1
@@ -251,11 +254,32 @@ def aggregate(turn_results: list[dict[str, Any]]) -> dict[str, Any]:
         for scene, b in by_scene.items()
     }
 
+    # ---- By-split breakdown (named test-set subsets) -------------------
+    by_split: dict[str, dict[str, Any]] = {}
+    for t in turn_results:
+        split = t.get("split") or "unknown"
+        det_scores = t.get("deterministic_scores") or []
+        turn_passed = all(s.get("passed", False) for s in det_scores) if det_scores else (
+            t.get("passed", True)
+        )
+        bucket = by_split.setdefault(split, {"count": 0, "_pass": 0})
+        bucket["count"] += 1
+        if turn_passed:
+            bucket["_pass"] += 1
+
+    by_split_out: dict[str, dict[str, Any]] = {
+        split: {
+            "count": b["count"],
+            "pass_rate": b["_pass"] / b["count"] if b["count"] else 0.0,
+        }
+        for split, b in by_split.items()
+    }
+
     # ---- Confusion matrix (expected_intent → actual_intent) ------------
     confusion: dict[str, dict[str, int]] = {}
     for t in turn_results:
         expected = t.get("expected_intent")
-        if expected is None:
+        if not expected:
             continue
         actual = t.get("intent") or "unknown"
         row = confusion.setdefault(expected, {})
@@ -282,11 +306,43 @@ def aggregate(turn_results: list[dict[str, Any]]) -> dict[str, Any]:
     breakdowns: dict[str, Any] = {
         "by_intent": by_intent_out,
         "by_scene": by_scene_out,
+        "by_split": by_split_out,
         "confusion": confusion,
         "latency": {k: round(v, 1) for k, v in latency.items()},
     }
 
-    return {"metrics": metrics, "breakdowns": breakdowns}
+    # ---- Per-metric sample sizes (n) -----------------------------------
+    # Each metric is computed over a DIFFERENT denominator. We surface the
+    # exact count behind every number so the dashboard can show "n=NN".
+    # Turn-level metrics count turns; the three session-level rates count
+    # conversations (sessions). judge_agreement is added later by the runner
+    # (it is scored over the fixed calibration set, not these turns).
+    counts_by_metric: dict[str, int] = {
+        "intent_accuracy": len(intent_total),
+        "task_completion_rate": len(task_completion_flags),
+        "topic_adherence_rate": len(topic_adherence_flags),
+        "faithfulness_avg": len(faithfulness_vals),
+        "relevancy_avg": len(relevancy_vals),
+        "tone_avg": len(tone_vals),
+        "hallucination_rate": len(faithfulness_vals),
+        "deterministic_pass_rate": det_total,
+        "overall_pass_rate": overall_total,
+        "tool_precision": len(prf_rows),
+        "tool_recall": len(prf_rows),
+        "tool_f1": len(prf_rows),
+        # Session-level rates — denominator is conversations, not turns.
+        "containment_rate": n_sessions,
+        "escalation_rate": n_sessions,
+        "deflection_rate": n_sessions,
+        # Latency percentiles are over every evaluated turn.
+        "latency": len(latencies),
+    }
+
+    return {
+        "metrics": metrics,
+        "breakdowns": breakdowns,
+        "counts_by_metric": counts_by_metric,
+    }
 
 
 def _empty_metrics() -> dict[str, float]:
@@ -313,6 +369,7 @@ def _empty_breakdowns() -> dict[str, Any]:
     return {
         "by_intent": {},
         "by_scene": {},
+        "by_split": {},
         "confusion": {},
         "latency": {"p50": 0.0, "p95": 0.0, "p99": 0.0},
     }

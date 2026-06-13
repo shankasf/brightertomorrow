@@ -9,6 +9,7 @@ import AppointmentSection from "@/components/AppointmentSection";
 import HomeFaqs from "@/components/HomeFaqs";
 import FirstStepCta from "@/components/FirstStepCta";
 import PodcastSection from "@/components/PodcastSection";
+import { JsonLd, homepageGraph } from "@/components/StructuredData";
 import {
   getBlogPosts,
   getFaqs,
@@ -19,6 +20,7 @@ import {
   getStats,
 } from "@/lib/queries";
 import { FiArrowUpRight } from "react-icons/fi";
+import { pageMetadata } from "@/lib/seo";
 
 /**
  * Cloud homepage — pixel-parity mirror of brightertomorrowtherapy.com home.
@@ -43,6 +45,13 @@ const WINE = "#66202A";
 const GOLD = "#E1B878";
 const INK = "#192735";
 
+export const metadata = pageMetadata({
+  title: "Therapy in Las Vegas, NV",
+  description:
+    "Compassionate therapy in Las Vegas and North Las Vegas for children, teens, and adults. In-person and online, with evening and weekend availability. Most major Nevada insurance accepted.",
+  path: "/",
+});
+
 export default async function HomePage() {
   const [settings, services, stats, posts, locations, podcast, faqs] =
     await Promise.all([
@@ -60,6 +69,10 @@ export default async function HomePage() {
 
   return (
     <>
+      {/* Structured data: MedicalBusiness/LocalBusiness (+ two clinic
+          departments) and WebSite, as one @graph. Invisible to users. */}
+      <JsonLd data={homepageGraph()} />
+
       {/* 1. HERO */}
       <Hero settings={settings} />
 

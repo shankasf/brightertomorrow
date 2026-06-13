@@ -74,16 +74,16 @@ export default function CareersPage() {
       {/* ─────────────────────────────────────────────────────────────
           1) HERO — full-bleed dusk landscape, dark overlay, centered
           ───────────────────────────────────────────────────────────── */}
-      <section className="relative isolate flex min-h-[600px] items-center justify-center overflow-hidden lg:min-h-[760px]">
+      <section className="relative isolate flex min-h-[360px] items-center justify-center overflow-hidden sm:min-h-[440px] lg:min-h-[500px]">
         <div
           aria-hidden
           className="absolute inset-0 -z-10 bg-cover bg-center"
           style={{
-            backgroundImage: `linear-gradient(180deg, rgba(25,39,53,0.74) 0%, rgba(25,39,53,0.84) 100%), url('/careers/hero.jpg')`,
+            backgroundImage: `linear-gradient(180deg, rgba(25,39,53,0.55) 0%, rgba(25,39,53,0.66) 100%), url('/careers/hero.webp')`,
           }}
         />
-        <div className="container-x py-24 text-center sm:py-28">
-          <h1 className="display text-5xl leading-[1.08] text-white sm:text-6xl lg:text-7xl">
+        <div className="container-x py-16 text-center sm:py-20">
+          <h1 className="display text-4xl leading-[1.08] text-white sm:text-5xl lg:text-6xl">
             <span style={{ color: GOLD }}>Join</span> Our Team
           </h1>
         </div>
@@ -92,7 +92,7 @@ export default function CareersPage() {
       {/* ─────────────────────────────────────────────────────────────
           2) INTRO — two columns on cream; offset blush photo card
           ───────────────────────────────────────────────────────────── */}
-      <section className="section bg-cream-alt">
+      <section className="section bg-cream-alt overflow-hidden">
         <div className="container-x">
           <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
             {/* LEFT — copy */}

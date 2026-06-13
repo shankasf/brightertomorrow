@@ -39,7 +39,6 @@ const PAYERS: Payer[] = [
   { id: "humana", name: "Humana" },
   { id: "kaiser", name: "Kaiser Permanente" },
   { id: "medicare", name: "Medicare" },
-  { id: "medicaid", name: "Medicaid" },
   { id: "tricare", name: "Tricare" },
   { id: "molina", name: "Molina Healthcare" },
   { id: "oscar", name: "Oscar Health" },

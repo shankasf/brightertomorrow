@@ -15,7 +15,7 @@ import type { NavItem, SiteSettings } from "@/lib/queries";
 const OFFICE_1 = "3430 E Russell Rd Ste 315 Las Vegas, Nevada 89120";
 const OFFICE_2 = "6955 N Durango Dr. Unit 1004 Las Vegas, Nevada 89149";
 const UTILITY_TAGLINE =
-  "In-person & telehealth therapy for individuals, couples & families — evenings & weekends at both locations.";
+  "In-person & telehealth across Nevada — evenings & weekends.";
 
 const AI_PHONE_DISPLAY = "(725) 465-2385";
 const AI_PHONE_TEL = "+17254652385";
@@ -67,83 +67,97 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            className="hidden md:block text-white text-[13.5px] overflow-hidden"
+            className="block text-white text-[12px] sm:text-[12.5px] lg:text-[13px] overflow-hidden"
             style={{ backgroundColor: "#66202A" }}
           >
-            <div className="container-x flex items-center justify-between gap-6 py-2">
-              {/* Addresses on left */}
-              <div className="flex items-center gap-5 text-white/95 leading-none min-w-0">
-                <span className="flex items-center gap-2 whitespace-nowrap">
-                  <FiMapPin size={13} className="text-brand shrink-0" />
-                  <span>{OFFICE_1}</span>
-                </span>
-                <span className="hidden xl:flex items-center gap-2 whitespace-nowrap">
-                  <FiMapPin size={13} className="text-brand shrink-0" />
-                  <span>{OFFICE_2}</span>
-                </span>
+            {/* Tidy two-zone bar. Mobile: a single centered, tappable row
+                (AI booking phone + short note) — the long dual addresses are
+                hidden below sm to avoid cramped wrapping / overflow at 320px.
+                sm+: addresses appear. lg+: full two-column layout with
+                addresses + front desk on the left, note + booking + socials
+                on the right, vertically centered. */}
+            <div className="container-x py-2 flex flex-col items-center gap-y-1.5 text-center leading-snug lg:flex-row lg:items-center lg:justify-between lg:gap-x-8 lg:text-left">
+              {/* ── Left zone: addresses + front-desk phone ── */}
+              <div className="flex flex-col items-center gap-y-1 lg:flex-row lg:items-center lg:gap-x-6 lg:min-w-0">
+                {/* Addresses — hidden on the smallest screens, shown sm+ */}
+                <div className="hidden sm:flex flex-col items-center gap-x-5 gap-y-0.5 text-white/95 md:flex-row md:flex-wrap md:justify-center lg:justify-start lg:min-w-0">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <FiMapPin size={13} className="text-[#E1B878] shrink-0" />
+                    <span className="min-w-0 truncate">{OFFICE_1}</span>
+                  </span>
+                  <span className="hidden md:inline-flex items-center gap-1.5 min-w-0">
+                    <FiMapPin size={13} className="text-[#E1B878] shrink-0" />
+                    <span className="min-w-0 truncate">{OFFICE_2}</span>
+                  </span>
+                </div>
+
+                {settings.primary_phone && (
+                  <a
+                    href={`tel:${settings.primary_phone}`}
+                    aria-label={`Front desk at ${settings.primary_phone}, Monday through Friday 9am to 5pm`}
+                    className="inline-flex items-center gap-1.5 text-white/65 hover:text-white transition tabular-nums whitespace-nowrap"
+                    title="Front desk — Mon–Fri 9 AM–5 PM"
+                  >
+                    <FiPhone size={11} className="text-white/45 shrink-0" />
+                    <span className="hidden sm:inline text-white/55 font-medium">Front desk</span>
+                    {settings.primary_phone}
+                  </a>
+                )}
               </div>
 
-              {/* Tagline (centered, hidden on smaller widths) */}
-              <p className="hidden lg:block flex-1 text-center text-white/90 max-w-[700px] leading-none truncate">
-                {UTILITY_TAGLINE}
-              </p>
+              {/* ── Right zone: tagline + AI booking + socials ── */}
+              <div className="flex flex-col items-center gap-y-1.5 lg:flex-row lg:items-center lg:gap-x-5 lg:shrink-0">
+                <p className="hidden sm:block text-white/90 whitespace-nowrap">
+                  {UTILITY_TAGLINE}
+                </p>
 
-              {/* Phone + socials on right — AI 24/7 line is the headline */}
-              <div className="flex items-center gap-3 shrink-0">
-                <a
-                  href={`tel:${AI_PHONE_TEL}`}
-                  aria-label={`Call our AI booking assistant at ${AI_PHONE_DISPLAY}, available 24/7`}
-                  className="group inline-flex items-center gap-2 text-white hover:text-[#E1B878] transition tabular-nums font-semibold"
-                >
-                  <span
-                    aria-hidden
-                    className="inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-[0.16em] px-1.5 py-[3px]"
-                    style={{ backgroundColor: "#E1B878", color: "#66202A", borderRadius: "6px 0 6px 6px" }}
+                <div className="flex items-center gap-x-3">
+                  {/* Booking card — the single, clearly-bounded booking entry. */}
+                  <a
+                    href={`tel:${AI_PHONE_TEL}`}
+                    aria-label={`Call our AI booking assistant at ${AI_PHONE_DISPLAY}, available 24/7`}
+                    className="group inline-flex items-center gap-2 text-white hover:text-[#E1B878] transition tabular-nums font-semibold px-2.5 py-1 rounded-[10px] border border-[#E1B878]/45 bg-[#E1B878]/[0.10] hover:border-[#E1B878]/80 whitespace-nowrap"
                   >
-                    <span className="inline-block w-1 h-1 rounded-full bg-[#66202A] animate-pulse" />
-                    AI&nbsp;booking&nbsp;&middot;&nbsp;24/7
-                  </span>
-                  <FiPhone size={13} className="text-[#E1B878]" />
-                  {AI_PHONE_DISPLAY}
-                </a>
-                {settings.primary_phone && (
-                  <>
-                    <span aria-hidden className="hidden xl:inline-block w-px h-4 bg-white/25" />
-                    <a
-                      href={`tel:${settings.primary_phone}`}
-                      aria-label={`Front desk at ${settings.primary_phone}, Monday through Friday 9am to 5pm`}
-                      className="hidden xl:inline-flex items-center gap-1.5 text-white/65 hover:text-white transition tabular-nums text-[12.5px]"
-                      title="Front desk — Mon–Fri 9 AM–5 PM"
+                    <span
+                      aria-hidden
+                      className="inline-flex items-center gap-1 text-[9.5px] font-bold uppercase tracking-[0.16em] px-1.5 py-[3px]"
+                      style={{ backgroundColor: "#E1B878", color: "#66202A", borderRadius: "6px 0 6px 6px" }}
                     >
-                      <FiPhone size={11} className="text-white/45" />
-                      <span className="text-white/55 font-medium">Front desk</span>
-                      {settings.primary_phone}
-                    </a>
-                  </>
-                )}
-                <span aria-hidden className="w-px h-4 bg-white/25" />
-                {settings.social.facebook && (
-                  <a
-                    href={settings.social.facebook}
-                    target="_blank"
-                    rel="noopener"
-                    aria-label="Facebook"
-                    className="text-white/90 hover:text-brand transition"
-                  >
-                    <FiFacebook size={15} />
+                      <span className="inline-block w-1 h-1 rounded-full bg-[#66202A] animate-pulse" />
+                      AI&nbsp;booking&nbsp;&middot;&nbsp;24/7
+                    </span>
+                    <FiPhone size={13} className="text-[#E1B878]" />
+                    {AI_PHONE_DISPLAY}
                   </a>
-                )}
-                {settings.social.instagram && (
-                  <a
-                    href={settings.social.instagram}
-                    target="_blank"
-                    rel="noopener"
-                    aria-label="Instagram"
-                    className="text-white/90 hover:text-brand transition"
-                  >
-                    <FiInstagram size={15} />
-                  </a>
-                )}
+
+                  {(settings.social.facebook || settings.social.instagram) && (
+                    <>
+                      <span aria-hidden className="w-px h-4 bg-white/25" />
+                      {settings.social.facebook && (
+                        <a
+                          href={settings.social.facebook}
+                          target="_blank"
+                          rel="noopener"
+                          aria-label="Facebook"
+                          className="text-white/90 hover:text-[#E1B878] transition"
+                        >
+                          <FiFacebook size={15} />
+                        </a>
+                      )}
+                      {settings.social.instagram && (
+                        <a
+                          href={settings.social.instagram}
+                          target="_blank"
+                          rel="noopener"
+                          aria-label="Instagram"
+                          className="text-white/90 hover:text-[#E1B878] transition"
+                        >
+                          <FiInstagram size={15} />
+                        </a>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </motion.div>

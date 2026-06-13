@@ -109,6 +109,7 @@ class InsuranceFields(TypedDict, total=False):
         "wc_auto_eap",
         "no_insurance",
         "self_pay",
+        "medicaid_not_accepted",
     ]]
 
 

@@ -155,6 +155,14 @@ CREATE TABLE IF NOT EXISTS contact_submissions (
   source      TEXT,
   ip          INET,
   user_agent  TEXT,
+  -- Discrete contact-form fields (see migration 025). NULL when left blank.
+  first_name               TEXT,
+  last_name                TEXT,
+  help_topic               TEXT,
+  other_describe           TEXT,
+  preferred_contact_method TEXT,
+  best_time                TEXT,
+  therapist_requested      TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS contact_submissions_created_idx ON contact_submissions(created_at DESC);

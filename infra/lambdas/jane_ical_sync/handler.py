@@ -1,7 +1,7 @@
 """
 jane_ical_sync — pulls iCal feeds from Jane and upserts into bt-jane-events.
 
-Triggered by EventBridge every 2 minutes.
+Triggered by EventBridge every 15 minutes.
 
 HIPAA note: description fields from iCal may contain PHI.  We upsert them
 into DDB (CMK-encrypted at rest) but NEVER log their content.  The only

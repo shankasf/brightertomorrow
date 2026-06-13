@@ -10,6 +10,18 @@ spec:
     scheme: https
     permanent: true
 ---
+# www.brightertomorrowtherapy.com → brightertomorrowtherapy.com 301 redirect (Traefik CRD)
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: www-to-apex-com
+  namespace: bt
+spec:
+  redirectRegex:
+    regex: "^https://www\\.brightertomorrowtherapy\\.com(.*)"
+    replacement: "https://brightertomorrowtherapy.com${1}"
+    permanent: true
+---
 # HTTP ingress: serves the redirect only
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -22,7 +34,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: brightertomorrowtherapy.cloud
+    - host: brightertomorrowtherapy.com
       http:
         paths:
           - path: /
@@ -32,7 +44,7 @@ spec:
                 name: bt-web
                 port:
                   number: 80
-    - host: www.brightertomorrowtherapy.cloud
+    - host: www.brightertomorrowtherapy.com
       http:
         paths:
           - path: /
@@ -42,7 +54,7 @@ spec:
                 name: bt-web
                 port:
                   number: 80
-    - host: admin.brightertomorrowtherapy.cloud
+    - host: admin.brightertomorrowtherapy.com
       http:
         paths:
           - path: /
@@ -53,15 +65,15 @@ spec:
                 port:
                   number: 80
 ---
-# HTTPS ingress: /v1/* and /admin/api/* → bt-gateway, everything else → bt-web
-#
-# Admin HTML pages (/admin, /admin/login, /admin/contacts, etc.) are served by Next.js
-# under the / catch-all. All admin API calls live under /admin/api/* — that single
-# longer prefix wins under Traefik's longest-match rule.
+# .cloud was fully decommissioned 2026-06-13 (app is .com-only). The former
+# bt-web-https-cloud cert-owner ingress, the bt-tls cert, and the entire
+# k8s/41 .cloud→.com redirect stack were deleted. Nothing serves .cloud anymore.
+---
+# HTTPS ingress (.com apex + admin): cert-manager issues bt-com-tls for the .com hosts.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: bt-web-https
+  name: bt-web-https-com
   namespace: bt
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
@@ -70,40 +82,13 @@ metadata:
 spec:
   ingressClassName: traefik
   tls:
-    - secretName: bt-tls
+    - secretName: bt-com-tls
       hosts:
-        - brightertomorrowtherapy.cloud
-        - www.brightertomorrowtherapy.cloud
-        - admin.brightertomorrowtherapy.cloud
+        - brightertomorrowtherapy.com
+        - www.brightertomorrowtherapy.com
+        - admin.brightertomorrowtherapy.com
   rules:
-    - host: brightertomorrowtherapy.cloud
-      http:
-        paths:
-          # All public API → gateway
-          - path: /v1
-            pathType: Prefix
-            backend:
-              service:
-                name: bt-gateway
-                port:
-                  number: 80
-          # Admin API → gateway
-          - path: /admin/api
-            pathType: Prefix
-            backend:
-              service:
-                name: bt-gateway
-                port:
-                  number: 80
-          # Everything else (including all /admin/* HTML pages) → Next.js
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: bt-web
-                port:
-                  number: 80
-    - host: www.brightertomorrowtherapy.cloud
+    - host: brightertomorrowtherapy.com
       http:
         paths:
           - path: /v1
@@ -127,10 +112,7 @@ spec:
                 name: bt-web
                 port:
                   number: 80
-    # admin.brightertomorrowtherapy.cloud — fronted by CloudFront, origin is this VM.
-    # Same path routing as the root domain so admin/* pages and admin/api/* work
-    # transparently. Bearer-token auth (no cookies), so cross-subdomain is fine.
-    - host: admin.brightertomorrowtherapy.cloud
+    - host: admin.brightertomorrowtherapy.com
       http:
         paths:
           - path: /admin/api
@@ -140,6 +122,37 @@ spec:
                 name: bt-gateway
                 port:
                   number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bt-web
+                port:
+                  number: 80
+---
+# HTTPS ingress (www.com): separate object so the www-to-apex-com middleware
+# annotation applies only to this host. Traefik middleware annotations are
+# per-Ingress object, not per-rule, so www must be isolated here.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bt-web-https-com-www
+  namespace: bt
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: bt-www-to-apex-com@kubernetescrd
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: bt-com-tls
+      hosts:
+        - www.brightertomorrowtherapy.com
+  rules:
+    - host: www.brightertomorrowtherapy.com
+      http:
+        paths:
           - path: /
             pathType: Prefix
             backend:

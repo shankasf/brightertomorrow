@@ -29,18 +29,26 @@ func (h *AdminContactsHandler) List(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	type contactRow struct {
-		ID        int64   `json:"id"`
-		FullName  string  `json:"full_name"`
-		Email     string  `json:"email"`
-		Phone     *string `json:"phone"`
-		Subject   *string `json:"subject"`
-		Source    *string `json:"source"`
-		CreatedAt string  `json:"created_at"`
-		PurgedAt  *string `json:"purged_at"`
+		ID                     int64   `json:"id"`
+		FullName               string  `json:"full_name"`
+		Email                  string  `json:"email"`
+		Phone                  *string `json:"phone"`
+		Subject                *string `json:"subject"`
+		Source                 *string `json:"source"`
+		FirstName              *string `json:"first_name"`
+		LastName               *string `json:"last_name"`
+		HelpTopic              *string `json:"help_topic"`
+		PreferredContactMethod *string `json:"preferred_contact_method"`
+		BestTime               *string `json:"best_time"`
+		TherapistRequested     *string `json:"therapist_requested"`
+		CreatedAt              string  `json:"created_at"`
+		PurgedAt               *string `json:"purged_at"`
 	}
 
 	rows, err := h.Pool.Query(r.Context(),
 		`SELECT id, full_name, email, phone, subject, source,
+		        first_name, last_name, help_topic,
+		        preferred_contact_method, best_time, therapist_requested,
 		        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
 		        to_char(purged_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS purged_at
 		 FROM bt.contact_submissions
@@ -56,7 +64,10 @@ func (h *AdminContactsHandler) List(w http.ResponseWriter, r *http.Request) {
 	var contacts []contactRow
 	for rows.Next() {
 		var c contactRow
-		if err := rows.Scan(&c.ID, &c.FullName, &c.Email, &c.Phone, &c.Subject, &c.Source, &c.CreatedAt, &c.PurgedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.FullName, &c.Email, &c.Phone, &c.Subject, &c.Source,
+			&c.FirstName, &c.LastName, &c.HelpTopic,
+			&c.PreferredContactMethod, &c.BestTime, &c.TherapistRequested,
+			&c.CreatedAt, &c.PurgedAt); err != nil {
 			slog.Error("admin contacts scan", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -83,27 +94,38 @@ func (h *AdminContactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type contactDetail struct {
-		ID          int64   `json:"id"`
-		FullName    string  `json:"full_name"`
-		Email       string  `json:"email"`
-		Phone       *string `json:"phone"`
-		Subject     *string `json:"subject"`
-		Message     string  `json:"message"`
-		Source      *string `json:"source"`
-		CreatedAt   string  `json:"created_at"`
-		RetainUntil *string `json:"retain_until"`
-		PurgedAt    *string `json:"purged_at"`
+		ID                     int64   `json:"id"`
+		FullName               string  `json:"full_name"`
+		Email                  string  `json:"email"`
+		Phone                  *string `json:"phone"`
+		Subject                *string `json:"subject"`
+		Message                string  `json:"message"`
+		Source                 *string `json:"source"`
+		FirstName              *string `json:"first_name"`
+		LastName               *string `json:"last_name"`
+		HelpTopic              *string `json:"help_topic"`
+		OtherDescribe          *string `json:"other_describe"`
+		PreferredContactMethod *string `json:"preferred_contact_method"`
+		BestTime               *string `json:"best_time"`
+		TherapistRequested     *string `json:"therapist_requested"`
+		CreatedAt              string  `json:"created_at"`
+		RetainUntil            *string `json:"retain_until"`
+		PurgedAt               *string `json:"purged_at"`
 	}
 
 	var c contactDetail
 	err = h.Pool.QueryRow(r.Context(),
 		`SELECT id, full_name, email, phone, subject, message, source,
+		        first_name, last_name, help_topic, other_describe,
+		        preferred_contact_method, best_time, therapist_requested,
 		        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		        to_char(retain_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		        to_char(purged_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.contact_submissions WHERE id = $1`, id,
 	).Scan(&c.ID, &c.FullName, &c.Email, &c.Phone, &c.Subject, &c.Message,
-		&c.Source, &c.CreatedAt, &c.RetainUntil, &c.PurgedAt)
+		&c.Source, &c.FirstName, &c.LastName, &c.HelpTopic, &c.OtherDescribe,
+		&c.PreferredContactMethod, &c.BestTime, &c.TherapistRequested,
+		&c.CreatedAt, &c.RetainUntil, &c.PurgedAt)
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "not found")
 		return

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -72,11 +73,53 @@ def post_run(run_payload: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# GET /internal/evals/runs  — light run summaries for baseline comparison
+# ---------------------------------------------------------------------------
+
+def list_recent_runs(
+    kind: str = "offline", limit: int = 10, channel: str | None = None
+) -> list[dict[str, Any]]:
+    """Return recent eval-run summaries (no transcripts) for regression compare.
+
+    Each item: {run_id, kind, channel, model, prompt_version, dataset_version,
+                created_at, counts, metrics}. Newest-first. Empty on any error.
+    When ``channel`` is given the gateway returns only that channel's runs.
+    """
+    base = gateway_base_url()
+    url = f"{base}/internal/evals/runs?kind={kind}&limit={limit}"
+    if channel:
+        url += f"&channel={urllib.parse.quote(channel)}"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=_DEFAULT_TIMEOUT) as resp:
+            body = resp.read().decode("utf-8")
+            parsed = json.loads(body)
+            runs: list[dict[str, Any]] = (
+                parsed.get("runs", []) if isinstance(parsed, dict) else parsed
+            )
+            logger.info("list_recent_runs ok kind=%s channel=%s count=%d", kind, channel, len(runs))
+            return runs
+    except urllib.error.URLError as exc:
+        logger.warning("list_recent_runs_failed url=%s error=%s", url, exc)
+        return []
+    except Exception:
+        logger.exception("list_recent_runs_unexpected")
+        return []
+
+
+# ---------------------------------------------------------------------------
 # GET /internal/chat/recent
 # ---------------------------------------------------------------------------
 
-def list_recent_sessions(limit: int = 20, hours: int = 24) -> list[dict[str, Any]]:
+def list_recent_sessions(
+    limit: int = 20, hours: int = 24, source: str | None = None
+) -> list[dict[str, Any]]:
     """Return a list of recent chat sessions from the gateway.
+
+    Args:
+        source: optional exact chat_sessions.source filter
+                (chat-agent | voice-agent | voice-phone) so per-channel online
+                evals only sample that channel's sessions.
 
     Returns:
         list of {session_id, source, started_at, message_count}
@@ -84,16 +127,19 @@ def list_recent_sessions(limit: int = 20, hours: int = 24) -> list[dict[str, Any
     """
     base = gateway_base_url()
     url = f"{base}/internal/chat/recent?limit={limit}&hours={hours}"
+    if source:
+        url += f"&source={urllib.parse.quote(source)}"
     req = urllib.request.Request(url, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=_DEFAULT_TIMEOUT) as resp:
             body = resp.read().decode("utf-8")
             sessions: list[dict[str, Any]] = json.loads(body)
             logger.info(
-                "list_recent_sessions ok count=%d limit=%d hours=%d",
+                "list_recent_sessions ok count=%d limit=%d hours=%d source=%s",
                 len(sessions),
                 limit,
                 hours,
+                source,
             )
             return sessions
     except urllib.error.URLError as exc:

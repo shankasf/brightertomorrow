@@ -106,7 +106,7 @@ Once `bt-main-restored` is `ACTIVE`, rename it (DynamoDB does not support in-pla
 
 | Location | Detail |
 |---|---|
-| AWS Secrets Manager | Secret ID: `bt/gateway/aws-credentials`, account 689517798275, region us-east-1 |
+| AWS Secrets Manager | Secret ID: `bt/gateway/aws-credentials`, account 502263855065, region us-east-1 |
 | Kubernetes | Secret `bt-config` in namespace `bt`, keys `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` |
 
 **Read the current Secrets Manager value:**

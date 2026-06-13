@@ -82,7 +82,7 @@ def respond_model_name() -> str:
 
 
 def judge_model_name() -> str:
-    """Model used by the LLM-as-judge evaluator.
+    """OpenAI model used by the LLM-as-judge evaluator.
 
     Reads OPENAI_JUDGE_MODEL; falls back to text_model_name() so the same
     model pin covers evals when no override is set.

@@ -166,6 +166,74 @@ export async function getBlogBySlug(slug: string): Promise<BlogPost | null> {
   return rows[0] ?? null;
 }
 
+export type BlogCategory = { id: number; slug: string; name: string; position: number };
+
+export async function getBlogCategories(): Promise<BlogCategory[]> {
+  const { rows } = await q<BlogCategory>(
+    `SELECT c.id, c.slug, c.name, c.position
+     FROM bt.blog_categories c
+     WHERE EXISTS (SELECT 1 FROM bt.blog_post_categories pc
+                   JOIN bt.blog_posts p ON p.id = pc.post_id AND p.published
+                   WHERE pc.category_id = c.id)
+     ORDER BY c.name`);
+  return rows;
+}
+
+export async function getBlogCategoryBySlug(slug: string): Promise<BlogCategory | null> {
+  const { rows } = await q<BlogCategory>(
+    `SELECT id, slug, name, position FROM bt.blog_categories WHERE slug = $1`, [slug]);
+  return rows[0] ?? null;
+}
+
+export async function getBlogPostsByCategory(categoryId: number): Promise<BlogPost[]> {
+  const { rows } = await q<BlogPost>(
+    `SELECT p.id, p.slug, p.title, p.excerpt, p.body_md, p.cover_url, p.author,
+            to_char(p.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
+     FROM bt.blog_posts p
+     JOIN bt.blog_post_categories pc ON pc.post_id = p.id
+     WHERE pc.category_id = $1 AND p.published
+     ORDER BY p.published_at DESC`, [categoryId]);
+  return rows;
+}
+
+// ── Paginated blog listings ──────────────────────────────────────────────────
+export async function getBlogPostsPage(limit: number, offset: number): Promise<BlogPost[]> {
+  const { rows } = await q<BlogPost>(
+    `SELECT id, slug, title, excerpt, body_md, cover_url, author,
+            to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
+     FROM bt.blog_posts WHERE published ORDER BY published_at DESC
+     LIMIT $1 OFFSET $2`, [limit, offset]);
+  return rows;
+}
+
+export async function countBlogPosts(): Promise<number> {
+  const { rows } = await q<{ n: string }>(
+    `SELECT count(*)::text AS n FROM bt.blog_posts WHERE published`);
+  return parseInt(rows[0]?.n ?? "0", 10);
+}
+
+export async function getBlogPostsByCategoryPage(
+  categoryId: number, limit: number, offset: number,
+): Promise<BlogPost[]> {
+  const { rows } = await q<BlogPost>(
+    `SELECT p.id, p.slug, p.title, p.excerpt, p.body_md, p.cover_url, p.author,
+            to_char(p.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
+     FROM bt.blog_posts p
+     JOIN bt.blog_post_categories pc ON pc.post_id = p.id
+     WHERE pc.category_id = $1 AND p.published
+     ORDER BY p.published_at DESC
+     LIMIT $2 OFFSET $3`, [categoryId, limit, offset]);
+  return rows;
+}
+
+export async function countBlogPostsByCategory(categoryId: number): Promise<number> {
+  const { rows } = await q<{ n: string }>(
+    `SELECT count(*)::text AS n FROM bt.blog_post_categories pc
+     JOIN bt.blog_posts p ON p.id = pc.post_id AND p.published
+     WHERE pc.category_id = $1`, [categoryId]);
+  return parseInt(rows[0]?.n ?? "0", 10);
+}
+
 export type PressMention = { id: number; outlet: string; title: string | null; url: string; logo_url: string | null; position: number };
 export type Podcast = { show_name: string; host: string | null; tagline: string | null; listen_url: string | null; cover_url: string | null };
 export type FreeResource = { id: number; kind: string; title: string; description: string | null; image_url: string | null; cta_label: string | null; cta_url: string | null; position: number };

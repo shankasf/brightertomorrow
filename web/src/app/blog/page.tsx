@@ -1,22 +1,36 @@
 import Link from "next/link";
-import { getBlogPosts } from "@/lib/queries";
+import { getBlogPostsPage, countBlogPosts } from "@/lib/queries";
 import BlogHero from "./BlogHero";
 import BlogCard from "./BlogCard";
+import Pagination from "@/components/Pagination";
+import type { Metadata } from "next";
+import { TITLE_SUFFIX } from "@/lib/seo";
 
-export const metadata = {
-  title: "Blog — Brighter Tomorrow Therapy",
+export const metadata: Metadata = {
+  // `absolute` so the root layout's title.template isn't re-applied (the
+  // suffix is included here once).
+  title: { absolute: `Blog ${TITLE_SUFFIX}` },
   description:
     "Notes from our clinicians on therapy, mental health, and the everyday work of becoming.",
+  alternates: { canonical: "/blog" },
 };
 
 const GOLD = "#E1B878";
 const INK = "#192735";
+const PER_PAGE = 12;
 
 const goldBtn =
   "inline-block font-display font-bold tracking-[0.15em] text-[13px] uppercase px-8 py-4 transition hover:opacity-90";
 
-export default async function BlogIndex() {
-  const posts = await getBlogPosts();
+export default async function BlogIndex(
+  { searchParams }: { searchParams: Promise<{ page?: string }> },
+) {
+  const { page: pageParam } = await searchParams;
+  const total = await countBlogPosts();
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const page = Math.min(totalPages, Math.max(1, parseInt(pageParam ?? "1", 10) || 1));
+  const posts = await getBlogPostsPage(PER_PAGE, (page - 1) * PER_PAGE);
+
   return (
     <article className="bg-white">
       {/* HERO */}
@@ -26,16 +40,20 @@ export default async function BlogIndex() {
       <section className="bg-white py-16 lg:py-20">
         <div className="container-x">
           <h2
-            className="text-center font-display font-bold text-[28px] sm:text-[34px] lg:text-[37.5px] mb-12"
+            className="text-center font-display font-bold text-[28px] sm:text-[34px] lg:text-[37.5px] mb-3"
             style={{ color: INK }}
           >
             Blog &amp; Articles
           </h2>
+          <p className="text-center text-ink-muted mb-12">
+            {total} articles · page {page} of {totalPages}
+          </p>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8 lg:gap-10">
             {posts.map((p, i) => (
               <BlogCard key={p.id} post={p} delay={i * 0.05} />
             ))}
           </div>
+          <Pagination currentPage={page} totalPages={totalPages} basePath="/blog" />
         </div>
       </section>
 

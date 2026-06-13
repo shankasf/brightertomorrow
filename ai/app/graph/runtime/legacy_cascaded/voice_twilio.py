@@ -40,7 +40,7 @@ router = APIRouter(prefix="/v2/twilio")
 
 @router.post("/voice")
 async def twiml_entry() -> Response:
-    ws_base = (os.environ.get("BT_PUBLIC_WS_BASE") or "wss://brightertomorrowtherapy.cloud").rstrip("/")
+    ws_base = (os.environ.get("BT_PUBLIC_WS_BASE") or "wss://brightertomorrowtherapy.com").rstrip("/")
     stream_url = f"{ws_base}/v2/twilio/media"
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'

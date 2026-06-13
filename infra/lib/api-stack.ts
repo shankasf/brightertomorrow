@@ -108,7 +108,7 @@ export class ApiStack extends Stack {
     // deploys still work; deployment of BtApi without the real ARN will fail
     // at create-time with a meaningful message.
     const apiCertArn = this.node.tryGetContext("apiCertArn")
-      || `arn:aws:acm:${this.region}:${this.account}:certificate/PLACEHOLDER-run-provision_cert.sh`;
+      || `arn:aws:acm:${this.region}:${this.account}:certificate/3c3b5f2a-cf1c-4a7a-8c3f-479fb1a4c2be`;
     const cert = acm.Certificate.fromCertificateArn(this, "ApiCertImported", apiCertArn);
 
     const accessLogs = new logs.LogGroup(this, "ApiAccessLogs", {

@@ -27,7 +27,7 @@ def _creds() -> Credentials:
 
 def signed_post(path: str, body: Mapping[str, Any], *, timeout: float = 20.0) -> dict[str, Any]:
     """POST JSON to $BT_API_URL + path, signed with SigV4 (service=execute-api)."""
-    base = os.environ.get("BT_API_URL", "https://api.brightertomorrowtherapy.cloud").rstrip("/")
+    base = os.environ.get("BT_API_URL", "https://api.brightertomorrowtherapy.com").rstrip("/")
     region = os.environ.get("AWS_REGION", "us-east-1")
     url = f"{base}{path}"
     data = json.dumps(body).encode("utf-8")
@@ -68,7 +68,7 @@ def gateway_get(path: str, *, params: Mapping[str, str] | None = None, timeout: 
 
 
 def signed_get(path: str, *, params: Mapping[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
-    base = os.environ.get("BT_API_URL", "https://api.brightertomorrowtherapy.cloud").rstrip("/")
+    base = os.environ.get("BT_API_URL", "https://api.brightertomorrowtherapy.com").rstrip("/")
     region = os.environ.get("AWS_REGION", "us-east-1")
     # SigV4 canonical query string is parsed from urlsplit(request.url).query
     # for GET — params passed via AWSRequest(params=...) are NOT signed. Bake

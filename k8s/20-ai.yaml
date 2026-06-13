@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: ai
-          image: bt-ai:prod-99a1650-1780690087
+          image: bt-ai:prod-214c9cb-1781335724
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
           env:
@@ -31,7 +31,7 @@ spec:
             - name: REALTIME_TRANSCRIPTION_MODEL
               valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_TRANSCRIPTION_MODEL, optional: true } }
             - name: BT_API_URL
-              value: "https://api.brightertomorrowtherapy.cloud"
+              value: "https://api.brightertomorrowtherapy.com"
             - name: BT_GATEWAY_URL
               value: "http://bt-gateway"
             - name: AWS_ACCESS_KEY_ID
@@ -57,11 +57,13 @@ spec:
             # needs to catch the loudest echo tail (2026-05-24).
             - name: TWILIO_ECHO_GATE_RMS
               value: "900"
-            # Phone bridge selector: raw_ws = new raw-WebSocket bridge
-            # (app/voice_rt, explicit response control, urackit_v2-style);
-            # sdk = legacy Agents-SDK bridge (app/twilio_voice.py). 2026-05-24.
+            # Phone bridge selector: hc = healthcare-style lean raw-WS bridge
+            # (app/voice_hc, port of healthcare_prior_auth — VAD 0.75,
+            # gpt-4o-mini-transcribe, no nudge/echo-gate/logprob); raw_ws =
+            # app/voice_rt (explicit response control); sdk = legacy Agents-SDK
+            # bridge (app/twilio_voice.py). Roll back = set to "raw_ws". 2026-06-09.
             - name: VOICE_BRIDGE
-              value: "raw_ws"
+              value: "hc"
             # --- LangSmith (agent tracing for the new LangGraph stack) ----
             - name: LANGSMITH_TRACING
               valueFrom: { secretKeyRef: { name: bt-config, key: LANGSMITH_TRACING, optional: true } }

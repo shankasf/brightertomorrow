@@ -23,7 +23,7 @@ Deploys the AWS portion of BrighterTomorrow Therapy:
 ```bash
 # one-time
 cd infra && npm ci
-npx cdk bootstrap aws://689517798275/us-east-1
+npx cdk bootstrap aws://502263855065/us-east-1
 
 # phase 1 — security, data, observability
 npm run deploy:phase1
@@ -42,7 +42,7 @@ npm run deploy:phase3
 
 ## Environment
 
-- Account: `689517798275`
+- Account: `502263855065`
 - Region: `us-east-1`
 - Root domain: `brightertomorrowtherapy.cloud` (DNS at Hostinger)
 

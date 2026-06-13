@@ -50,24 +50,27 @@ export default function ContactReplicaForm() {
     if (!consent || state === "sending") return;
     setState("sending");
 
-    const isOther = help === "Other (please describe below)";
-    const subject = (isOther && otherDescribe.trim() ? otherDescribe.trim() : help) || "Contact form";
+    const subject = help || "Contact form";
 
-    const messageLines = [
-      `Preferred contact method: ${contactMethod || "Not specified"}`,
-      `Best time to reach you: ${bestTime.trim() || "Not specified"}`,
-      `Therapist you wish to contact: ${therapist.trim() || "Not specified"}`,
-    ];
-    if (otherDescribe.trim()) {
-      messageLines.push(`Other / describe: ${otherDescribe.trim()}`);
-    }
+    // `message` stays NOT NULL server-side. Prefer the visitor's free-text
+    // note; fall back to the selected topic so it is never empty.
+    const message = otherDescribe.trim() || help || "Contact form";
 
     const payload = {
       full_name: `${firstName.trim()} ${lastName.trim()}`.trim(),
       email: email.trim(),
       phone: phone.trim(),
       subject,
-      message: messageLines.join("\n"),
+      message,
+      // Discrete fields — sent individually so the admin portal shows each
+      // value the visitor entered (blank → stored NULL).
+      first_name: firstName.trim(),
+      last_name: lastName.trim(),
+      help_topic: help,
+      other_describe: otherDescribe.trim(),
+      preferred_contact_method: contactMethod,
+      best_time: bestTime.trim(),
+      therapist_requested: therapist.trim(),
     };
 
     try {

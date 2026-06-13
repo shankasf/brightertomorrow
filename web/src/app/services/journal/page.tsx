@@ -22,13 +22,13 @@ export default async function JournalPage() {
           className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(15,22,30,0.65), rgba(15,22,30,0.65)), url('/images/services/journal/book-cover.jpg')",
+              "linear-gradient(rgba(15,22,30,0.55), rgba(15,22,30,0.68)), url('/images/services/journal/hero-bg.jpg')",
           }}
           aria-hidden
         />
         <div className="relative container-x py-28 sm:py-36 lg:py-44 text-center">
           <Reveal>
-            <h1 className="font-display font-bold leading-tight text-[40px] sm:text-[52px] lg:text-[60px]" style={{ color: "#F4F4F4" }}>
+            <h1 className="font-display font-bold leading-tight text-[40px] sm:text-[52px] lg:text-[60px] break-words" style={{ color: "#F4F4F4" }}>
               <span style={{ color: GOLD }}>Journal</span> &amp; Free Resources
             </h1>
           </Reveal>
@@ -55,7 +55,7 @@ export default async function JournalPage() {
               </p>
               <div className="mt-8 flex flex-wrap gap-4">
                 <a
-                  href="https://www.amazon.com/"
+                  href="https://www.amazon.com/Tame-My-Chronic-Pain-interactive/dp/B0BMSY623W/"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 font-display font-bold tracking-[0.15em] text-[13px] uppercase px-8 py-4 transition hover:opacity-90"
@@ -65,7 +65,7 @@ export default async function JournalPage() {
                   Purchase the Journal
                 </a>
                 <Link
-                  href="/contact"
+                  href="https://brightertomorrow.janeapp.com/" target="_blank" rel="noopener noreferrer"
                   className="inline-block font-display font-bold tracking-[0.15em] text-[13px] uppercase px-8 py-4 transition hover:opacity-90 border-2"
                   style={{ borderColor: WINE, color: WINE, borderRadius: "30px 0 30px 30px" }}
                 >

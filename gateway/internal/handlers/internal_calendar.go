@@ -438,7 +438,7 @@ func (h *InternalCalendarHandler) Confirm(w http.ResponseWriter, r *http.Request
 			greeting := notifyGreeting(strings.TrimSpace(draft.FirstName))
 			subj, heading, paragraphs, details := buildBookingRequestAckContent(greeting)
 			dedupeKey := fmt.Sprintf("apptconfirm:%s:email", appointmentID)
-			emailSent = enqueueEmail(r.Context(), h.Notify, email, subj, heading, paragraphs, details, dedupeKey, appointmentID)
+			emailSent = enqueueEmail(r.Context(), h.Notify, email, subj, heading, paragraphs, details, false, dedupeKey, appointmentID)
 			slog.Info("internal calendar confirm: request ack email enqueue",
 				"appointment_id", appointmentID, "channel", "email", "enqueued", emailSent)
 		}

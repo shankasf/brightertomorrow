@@ -4,6 +4,12 @@ import { FiArrowRight, FiCheck } from "react-icons/fi";
 import Reveal from "@/components/Reveal";
 import HeroPhotoCarousel from "@/components/HeroPhotoCarousel";
 import { getTeamBio } from "@/lib/teamBio";
+import { pageMetadata } from "@/lib/seo";
+import {
+  JsonLd,
+  therapistPerson,
+  therapistBreadcrumb,
+} from "@/components/StructuredData";
 
 const JANE_APP_URL = "https://brightertomorrow.janeapp.com/";
 
@@ -25,13 +31,22 @@ export async function generateMetadata(
 ): Promise<Metadata> {
   const { slug } = await params;
   const bio = await getTeamBio(slug);
-  if (!bio) return { title: "Therapist — Brighter Tomorrow Therapy" };
-  const title = `${bio.full_name}${bio.credentials_suffix ? `, ${bio.credentials_suffix}` : ""} — Brighter Tomorrow Therapy`;
+  // Throw here, not just in the page body: metadata resolves before streaming
+  // starts, so this is what makes the response a real HTTP 404 (not a soft 200).
+  if (!bio) notFound();
+  // Title WITHOUT the brand suffix — pageMetadata appends it (em-dash) so the
+  // result is "<Name>, <Credentials> — Brighter Tomorrow Therapy Collective".
+  const namePart = `${bio.full_name}${bio.credentials_suffix ? `, ${bio.credentials_suffix}` : ""}`;
   const description =
     (bio.hero_intro || "").split("\n\n")[0]?.slice(0, 200) ||
     bio.bio_paragraphs?.[0]?.slice(0, 200) ||
-    `Meet ${bio.full_name}, ${bio.role ?? "therapist"} at Brighter Tomorrow Therapy.`;
-  return { title, description };
+    `Meet ${bio.full_name}, ${bio.role ?? "therapist"} at Brighter Tomorrow Therapy Collective.`;
+  return pageMetadata({
+    title: namePart,
+    description,
+    path: `/team/${slug}`,
+    ogImage: bio.photo_url ?? undefined,
+  });
 }
 
 // Gold "Book an Appointment" button — matches the .com Elementor button
@@ -78,6 +93,18 @@ export default async function TherapistBioPage(
 
   return (
     <article className="bg-white" style={{ color: GREY }}>
+      {/* Structured data: Person (jobTitle + worksFor) and the Home > Team >
+          Name breadcrumb trail. Invisible to users. */}
+      <JsonLd
+        data={therapistPerson({
+          slug,
+          name: nameLine,
+          jobTitle: bio.credentials_suffix || bio.role,
+          image: bio.photo_url,
+        })}
+      />
+      <JsonLd data={therapistBreadcrumb({ slug, name: nameLine })} />
+
       {/* ───── Hero ───── */}
       <section className="bg-white">
         <div className="container-x py-12 sm:py-16 lg:py-20">

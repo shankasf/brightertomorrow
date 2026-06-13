@@ -1,11 +1,13 @@
 import { FiMapPin, FiPhone, FiMail, FiClock } from "react-icons/fi";
 import BookingFlow from "@/components/BookingFlow";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata = {
+export const metadata = pageMetadata({
   title: "Quick Appointment Request",
   description:
-    "Request an appointment in minutes — we'll check your coverage in real time and a care-team member reaches out within one business day.",
-};
+    "Request a therapy appointment in minutes — we check your insurance coverage in real time and a care-team member reaches out within one business day.",
+  path: "/contact/quick-appointment",
+});
 
 const HOURS = [
   ["Monday", "8am – 8pm"],
