@@ -5,6 +5,7 @@ import Reveal from "@/components/Reveal";
 import { getBlogBySlug } from "@/lib/queries";
 import { renderMarkdown, stripMarkdown } from "@/lib/markdown";
 import { SITE_URL, SITE_NAME, TITLE_SUFFIX } from "@/lib/seo";
+import { JsonLd, breadcrumbGraph } from "@/components/StructuredData";
 import { FiArrowLeft } from "react-icons/fi";
 import ShareButtons from "@/components/ShareButtons";
 
@@ -98,6 +99,13 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <JsonLd
+        data={breadcrumbGraph([
+          { name: "Home", path: "/" },
+          { name: "Blog", path: "/blog" },
+          { name: post.title, path: `/blog/${post.slug}` },
+        ])}
       />
 
       {/* Page header */}

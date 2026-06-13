@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Reveal from "@/components/Reveal";
 import { pageMetadata } from "@/lib/seo";
+import { JsonLd, detailPageGraph } from "@/components/StructuredData";
 import { getServiceBySlug } from "@/lib/queries";
 import { FiArrowLeft, FiArrowUpRight, FiClock, FiShield, FiStar } from "react-icons/fi";
 
@@ -33,8 +34,25 @@ export default async function ServiceDetail({ params }: { params: Promise<{ slug
   const svc = await getServiceBySlug(slug);
   if (!svc) notFound();
 
+  const description =
+    svc.short_desc ??
+    `${svc.title} at Brighter Tomorrow Therapy Collective in Las Vegas, NV.`;
+
   return (
     <article>
+      <JsonLd
+        data={detailPageGraph({
+          name: svc.title,
+          description,
+          path: `/services/${slug}`,
+          image: svc.image_url ?? undefined,
+          breadcrumb: [
+            { name: "Home", path: "/" },
+            { name: "Services", path: "/services" },
+            { name: svc.title, path: `/services/${slug}` },
+          ],
+        })}
+      />
       {/* Page header */}
       <section className="bg-cream-alt relative overflow-hidden">
         <div aria-hidden className="absolute inset-0 bg-grid opacity-[0.06]" />

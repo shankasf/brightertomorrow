@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Reveal from "@/components/Reveal";
 import { pageMetadata } from "@/lib/seo";
+import { JsonLd, detailPageGraph } from "@/components/StructuredData";
 import { getSpecialtyBySlug } from "@/lib/queries";
 import { FiArrowLeft, FiClock, FiShield, FiStar } from "react-icons/fi";
 import MatchTrigger from "./MatchTrigger";
@@ -84,6 +85,16 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
   const sp = await getSpecialtyBySlug(slug);
   if (!sp) notFound();
 
+  // Clean title for schema (sp.title may carry inline HTML — see generateMetadata).
+  const cleanTitle = sp.title
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .trim();
+  const description =
+    sp.short_desc ??
+    sp.subheadline ??
+    `${cleanTitle} at Brighter Tomorrow Therapy Collective in Las Vegas, NV.`;
+
   const blocks = sp.long_desc ? parseBody(sp.long_desc) : [];
 
   // Insert inline image right before the SECOND H2 heading (after intro section).
@@ -99,6 +110,19 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
 
   return (
     <article>
+      <JsonLd
+        data={detailPageGraph({
+          name: cleanTitle,
+          description,
+          path: `/specialties/${slug}`,
+          image: sp.image_url ?? undefined,
+          breadcrumb: [
+            { name: "Home", path: "/" },
+            { name: "Specialties", path: "/specialties" },
+            { name: cleanTitle, path: `/specialties/${slug}` },
+          ],
+        })}
+      />
       {/* ───── Hero band ───── */}
       <section className="bg-cream-alt relative overflow-hidden border-b border-surface-line">
         <div

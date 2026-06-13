@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { pageMetadata } from "@/lib/seo";
+import { JsonLd, breadcrumbGraph } from "@/components/StructuredData";
 import { FiArrowLeft } from "react-icons/fi";
 import {
   getBlogCategoryBySlug,
@@ -53,6 +54,13 @@ export default async function CategoryArchive(
 
   return (
     <article className="bg-white">
+      <JsonLd
+        data={breadcrumbGraph([
+          { name: "Home", path: "/" },
+          { name: "Blog", path: "/blog" },
+          { name: cat.name, path: `/category/${slug}` },
+        ])}
+      />
       <section className="bg-cream-alt relative overflow-hidden">
         <div aria-hidden className="absolute inset-0 bg-grid opacity-[0.06]" />
         <div className="container-narrow relative py-20 sm:py-28 text-center">

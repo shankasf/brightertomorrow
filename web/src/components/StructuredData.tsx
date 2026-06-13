@@ -190,3 +190,94 @@ export function therapistBreadcrumb(input: { slug: string; name: string }): obje
     ],
   };
 }
+
+// ── Generic GEO/AEO helpers ──────────────────────────────────────────────────
+
+/**
+ * Generic BreadcrumbList. Pass trail items in order (Home first). `path` may be
+ * a site-relative path ("/services") or an absolute URL; relative paths resolve
+ * against SITE_URL. Surfaces the page's position in site hierarchy to crawlers
+ * and answer engines.
+ */
+export function breadcrumbGraph(items: { name: string; path: string }[]): object {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((it, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: it.name,
+      item: /^https?:\/\//i.test(it.path) ? it.path : `${SITE_URL}${it.path}`,
+    })),
+  };
+}
+
+/**
+ * FAQPage @graph node. Strips simple markdown/HTML noise so answer engines get
+ * clean plain-text answers. Use on any page with a genuine Q&A list — Google
+ * FAQ rich results + a strong citation signal for ChatGPT/Perplexity/AI
+ * Overviews (the core AEO win).
+ */
+export function faqPageGraph(faqs: { q: string; a: string }[]): object {
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map((f) => ({
+      "@type": "Question",
+      name: f.q,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: f.a.trim(),
+      },
+    })),
+  };
+}
+
+/**
+ * Detail-page @graph for a service or specialty: a MedicalWebPage whose
+ * mainEntity is a MedicalTherapy provided by the practice (linked to the
+ * homepage #organization node), plus a BreadcrumbList. This is the structured
+ * "the practice offers <X> in Las Vegas" signal that drives local + generative
+ * discovery. `breadcrumb` items are ordered, Home first.
+ */
+export function detailPageGraph(input: {
+  name: string;
+  description: string;
+  path: string;
+  image?: string | null;
+  breadcrumb: { name: string; path: string }[];
+}): object {
+  const url = `${SITE_URL}${input.path}`;
+  const orgId = `${SITE_URL}/#organization`;
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "MedicalWebPage",
+        "@id": `${url}#webpage`,
+        url,
+        name: input.name,
+        description: input.description,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+        ...(input.image ? { primaryImageOfPage: absUrl(input.image) } : {}),
+        breadcrumb: { "@id": `${url}#breadcrumb` },
+        mainEntity: {
+          "@type": "MedicalTherapy",
+          name: input.name,
+          description: input.description,
+          provider: { "@id": orgId },
+        },
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": `${url}#breadcrumb`,
+        itemListElement: input.breadcrumb.map((it, i) => ({
+          "@type": "ListItem",
+          position: i + 1,
+          name: it.name,
+          item: /^https?:\/\//i.test(it.path) ? it.path : `${SITE_URL}${it.path}`,
+        })),
+      },
+    ],
+  };
+}

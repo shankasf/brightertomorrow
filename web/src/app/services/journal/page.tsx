@@ -4,6 +4,7 @@ import Reveal from "@/components/Reveal";
 import { FiBookOpen } from "react-icons/fi";
 import { getWorkbooks } from "@/lib/queries";
 import WorkbookGrid from "./WorkbookGrid";
+import { JsonLd, detailPageGraph } from "@/components/StructuredData";
 
 const WINE = "#66202A";
 const GOLD = "#E1B878";
@@ -15,7 +16,24 @@ export default async function JournalPage() {
   const workbooks = await getWorkbooks();
 
   return (
-    <article className="bg-white">
+    <>
+      <JsonLd
+        data={detailPageGraph({
+          name: "Journal & Free Resources — Brighter Tomorrow Therapy",
+          description:
+            "Practical, therapist-built journals and free downloadable workbooks from Brighter Tomorrow Therapy in Las Vegas, NV — tools to manage chronic pain, track patterns, and support your mental health.",
+          path: "/services/journal",
+          breadcrumb: [
+            { name: "Home", path: "/" },
+            { name: "Services", path: "/services" },
+            {
+              name: "Journal & Free Resources — Brighter Tomorrow Therapy",
+              path: "/services/journal",
+            },
+          ],
+        })}
+      />
+      <article className="bg-white">
       {/* HERO */}
       <section className="relative overflow-hidden">
         <div
@@ -134,6 +152,7 @@ export default async function JournalPage() {
           </Reveal>
         </div>
       </section>
-    </article>
+      </article>
+    </>
   );
 }
