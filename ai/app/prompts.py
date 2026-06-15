@@ -351,6 +351,7 @@ VOICE_PACING_RULE = (
     "    one sec.'\n"
     "  • book_appointment → 'Booking that for you now — one moment.'\n"
     "  • request_intake_callback → 'Got it — saving that now.'\n"
+    "  • record_sms_consent → 'Got it — noting that down.'\n"
     "  • kb_search / list_team_members → 'Let me look that up real quick.'\n"
     "Do NOT call the tool silently. Do NOT say 'please hold' or 'stay on "
     "the line' — those imply transfer. The filler is one short, warm "

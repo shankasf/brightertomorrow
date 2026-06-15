@@ -260,13 +260,32 @@ func (h *AdminAuditHandler) PurgeContact(w http.ResponseWriter, r *http.Request)
 }
 
 // PurgeChat handles POST /admin/audit/purge/chat/:id — superadmin only.
+//
+// A chat session has two stores: the Postgres pointer/metadata rows
+// (chat_sessions + the legacy chat_messages table) and the DynamoDB
+// CHAT#<session>/TURN# items that hold the actual message bodies (PHI of
+// record). Right-to-erasure must clear BOTH — the Postgres proc cannot reach
+// DynamoDB, so we follow it with DeleteChatSession. If the DDB side fails we
+// surface a 500 so the operator knows the erasure is incomplete.
 func (h *AdminAuditHandler) PurgeChat(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		httpx.WriteValidationError(w, "missing session id")
+		return
+	}
 
 	if _, err := h.Pool.Exec(r.Context(), `CALL bt.anonymise_chat_session($1)`, sessionID); err != nil {
 		slog.Error("admin purge chat", "err", err, "session_id", sessionID)
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		httpx.WriteError(w, http.StatusInternalServerError, "purge failed")
 		return
+	}
+
+	if h.PHI != nil {
+		if _, err := h.PHI.DeleteChatSession(r.Context(), sessionID); err != nil {
+			slog.Error("admin purge chat: delete ddb turns", "err", err, "session_id", sessionID)
+			httpx.WriteError(w, http.StatusInternalServerError, "purge incomplete: message bodies not deleted")
+			return
+		}
 	}
 
 	u, _ := appmw.AdminFromContext(r.Context())

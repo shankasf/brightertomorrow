@@ -32,6 +32,11 @@ type contactRequest struct {
 	PreferredContactMethod string `json:"preferred_contact_method"`
 	BestTime               string `json:"best_time"`
 	TherapistRequested     string `json:"therapist_requested"`
+
+	// SMSOptIn is the optional, unchecked-by-default SMS consent checkbox.
+	// The contact submission lands in Postgres (non-BAA), so the consent
+	// itself is recorded separately in DDB via h.PHI — never as a PG column.
+	SMSOptIn bool `json:"sms_opt_in"`
 }
 
 var (
@@ -78,6 +83,11 @@ func (b *contactRequest) validate() error {
 type ContactHandler struct {
 	Pool *pgxpool.Pool
 
+	// PHI records A2P SMS consent in DDB (the contact submission itself stays
+	// in non-BAA Postgres, so consent cannot live alongside it). Optional —
+	// nil disables consent capture on this surface.
+	PHI *phi.Store
+
 	// Notify is the patient-facing email outbox. When NotifyEnabled is true
 	// and Notify is non-nil, a "we received your request" acknowledgement is
 	// enqueued to the submitter. Best-effort — never fails the submission.
@@ -116,6 +126,19 @@ func (h *ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("contact: insert", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
+	}
+
+	// Best-effort A2P SMS consent (DDB, not Postgres) — never fail the
+	// submission over it.
+	if body.SMSOptIn && h.PHI != nil && strings.TrimSpace(body.Phone) != "" {
+		if err := h.PHI.PutSMSConsent(r.Context(), phi.SMSConsentInput{
+			Phone:   body.Phone,
+			OptedIn: true,
+			Method:  phi.SMSMethodWebContact,
+			Source:  "web",
+		}); err != nil {
+			slog.Warn("contact: sms consent record failed", "err", err)
+		}
 	}
 
 	// Best-effort acknowledgement email — never fail the submission over a

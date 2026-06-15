@@ -135,7 +135,10 @@ def gate_resume_offer(state: State) -> dict[str, Any]:
         return {}
 
     # Check if the caller has already responded to the offer this pass.
-    resume_decision: str | None = state.get("resume_decision")
+    # The decision lives at resume.decision (written by extract); there is no
+    # top-level "resume_decision" key in State, so reading that always yielded
+    # None and made this branch dead code.
+    resume_decision: str | None = (state.get("resume") or {}).get("decision")
 
     if resume_decision in ("continue", "fresh"):
         # Decision captured — resolve and mark done.

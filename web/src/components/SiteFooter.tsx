@@ -168,6 +168,7 @@ export default function SiteFooter({ settings, nav }: { settings: SiteSettings; 
                 <ul className="space-y-2.5">
                   <ExternalFooterLink href={JOTFORM_MATCH_URL} label="Find My Therapist" />
                   <FooterLink href="/privacy-policy" label="Privacy Policy" />
+                  <FooterLink href="/sms-terms" label="SMS Terms" />
                   <FooterLink href="/contact" label="Contact" />
                   <FooterLink href="/faqs" label="FAQs" />
                 </ul>

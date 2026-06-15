@@ -43,6 +43,7 @@ export default function ContactReplicaForm() {
   const [bestTime, setBestTime] = useState("");
   const [therapist, setTherapist] = useState("");
   const [consent, setConsent] = useState(false);
+  const [smsConsent, setSmsConsent] = useState(false);
   const [state, setState] = useState<SubmitState>("idle");
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -71,6 +72,7 @@ export default function ContactReplicaForm() {
       preferred_contact_method: contactMethod,
       best_time: bestTime.trim(),
       therapist_requested: therapist.trim(),
+      sms_opt_in: smsConsent,
     };
 
     try {
@@ -91,6 +93,7 @@ export default function ContactReplicaForm() {
       setBestTime("");
       setTherapist("");
       setConsent(false);
+      setSmsConsent(false);
     } catch {
       setState("err");
     }
@@ -273,6 +276,22 @@ export default function ContactReplicaForm() {
         />
         <span className="text-[14px] text-ink leading-snug">
           Yes, I want to submit this form &amp; agree to the terms of use.
+        </span>
+      </label>
+
+      <label htmlFor="cf-sms-consent" className="mt-4 flex items-start gap-3 cursor-pointer">
+        <input
+          id="cf-sms-consent"
+          type="checkbox"
+          checked={smsConsent}
+          onChange={(e) => setSmsConsent(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[#E1B878]"
+        />
+        <span className="text-[14px] text-ink leading-snug">
+          By checking this box, I agree to receive appointment reminders and marketing text
+          messages from Brighter Tomorrow Therapy at the number provided. Consent is not a
+          condition of service. Message frequency varies. Msg &amp; data rates may apply.
+          Reply STOP to cancel, HELP for help.
         </span>
       </label>
 

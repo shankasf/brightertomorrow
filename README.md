@@ -187,6 +187,9 @@ One cycle per user turn. The graph has three structural pieces:
    └──► BOOKING CHAIN        book_appointment ─► create_pending_request
                                               ─► send_acknowledgement
                                               ─► log_phi
+
+        record_sms_consent       ← post-booking A2P SMS opt-in (chat only;
+                                     voice captures it via a Realtime tool)
                   │
                   ▼
               respond                ← scene-based LLM reply
@@ -209,7 +212,7 @@ Anti-loop guarantees: gate flags are monotonic, the planner enforces a hard `_MA
   - `planner.py` — pure-Python router. Defines `N.*` (every node name as a symbol).
   - `respond.py` — scene-based reply.
   - `rollback.py` — clears a pending confirmation on "no".
-  - `actions/` — `insurance.py`, `booking.py`, `coverage.py`, `notify.py`, plus `_legacy.py` for `propose_slots / book_appointment / cancel_appointment / submit_callback / search_kb / check_payer`.
+  - `actions/` — `insurance.py`, `booking.py`, `coverage.py`, `notify.py`, `sms_consent.py` (post-booking A2P opt-in capture), plus `_legacy.py` for `propose_slots / book_appointment / cancel_appointment / submit_callback / search_kb / check_payer`.
   - `gates/` — `disclosure.py`, `nv_presence.py`, `caller_relationship.py`, `returning_verify.py`, `resume_offer.py`. Only `resume_offer` is wired as a graph node; the other four are inline checks the planner makes against state flags set by `extract`.
   - `handoffs/` — seven terminal nodes. The shared `_post_admin_notification` helper lives in `handoffs/__init__.py`.
 - `graph/prompts/`:
@@ -286,6 +289,7 @@ gateway/            Go service (chi router)
       insurance.go          insurance audit rows
       callbacks.go          callback intake
       admin_queue.go        bt-admin-queue / bt-safety-queue writes
+      sms_consent.go        A2P SMS opt-in records (CONSENT#SMS#<phoneHash>)
       returning_lookup.go   returning-patient lookup by DOB
       intake_list.go, audit.go
     handlers/
@@ -295,6 +299,7 @@ gateway/            Go service (chi router)
       twilio.go                                 /v1/twilio/voice + /v1/twilio/media
       intake.go, intake_internal.go             intake submissions
       coverage.go, coverage_check.go            eligibility (SigV4 to AWS)
+      sms_consent_internal.go                   /internal/sms/consent (chat/voice opt-in)
       internal_calendar.go                      Jane calendar bridge
       callback.go, contact.go, newsletter.go    public form endpoints
       faqs.go, match.go, health.go
@@ -307,7 +312,8 @@ gateway/            Go service (chi router)
 web/                Next.js (App Router)
   src/
     app/             routes: /, /about, /team, /services, /specialties,
-                     /rates, /contact, /admin/*, /faqs, /blog, /our-approach, ...
+                     /rates, /contact, /admin/*, /faqs, /blog, /our-approach,
+                     /sms-terms (A2P opt-in terms), ...
     components/
       ChatWidget.tsx  SSE chat + WS voice + insurance dropdown + session persistence
       ...             Hero, Booking, CoverageModal, MatchModal, etc.
@@ -385,7 +391,7 @@ DynamoDB tables (every table KMS-encrypted with the `alias/bt-phi` CMK, point-in
 
 | Table | Purpose |
 |---|---|
-| `bt-main` | Chat turns, intake details, generic key-value PHI store (GSI1 for lookups). |
+| `bt-main` | Chat turns, intake details, A2P SMS consent records (`CONSENT#SMS#<phoneHash>`), generic key-value PHI store (GSI1 for lookups). |
 | `bt-langgraph-checkpoints` | Per-thread graph state, 24 h TTL. |
 | `bt-jane-events` | iCal-synced Jane appointments. |
 | `bt-soft-holds` | Booking soft holds before Jane confirms. |
@@ -403,6 +409,7 @@ Lambda + API Gateway: eligibility (`/internal/insurance/verify` → CLAIM.MD), p
 - `bt-gateway` and `bt-ai` both stamp every PHI write with an `agent_source` ContextVar (`chat-agent` / `voice-agent` / `voice-phone`) so admin reports can split by modality.
 - Handoff and safety notifications never POST PHI: nodes write the full record to the DDB queue table under the CMK, then POST only request_id + severity + type to the gateway. The notifications-retry Lambda is the only consumer authorised to read those PHI fields back out.
 - The LangGraph checkpointer writes to DDB only, KMS-encrypted, 24 h TTL — minimum necessary.
+- **A2P SMS consent is PHI.** A record tying a phone number to "agreed to receive texts from a mental-health practice" is a regulated linkage, so it is written to `bt-main` (`CONSENT#SMS#<phoneHash>`, one current-state item per phone, version-stamped) under the CMK — **never** as a Postgres column, even when the web *contact* form (which itself lands in Postgres) is the surface that captures it. All four surfaces (web contact form, web booking form, chat agent, voice/phone agent) route consent through `phi.PutSMSConsent`; history lives in the immutable PHI audit log.
 
 ---
 
@@ -455,6 +462,7 @@ Because the session ID is the LangGraph `thread_id`, a refresh mid-booking resum
 |---|---|---|
 | POST | `/internal/intake/submit`, `/internal/callback/submit` | bt-ai |
 | POST | `/internal/coverage/record` | bt-ai (audit row after CLAIM.MD probe) |
+| POST | `/internal/sms/consent` | bt-ai chat/voice agents (A2P opt-in/opt-out) |
 | POST | `/internal/chat/turn`, `/internal/chat/end` | bt-ai |
 | GET | `/internal/chat/history` | bt-ai |
 | POST | `/internal/calendar/free-slots`, `/internal/calendar/book`, `/internal/calendar/confirm` | bt-ai |
@@ -524,4 +532,5 @@ Account 502263855065, region us-east-1. See `infra/README.md` for stack-specific
 - **DOB is echoed once in plain English** (`"August 19, 1998, correct?"`) — never MM/DD vs DD/MM.
 - **Silent handoffs.** The caller never hears "transferring you" or "let me hand you off". The handoff *is* the transfer.
 - **Trust contact fields.** Booking and intake do not refuse a name, phone, email, or address on "explicit content" grounds — read it back and confirm.
+- **SMS consent is captured once and never re-asked.** The `sms_consent_asked` / `sms_consent` state flags are sticky; the opt-in question is posed only after a booking and only on the chat surface (voice/phone capture it through a Realtime tool). No raw phone number is ever logged. A2P/10DLC campaign details live in `TWILIO.md`.
 - **HIPAA is the default.** Every endpoint, audit row, and log line is reviewed against the boundary in section 5 before merging. PHI never lands in Postgres or stdout.

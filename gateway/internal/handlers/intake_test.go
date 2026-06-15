@@ -27,7 +27,8 @@ func (s *stubCoverageChecker) CheckCoverage(_ context.Context, in aiclient.Cover
 
 // stubPHIStore is a no-op phi store used in tests so we don't need real DynamoDB.
 type stubPHIStore struct {
-	putErr error
+	putErr        error
+	smsConsentErr error
 }
 
 func (s *stubPHIStore) PutIntake(_ context.Context, _ phi.IntakeRecord) error {
@@ -44,6 +45,10 @@ func (s *stubPHIStore) FindStandaloneCheckForReuse(_ context.Context, _, _ strin
 
 func (s *stubPHIStore) LinkCheckToSubmission(_ context.Context, _, _, _, _ string) error {
 	return nil
+}
+
+func (s *stubPHIStore) PutSMSConsent(_ context.Context, _ phi.SMSConsentInput) error {
+	return s.smsConsentErr
 }
 
 func TestIntakeRequestValidate(t *testing.T) {

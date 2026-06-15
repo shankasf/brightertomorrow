@@ -114,6 +114,16 @@ def _pick_scene(state: State) -> str:
     if state.get("booking_status") == "booked" and state.get("intent") != "cancel":
         if state.get("intent") == "info" and state.get("kb_snippets"):
             return "info_answer"
+        # Ask the A2P SMS opt-in once, the turn after the booking ack — chat
+        # only, and only when we have a phone to text. The send_ack_confirmation
+        # explicit-scene override owns the booking-ack turn itself, so this only
+        # fires on the following turn.
+        if (
+            state.get("channel") == "chat"
+            and not state.get("sms_consent_asked")
+            and (state.get("booking_fields") or {}).get("phone")
+        ):
+            return "ask_sms_consent"
         return "post_booking_followup"
     if state.get("_resume_offer_pending"):
         return "resume_offer"
@@ -512,6 +522,10 @@ def _apply_scene_side_effects(scene: str, state: State) -> dict[str, Any]:
         gates = dict(state.get("gates") or {})
         gates["disclosure_done"] = True
         return {"gates": gates}
+    # Mark the SMS opt-in as asked so the planner/_pick_scene never re-ask;
+    # the caller's yes/no next turn is captured by record_sms_consent.
+    if scene == "ask_sms_consent":
+        return {"sms_consent_asked": True}
     return {}
 
 

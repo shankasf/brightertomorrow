@@ -89,20 +89,30 @@ func (h *InternalCalendarHandler) LookupAppointment(w http.ResponseWriter, r *ht
 
 	now := time.Now().UTC()
 
-	// Pick the most-recent non-cancelled appointment (past OR future) per GSI
-	// descending order. We do NOT filter out past appointments here so we can
-	// tell the caller "that one already passed" — but only AFTER DOB verifies.
-	var match *phi.IntakeRecord
+	// Pick the SOONEST upcoming non-cancelled appointment — that's what a caller
+	// means by "my appointment" when they want to cancel/reschedule. Only if the
+	// patient has no upcoming appointment do we fall back to the most-recent past
+	// one, so we can still tell them "that one already passed" (post-DOB-verify).
+	//
+	// Records arrive sorted by appointmentTime DESCENDING (furthest future →
+	// oldest past). Walking that order, the LAST future record we see is the
+	// soonest upcoming; the FIRST past record we see is the most-recent past.
+	var soonestFuture *phi.IntakeRecord
+	var mostRecentPast *phi.IntakeRecord
 	for i := range records {
 		rec := &records[i]
-		if rec.WorkflowStatus == "cancelled" {
+		if rec.WorkflowStatus == "cancelled" || rec.AppointmentTime == nil {
 			continue
 		}
-		if rec.AppointmentTime == nil {
-			continue
+		if rec.AppointmentTime.After(now) {
+			soonestFuture = rec // keep overwriting → ends on the nearest future
+		} else if mostRecentPast == nil {
+			mostRecentPast = rec // first past in descending order
 		}
-		match = rec
-		break
+	}
+	match := soonestFuture
+	if match == nil {
+		match = mostRecentPast
 	}
 
 	if match == nil {
@@ -392,7 +402,6 @@ func (h *InternalCalendarHandler) RescheduleAppointment(w http.ResponseWriter, r
 
 	// Mutate the DDB record in place.
 	updateErr := h.PHI.UpdateIntakeAppointment(ctx, body.EmailHash, body.AppointmentID, newTime, body.StaffID)
-	appointmentRescheduleAudit(ctx, h.PHI, body.AppointmentID, body.EmailHash, newTime.Format(time.RFC3339))
 
 	if updateErr != nil {
 		if errors.Is(updateErr, phi.ErrNotFound) {
@@ -410,6 +419,10 @@ func (h *InternalCalendarHandler) RescheduleAppointment(w http.ResponseWriter, r
 		})
 		return
 	}
+
+	// Audit only after the move actually succeeded — a failed/not-found update
+	// must not leave a "reschedule happened" row in the audit trail.
+	appointmentRescheduleAudit(ctx, h.PHI, body.AppointmentID, body.EmailHash, newTime.Format(time.RFC3339))
 
 	// Best-effort confirmation email for the completed move — never fail the
 	// reschedule over a missed notification. Recipient + first name come from

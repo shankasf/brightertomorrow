@@ -273,6 +273,13 @@ class State(TypedDict, total=False):
     # We run the gentle "are you safe?" screen at most once per session.
     soft_safety_asked: bool
 
+    # ----- Post-booking SMS opt-in (A2P) --------------------------------
+    # Chat-only. After a booking completes the bot asks once whether the
+    # caller wants appointment/practice texts; the answer is recorded to the
+    # gateway (DDB consent). Both flags are sticky so we never re-ask.
+    sms_consent_asked: bool                       # the opt-in question was posed
+    sms_consent: Optional[Literal["yes", "no"]]   # captured answer; None until recorded
+
     # The explicit scene a gate / handoff / action node wants respond to
     # use this turn. Read by respond._pick_scene (takes precedence over
     # state-derived scenes). Cleared by respond at the end of each turn
@@ -310,6 +317,17 @@ class State(TypedDict, total=False):
     _cancel_email_sent: bool           # gateway confirmed a cancellation-confirmation email was enqueued — post_cancel only claims an email when True
     verify_result_next_step: str | None  # post-booking message from Jane
     insurance_pending_admin: bool     # CLAIM.MD couldn't verify; admin team will follow up. Keeps the booking flow alive so the caller still books a slot.
+
+    # ----- Compliance audit + flow-control keys --------------------------
+    # These MUST be declared here: LangGraph 1.x drops any key a node returns
+    # that isn't in the schema. Before they were declared, every node's
+    # `audit_event` was silently discarded, and `request_id` (emitted by
+    # create_pending_request, read by log_phi) never survived to the next
+    # node — so log_phi always logged request_id="?" and could not link the
+    # intake-complete audit to its DDB pending_request row.
+    audit_event: dict | None          # last node's structured (NON-PHI) audit event this turn
+    request_id: str | None            # pending_request id from create_pending_request; read by log_phi
+    done: bool                        # terminal handoff / flow-complete signal
 
 
 def initial_state(channel: Channel, session_id: str, agent_source: str) -> State:
@@ -368,6 +386,10 @@ def initial_state(channel: Channel, session_id: str, agent_source: str) -> State
         last_reply_text=None,
         soft_safety_asked=False,
         scene=None,
+        request_id=None,
+        done=False,
+        sms_consent_asked=False,
+        sms_consent=None,
     )
 
 

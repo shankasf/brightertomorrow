@@ -180,8 +180,17 @@ export async function getBlogCategories(): Promise<BlogCategory[]> {
 }
 
 export async function getBlogCategoryBySlug(slug: string): Promise<BlogCategory | null> {
+  // Only resolve categories that have at least one published post (same guard
+  // as getBlogCategories). Otherwise old WordPress category slugs with zero
+  // posts render a thin HTTP 200 "0 articles" page — a soft-404 — instead of
+  // letting the page call notFound() for a real 404.
   const { rows } = await q<BlogCategory>(
-    `SELECT id, slug, name, position FROM bt.blog_categories WHERE slug = $1`, [slug]);
+    `SELECT c.id, c.slug, c.name, c.position
+     FROM bt.blog_categories c
+     WHERE c.slug = $1
+       AND EXISTS (SELECT 1 FROM bt.blog_post_categories pc
+                   JOIN bt.blog_posts p ON p.id = pc.post_id AND p.published
+                   WHERE pc.category_id = c.id)`, [slug]);
   return rows[0] ?? null;
 }
 

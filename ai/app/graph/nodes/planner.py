@@ -79,6 +79,9 @@ class N:
     SEND_ACKNOWLEDGEMENT = "send_acknowledgement"
     LOG_PHI = "log_phi"
 
+    # Post-booking A2P SMS opt-in capture (chat only)
+    RECORD_SMS_CONSENT = "record_sms_consent"
+
     # Cancel lookup — finds a prior-session appointment by phone+DOB
     LOOKUP_APPOINTMENT = "lookup_appointment"
 
@@ -322,6 +325,21 @@ def planner(state: State) -> str:
         return _route(state, N.SUBMIT_CALLBACK, "confirm_callback_yes")
     if cs == "pending_confirm" and aff == "no":
         return _route(state, N.ROLLBACK, "confirm_callback_no")
+
+    # ---- 9c. Post-booking SMS opt-in capture ---------------------------
+    # The turn after ask_sms_consent posed the question (sms_consent_asked is
+    # set by that scene's side-effect), the caller's yes/no is recorded once.
+    # Guarded to the booked, chat, not-yet-recorded state so it can't collide
+    # with any other affirmation handler. After recording, booked-state
+    # routing falls through to post_booking_followup naturally.
+    if (
+        bs == "booked"
+        and state.get("channel") == "chat"
+        and state.get("sms_consent_asked")
+        and state.get("sms_consent") is None
+        and aff in ("yes", "no")
+    ):
+        return _route(state, N.RECORD_SMS_CONSENT, "sms_consent_capture")
 
     # Post-self-pay-offer affirmation. After OFFER_SELF_PAY ran on a prior
     # turn, respond asked "want to continue as self-pay?"; the caller's

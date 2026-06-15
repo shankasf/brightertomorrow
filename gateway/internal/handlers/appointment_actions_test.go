@@ -319,6 +319,58 @@ func TestLookupAppointment_PastSkipped(t *testing.T) {
 	}
 }
 
+// TestLookupAppointment_MultipleFuturePicksSoonest: with two upcoming
+// appointments (GSI returns them appointmentTime-DESCENDING, so furthest-future
+// first), the handler must return the SOONEST upcoming one — that's what a
+// caller means by "my appointment" when cancelling/rescheduling.
+func TestLookupAppointment_MultipleFuturePicksSoonest(t *testing.T) {
+	now := time.Now().UTC()
+	furthest := now.Add(120 * time.Hour)
+	soonest := now.Add(48 * time.Hour)
+	past := now.Add(-48 * time.Hour)
+	staffID := 2
+
+	mk := func(uuid string, when time.Time) map[string]ddbtypes.AttributeValue {
+		return marshalIntakeRecord(t, phi.IntakeRecord{
+			SubmissionUUID:   uuid,
+			EmailHash:        "ehash-" + uuid,
+			DateOfBirth:      "1990-05-10",
+			Phone:            "8453884267",
+			PhoneHash:        phi.HashPhone("8453884267"),
+			WorkflowStatus:   "scheduled",
+			AppointmentTime:  &when,
+			TherapistStaffID: &staffID,
+			CoverageStatus:   "eligible",
+			CreatedAt:        now,
+			RetainUntil:      now.Add(10 * 365 * 24 * time.Hour),
+		})
+	}
+
+	// Descending order, exactly as the byPhoneHash GSI (ScanIndexForward=false) returns it.
+	items := []map[string]ddbtypes.AttributeValue{
+		mk("appt-furthest", furthest),
+		mk("appt-soonest", soonest),
+		mk("appt-past", past),
+	}
+
+	h := newLookupHandler(&fakeDDB{queryItems: items})
+	w := doLookupPost(t, h, `{"phone":"8453884267","dob_yyyymmdd":"19900510"}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["found"] != true {
+		t.Fatalf("found = %v, want true", resp["found"])
+	}
+	if resp["appointment_id"] != "appt-soonest" {
+		t.Errorf("appointment_id = %v, want appt-soonest (nearest upcoming, not furthest)", resp["appointment_id"])
+	}
+}
+
 // TestLookupAppointment_BadJSON: malformed body → 200 {"found":false} (fail-open).
 func TestLookupAppointment_BadJSON(t *testing.T) {
 	h := newLookupHandler(&fakeDDB{})

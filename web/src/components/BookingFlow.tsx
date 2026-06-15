@@ -117,6 +117,8 @@ type FormState = {
   subscriberRelationship: string;
   // Optional notes
   notes: string;
+  // SMS reminders opt-in (optional, unchecked by default)
+  smsConsent: boolean;
 };
 
 const EMPTY_FORM: FormState = {
@@ -136,6 +138,7 @@ const EMPTY_FORM: FormState = {
   subscriberName: "",
   subscriberRelationship: "",
   notes: "",
+  smsConsent: false,
 };
 
 // =====================================================================
@@ -298,6 +301,7 @@ export default function BookingFlow() {
             }
           : {}),
         notes: buildNotes(form),
+        sms_opt_in: form.smsConsent,
       };
       const r = await fetch("/v1/intake", {
         method: "POST",
@@ -417,6 +421,7 @@ export default function BookingFlow() {
           {step === "confirm" && (
             <ConfirmStep
               form={form}
+              update={update}
               serviceValue={serviceValue}
               coverage={coverage}
               error={submitError}
@@ -921,12 +926,14 @@ function SubscriberStep({ form, update }: { form: FormState; update: <K extends 
 
 function ConfirmStep({
   form,
+  update,
   serviceValue,
   coverage,
   error,
   onEditStep,
 }: {
   form: FormState;
+  update: <K extends keyof FormState>(k: K, v: FormState[K]) => void;
   serviceValue: string;
   coverage: CoverageResponse | null;
   error: string | null;
@@ -1010,6 +1017,22 @@ function ConfirmStep({
       <p className="text-[11px] text-ink-soft mt-5 leading-relaxed">
         By submitting, you consent to be contacted at the phone or email above. Your information is stored over HIPAA-secure channels.
       </p>
+
+      <label htmlFor="bf-sms-consent" className="mt-4 flex items-start gap-3 cursor-pointer">
+        <input
+          id="bf-sms-consent"
+          type="checkbox"
+          checked={form.smsConsent}
+          onChange={(e) => update("smsConsent", e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[#E1B878]"
+        />
+        <span className="text-[12px] text-ink-soft leading-relaxed">
+          By checking this box, I agree to receive appointment reminders and marketing text
+          messages from Brighter Tomorrow Therapy at the number provided. Consent is not a
+          condition of service. Message frequency varies. Msg &amp; data rates may apply.
+          Reply STOP to cancel, HELP for help.
+        </span>
+      </label>
     </div>
   );
 }

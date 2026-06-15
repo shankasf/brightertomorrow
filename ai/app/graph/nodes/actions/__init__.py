@@ -21,6 +21,7 @@ from .insurance import verify_insurance, send_coverage_result
 from .booking import create_pending_request
 from .notify import send_acknowledgement, log_phi
 from .coverage import offer_self_pay, capture_self_pay_consent
+from .sms_consent import record_sms_consent
 
 # Legacy action nodes — unchanged from original actions.py
 from ._legacy import (
@@ -43,6 +44,7 @@ __all__ = [
     "log_phi",
     "offer_self_pay",
     "capture_self_pay_consent",
+    "record_sms_consent",
     # Legacy
     "propose_slots",
     "book_appointment",

@@ -229,6 +229,46 @@ async def _invoke_langgraph(session_id: str, user_text: str, channel: str = "cha
     return await _lg_app.ainvoke(seed, config=cfg)
 
 
+# Per-session de-dupe for graph audit events. `audit_event` is a plain (sticky)
+# state key: it lingers in the checkpoint across turns until a later node
+# overwrites it, so the merged final state re-presents the same event every
+# turn. We log each distinct event (keyed by its creation ts + action) once.
+# Bounded to avoid unbounded growth on a long-lived process.
+_last_audit_seen: dict[str, str] = {}
+_LAST_AUDIT_CAP = 2000
+
+
+def _log_graph_audit(result: dict[str, Any] | None, session_id: str) -> None:
+    """Emit the graph's terminal audit_event to structured logs (once per event).
+
+    The graph nodes build a NON-PHI `audit_event` dict (action/session_id/ts/
+    outcome — see _build_audit_event). PHI-mutation events (booking, verify,
+    cancel) are already audited gateway-side at the data endpoints; this gives
+    the conversational/safety events (crisis, ROI, mandatory-report, gate
+    decisions) a real, grep-able destination in the log lake instead of being
+    silently dropped. Only the merged final-state event is logged — terminal
+    handoffs are last-node, so the compliance-relevant ones land here.
+    """
+    if not result:
+        return
+    ev = result.get("audit_event")
+    if not isinstance(ev, dict) or not ev:
+        return
+    # Skip if we've already logged this exact event for this session (the
+    # sticky-key replay described above).
+    sid = session_id or "anon"
+    fingerprint = f"{ev.get('ts','')}|{ev.get('action') or ev.get('type','')}"
+    if _last_audit_seen.get(sid) == fingerprint:
+        return
+    if len(_last_audit_seen) >= _LAST_AUDIT_CAP:
+        _last_audit_seen.clear()
+    _last_audit_seen[sid] = fingerprint
+    try:
+        logger.info("graph_audit_event session=%s event=%s", sid, json.dumps(ev, separators=(",", ":")))
+    except Exception:
+        logger.info("graph_audit_event session=%s event=%r", sid, ev)
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
     """Single-shot chat endpoint backed by the LangGraph agent.
@@ -261,6 +301,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     t0 = time.perf_counter()
     try:
         result = await _invoke_langgraph(session_id, user_text, channel="chat")
+        _log_graph_audit(result, session_id)
         reply = (result.get("last_reply_text") or "").strip() or "I'm here — could you tell me a bit more?"
         latency_ms = (time.perf_counter() - t0) * 1000
         logger.info(
@@ -346,7 +387,10 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
     if not is_greet:
         intent = detect_intent(msg)
         if intent is not None:
-            cached = get_cached_reply(intent)
+            # get_cached_reply does a blocking psycopg connect on a cache miss;
+            # off-load to a thread so a miss never stalls the event loop (and
+            # every other in-flight SSE/WS connection) during the DB round-trip.
+            cached = await asyncio.to_thread(get_cached_reply, intent)
             if cached is not None:
                 meta = {"version_key": cached.version_key, "hit": cached.hit}
                 logger.info(
@@ -379,6 +423,7 @@ async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
                         yield _sse_event("delta", {"text": emit})
                 elif ev["type"] == "final":
                     result = ev["result"] or {}
+            _log_graph_audit(result, session_id)
             # Flush any leftover buffer (e.g. a stray "[[" that never closed).
             if marker_buf:
                 yield _sse_event("delta", {"text": marker_buf})
@@ -509,8 +554,15 @@ async def internal_evals_trigger(request: Request) -> dict[str, Any]:
     channel = str(body.get("channel") or "chat").strip().lower()
     if channel not in ("chat", "voice", "phone"):
         channel = "chat"
-    sample = int(body.get("sample") or 20)
-    hours = int(body.get("hours") or 24)
+
+    def _as_int(value: Any, default: int) -> int:
+        try:
+            return int(value) if value not in (None, "") else default
+        except (TypeError, ValueError):
+            return default
+
+    sample = _as_int(body.get("sample"), 20)
+    hours = _as_int(body.get("hours"), 24)
     run_id = str(_uuid4())
 
     async def _bg_run() -> None:

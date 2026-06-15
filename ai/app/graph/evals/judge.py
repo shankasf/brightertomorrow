@@ -244,8 +244,20 @@ def judge_turn(
             result.task_completion,
         )
         return result
-    except Exception:
-        logger.exception("judge_turn_failed user_says=%r", user_says[:80])
+    except Exception as exc:
+        msg = str(exc)
+        # Quota/rate-limit failures silently fabricate scores that pollute a run.
+        # Log a loud, grep-able marker (`insufficient_quota`) so a bad run is
+        # caught before its garbage numbers are trusted; the rationale is
+        # prefixed JUDGE_FAILED so it's distinguishable downstream.
+        if "insufficient_quota" in msg or "rate_limit" in msg or "429" in msg:
+            logger.error(
+                "judge_quota_exhausted insufficient_quota — scores are FABRICATED defaults, "
+                "do NOT trust this run: %s",
+                msg[:200],
+            )
+        else:
+            logger.exception("judge_turn_failed user_says=%r", user_says[:80])
         # Fail-open: return a neutral/low-confidence result rather than crash
         # the whole eval run. Rationale makes the failure visible.
         return JudgeResult(
@@ -254,5 +266,5 @@ def judge_turn(
             tone=3,
             topic_adherence=True,
             task_completion=False,
-            rationale="Judge call failed — scores are defaults, not real assessments.",
+            rationale="JUDGE_FAILED — scores are defaults, not real assessments: " + msg[:120],
         )

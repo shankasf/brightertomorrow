@@ -32,8 +32,11 @@ def embed_all_faqs() -> int:
     """Embed every published FAQ and persist to DB. Returns the number embedded."""
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
-        logger.error("OPENAI_API_KEY not set")
-        sys.exit(1)
+        # Raise (not sys.exit) — this function is also called in a thread
+        # executor from the /internal/embed-faqs handler, where SystemExit is a
+        # BaseException that `except Exception` won't catch and would kill the
+        # uvicorn worker.
+        raise RuntimeError("OPENAI_API_KEY not set")
 
     client = OpenAI(api_key=api_key)
 

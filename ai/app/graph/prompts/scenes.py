@@ -50,6 +50,7 @@ Scene = Literal[
     "clarify",
     "open_question",
     "post_booking_followup",
+    "ask_sms_consent",
     # ----- Handoffs (6) -----------------------------------------------------
     "handoff_roi_required",
     "handoff_mandatory_report",
@@ -781,7 +782,18 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "our care team will follow up to confirm. In the SAME short "
         "reply, let them know a confirmation email is on its way to "
         "{email} (only mention the email if {email} is present). "
-        "Do NOT promise a text/SMS — texting is not enabled, only "
-        "email. End with the practice line 725-238-6990."
+        "Do NOT mention or promise a text/SMS in this message — a "
+        "separate opt-in question comes next. End with the practice "
+        "line 725-238-6990."
+    ),
+    "ask_sms_consent": (
+        "The appointment is booked. Ask the caller ONE short, friendly "
+        "yes/no question: would they like to get appointment reminders "
+        "and occasional practice updates by text at the phone number we "
+        "have on file? Make clear it's optional, they can reply STOP "
+        "anytime, texts are infrequent (about twice a month), and "
+        "message & data rates may apply. Keep it to one or two sentences. "
+        "Do NOT re-read the booking details and do NOT read the phone "
+        "number aloud."
     ),
 }

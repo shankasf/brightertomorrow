@@ -74,6 +74,7 @@ from .nodes.actions import (
     lookup_appointment,
     offer_self_pay,
     propose_slots,
+    record_sms_consent,
     reschedule_appointment,
     search_kb,
     send_acknowledgement,
@@ -134,6 +135,7 @@ _PLANNER_TARGETS: dict[str, str] = {
     # Terminal booking-chain entry point (rarely planner-routed; usually
     # reached via static edge from book_appointment)
     N.CREATE_PENDING_REQUEST: N.CREATE_PENDING_REQUEST,
+    N.RECORD_SMS_CONSENT: N.RECORD_SMS_CONSENT,
     # Cancel lookup — prior-session appointment lookup by phone+DOB
     N.LOOKUP_APPOINTMENT: N.LOOKUP_APPOINTMENT,
     N.RESCHEDULE_APPOINTMENT: N.RESCHEDULE_APPOINTMENT,
@@ -190,6 +192,9 @@ def build_graph():
     g.add_node(N.CREATE_PENDING_REQUEST, create_pending_request)
     g.add_node(N.SEND_ACKNOWLEDGEMENT, send_acknowledgement)
     g.add_node(N.LOG_PHI, log_phi)
+
+    # Post-booking SMS opt-in capture (chat only)
+    g.add_node(N.RECORD_SMS_CONSENT, record_sms_consent)
 
     # -----------------------------------------------------------------------
     # Static edges — fixed topology
@@ -259,6 +264,7 @@ def build_graph():
     g.add_edge(N.CREATE_PENDING_REQUEST, N.SEND_ACKNOWLEDGEMENT)
     g.add_edge(N.SEND_ACKNOWLEDGEMENT, N.LOG_PHI)
     g.add_edge(N.LOG_PHI, N.RESPOND)
+    g.add_edge(N.RECORD_SMS_CONSENT, N.RESPOND)
 
     # check_payer is an auxiliary node — wire it like the other actions so
     # planner-less callers (REST tool endpoints) can invoke a one-shot turn.

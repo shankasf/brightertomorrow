@@ -505,24 +505,11 @@ INTAKE_TOOLS = [
 CRISIS_TOOLS: list = []
 
 
-@function_tool
-def end_call(reason: str = "completed") -> dict[str, str]:
-    """Signal that the voice call is over and the WebSocket should close.
-
-    The voice.py session loop watches for this tool call in `RealtimeToolEnd`
-    and closes the browser/telephony WebSocket after a short grace period so
-    the goodbye audio finishes playing. `reason` is a free-text label for
-    logs only — e.g. 'completed', 'declined', 'transferred'.
-    """
-    with _log_call("end_call", reason=reason):
-        return {"status": "ended", "reason": reason}
-
-
-# Realtime-only end-of-call signal. Adding end_call here (not to the *_TOOLS
-# lists above) keeps the text-chat surface unchanged — text agents don't get
-# this tool, voice agents do. See feedback_sync_all_agents memory: this is a
-# deliberate divergence, not an oversight.
-VOICE_TOOLS = [end_call]
+# NOTE: the realtime end_call tool is defined once, lower in this module (the
+# version that signals end_call_event so the Twilio bridge actually hangs up).
+# An earlier duplicate stub + unused VOICE_TOOLS list lived here and only ever
+# captured the non-functional stub (last-def-wins meant `end_call` imports got
+# the real one anyway). Removed to kill the foot-gun.
 
 
 # ---------------------------------------------------------------------------
@@ -1462,6 +1449,36 @@ def book_appointment(
         staff_id, appointment_id,
     )
     return {"ok": True, "appointment_id": appointment_id, "next_step": next_step}
+
+
+@function_tool
+def record_sms_consent(opted_in: bool) -> dict[str, Any]:
+    """Record whether the caller consents to appointment reminders / practice
+    updates by SMS.  Must be called at most once per call, after booking is
+    confirmed, based on an explicit yes/no from the caller.
+
+    HIPAA note: the raw phone number is never logged here — only the boolean
+    consent value and the agent source are written to the logger.
+    """
+    phone = caller_phone.get()
+    if not phone:
+        return {"ok": False, "reason": "no_phone"}
+
+    try:
+        with _log_call("record_sms_consent", opted_in=opted_in,
+                       source=agent_source.get()):
+            gateway_post("/internal/sms/consent", {
+                "phone": phone,
+                "opted_in": opted_in,
+                "method": "voice",
+                "session_id": "",
+                "source": agent_source.get(),
+            })
+    except Exception as exc:
+        # Best-effort — never let a consent-write failure block the call flow.
+        logger.warning("record_sms_consent failed opted_in=%s error=%r", opted_in, exc)
+
+    return {"ok": True, "opted_in": opted_in}
 
 
 # ---------------------------------------------------------------------------

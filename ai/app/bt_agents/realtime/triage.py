@@ -44,6 +44,7 @@ from ...integrations.voice_tools import (
     list_team_members,
     lookup_appointment,
     propose_slots,
+    record_sms_consent,
     request_intake_callback,
     search_faqs,
     verify_coverage,
@@ -62,6 +63,8 @@ _AGENT_TOOLS = [
     check_insurance_support, list_payers, verify_coverage,
     # booking
     get_free_slots, propose_slots, book_appointment,
+    # post-booking consent
+    record_sms_consent,
     # cancel / reschedule
     lookup_appointment, cancel_appointment,
     # callback
@@ -207,10 +210,11 @@ def build_realtime_triage(caller_phone: str | None = None) -> RealtimeAgent:
             "book_appointment. When book_appointment returns ok you MUST first "
             "speak the `next_step` confirmation out loud as its own turn (the "
             "caller has to HEAR they're booked and that a confirmation email is "
-            "coming), then STOP and let the caller respond. Only on a later turn "
-            "— after a goodbye or 'nothing else' — do you give a farewell and "
-            "call end_call. Never emit book_appointment and end_call back to "
-            "back.\n\n"
+            "coming), then STOP and let the caller respond. On the next turn, "
+            "ask the SMS opt-in question ONCE (see STEP 6 Turn B). Only after "
+            "that exchange — and only after record_sms_consent has been called — "
+            "do you give a farewell and call end_call. Never emit book_appointment "
+            "and end_call back to back.\n\n"
 
             # --- PRIORITY 1: crisis ---
             "PRIORITY — SAFETY: on any EXPLICIT safety signal (suicide, "
@@ -361,17 +365,24 @@ def build_realtime_triage(caller_phone: str | None = None) -> RealtimeAgent:
             "13 args (staff_id, start_iso, end_iso, first_name, last_name, "
             "dob_yyyymmdd, phone, email, home_address, sex, reason, "
             "payer_name, member_id). On any 'no', fix only that group.\n"
-            "STEP 6 — On slot_taken, read alternatives and loop. On success, "
-            "your VERY NEXT action is a SPOKEN turn: speak the tool's `next_step` "
-            "warmly and IN FULL — when it says a confirmation email is on its "
-            "way, tell the caller that too. Never promise a text/SMS (only email "
-            "is sent). Mention copay if coverage showed one. This spoken "
-            "confirmation is MANDATORY and must NOT be skipped or merged into an "
-            "end_call turn — do NOT call end_call in the same response as "
-            "book_appointment. After the caller hears the confirmation and "
-            "signals they're done, offer 725-238-6990 and THEN, on a separate "
-            "turn, call end_call. If the caller backs out, give a brief warm "
-            "farewell then end_call.\n\n"
+            "STEP 6 — On slot_taken, read alternatives and loop. On success:\n"
+            "  Turn A (MANDATORY, SAME turn as book_appointment result): speak "
+            "the tool's `next_step` warmly and IN FULL — when it says a "
+            "confirmation email is on its way, tell the caller that too. Mention "
+            "copay if coverage showed one. This spoken confirmation must NOT be "
+            "skipped or merged into any other action. Do NOT call end_call here.\n"
+            "  Turn B (a LATER turn, after the caller has responded to Turn A): "
+            "ask ONCE, conversationally: 'Before we finish — would you like "
+            "appointment reminders and occasional practice updates by text at "
+            "this number? You can reply STOP anytime.' Then call "
+            "record_sms_consent(opted_in=True) on a yes / any affirmative, or "
+            "record_sms_consent(opted_in=False) on a no / any declination. Ask "
+            "this question AT MOST ONCE per call. Do NOT promise any specific "
+            "texts beyond what the question states.\n"
+            "  Turn C (only after record_sms_consent returns): give a brief warm "
+            "farewell, offer 725-238-6990, then on a final separate turn call "
+            "end_call. If the caller backs out before the SMS ask, give a brief "
+            "warm farewell then end_call (skip the SMS ask).\n\n"
 
             # --- Cancel / reschedule flow ---
             "CANCEL / RESCHEDULE — when the caller wants to cancel or move an "

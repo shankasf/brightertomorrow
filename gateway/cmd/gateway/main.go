@@ -199,6 +199,7 @@ func main() {
 		NotifyEnabled: cfg.AppointmentNotifyEnabled,
 	}
 	coverageInternalH := &handlers.CoverageInternalHandler{PHI: phiStore}
+	smsConsentInternalH := &handlers.SMSConsentInternalHandler{PHI: phiStore, InternalSecret: cfg.InternalAPISecret}
 	chatInternalH := &handlers.ChatInternalHandler{Pool: pool, PHI: phiStore}
 	internalEvalsH := &handlers.InternalEvalsHandler{PHI: phiStore, Pool: pool}
 	adminAgentAccuracyH := &handlers.AdminAgentAccuracyHandler{PHI: phiStore, AIServiceURL: cfg.AIServiceURL}
@@ -249,7 +250,7 @@ func main() {
 	// API v1.
 	r.Route("/v1", func(r chi.Router) {
 		r.Get("/faqs", (&handlers.FAQsHandler{Pool: pool}).ServeHTTP)
-		r.With(httprate.LimitByIP(10, time.Minute)).Post("/contact", (&handlers.ContactHandler{Pool: pool, Notify: notifyStore, NotifyEnabled: cfg.AppointmentNotifyEnabled}).ServeHTTP)
+		r.With(httprate.LimitByIP(10, time.Minute)).Post("/contact", (&handlers.ContactHandler{Pool: pool, PHI: phiStore, Notify: notifyStore, NotifyEnabled: cfg.AppointmentNotifyEnabled}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/intake", intakeH.ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/newsletter", (&handlers.NewsletterHandler{Pool: pool}).ServeHTTP)
 		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat", (&handlers.ChatHandler{Pool: pool, PHI: phiStore, AIClient: ai, CookieSecure: cfg.CookieSecure}).ServeHTTP)
@@ -287,6 +288,8 @@ func main() {
 		// bookings in /admin/insurance-checks. No cache, no reuse —
 		// CLAIM.MD is always re-hit; this is a pure history log.
 		r.Post("/coverage/record", coverageInternalH.Record)
+		// A2P SMS opt-in/opt-out captured by the AI chat/voice agent.
+		r.Post("/sms/consent", smsConsentInternalH.ServeHTTP)
 		// Chat-turn API used by the AI pod (voice + chat) so message bodies
 		// are written/read through the PHI store, never directly to Postgres.
 		r.Post("/chat/turn", chatInternalH.PutTurn)

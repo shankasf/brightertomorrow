@@ -42,6 +42,9 @@ type intakeRequest struct {
 	SubscriberName         string `json:"subscriber_name"`
 	SubscriberRelationship string `json:"subscriber_relationship"`
 	Notes                  string `json:"notes"`
+	// SMSOptIn is the optional, unchecked-by-default SMS consent checkbox on
+	// the booking form. When true we record an A2P consent row in DDB.
+	SMSOptIn bool `json:"sms_opt_in"`
 	// Source is only honoured on the internal endpoint; on the public
 	// endpoint it is derived from Flow.
 	Source string `json:"source,omitempty"`
@@ -69,6 +72,7 @@ type phiStorer interface {
 	PutInsuranceCheck(ctx context.Context, r phi.InsuranceCheckRecord) error
 	FindStandaloneCheckForReuse(ctx context.Context, emailHash, payerName string, within time.Duration) (*phi.InsuranceReuse, error)
 	LinkCheckToSubmission(ctx context.Context, checkUUID, oldEmailHash, submissionUUID, newEmailHash string) error
+	PutSMSConsent(ctx context.Context, in phi.SMSConsentInput) error
 }
 
 type CoverageChecker interface {
@@ -371,6 +375,17 @@ func (h *IntakeHandler) submit(ctx context.Context, body intakeRequest) (intakeR
 				"submission_uuid", submissionUUID,
 			)
 			return intakeResponse{}, http.StatusServiceUnavailable, fmt.Errorf("phi_store_unavailable")
+		}
+		// Best-effort A2P SMS consent — never fail the booking over it.
+		if body.SMSOptIn && strings.TrimSpace(body.Phone) != "" {
+			if err := h.PHI.PutSMSConsent(ctx, phi.SMSConsentInput{
+				Phone:   body.Phone,
+				OptedIn: true,
+				Method:  phi.SMSMethodWebBooking,
+				Source:  "web",
+			}); err != nil {
+				slog.Warn("intake: sms consent record failed", "err", err, "submission_uuid", submissionUUID)
+			}
 		}
 	}
 

@@ -1,0 +1,118 @@
+==============================================================================
+TWILIO A2P 10DLC — "Create new A2P Campaign" — Brighter Tomorrow Therapy (BT)
+==============================================================================
+Prepared: 2026-06-13
+Use case selected: Low Volume Mixed (supports transactional + marketing)
+Brand: My first Twilio account
+Domain: https://brightertomorrowtherapy.com
+Office phone (support / appears in messages): 725-238-6990
+
+Your decisions (driving the answers below):
+Opt-in methods supported: website checkbox + verbal on AI calls + text keyword + in-person/paper.
+Links in messages: NONE (text only — matches "no PHI link").
+Terms & Conditions URL: point to the existing Privacy Policy.
+Stated message frequency: the consent checkbox says "Message frequency varies" (no fixed number); the opt-in auto-reply optionally cites ~2/month.
+NO PHI in message bodies: brand name + appointment DATE/TIME only; no diagnosis, service type, clinical notes, or patient-portal links.
+
+------------------------------------------------------------------------------
+READ FIRST — MUST be true BEFORE you click Submit
+------------------------------------------------------------------------------
+The #1 cause of A2P rejection is the consent/opt-in section not matching a REAL, reviewable opt-in. The website checkbox is now live; finish the items below before submitting.
+1. The UNCHECKED SMS-consent checkbox is live on the website booking + contact forms (consent text is the "How do end-users consent" field below). Carriers may ask for a screenshot — the URL in the consent text must show that checkbox. Take a screenshot of https://brightertomorrowtherapy.com/contact before submitting.
+2. Configure the keyword opt-in + STOP/HELP auto-replies on the Messaging Service (Advanced Opt-Out, Console-only — no API). Replies are in the "Messaging Service auto-replies" section at the bottom. Twilio's default STOP/HELP is already compliant; this is branded polish.
+3. The website checkbox text explicitly says MARKETING text messages (not just appointment) — this campaign is Mixed and includes win-back marketing, so consent must cover marketing.
+
+==============================================================================
+FORM FIELDS — copy/paste answers (each value is a single line)
+==============================================================================
+
+------------------------------------------------------------------------------
+Messaging Service
+------------------------------------------------------------------------------
+Select "Create new Messaging Service" (auto-created with the campaign). You have no existing Messaging Service for this use case; add your 10DLC number(s) to it after the campaign is created.
+
+------------------------------------------------------------------------------
+Campaign description
+------------------------------------------------------------------------------
+Brighter Tomorrow Therapy, a licensed Nevada mental-health practice, sends SMS to existing and prospective clients who have opted in. Messages include appointment confirmations, reminders, and schedule changes (date and time only — no health information), plus occasional practice updates and win-back outreach to clients who have not visited recently. Recipients opt in via a consent checkbox on our website booking/contact form, verbally during a phone call with our staff or AI scheduling assistant, by texting a keyword to our number, or on an in-person intake form. Recipients can reply STOP to opt out or HELP for assistance at any time.
+
+------------------------------------------------------------------------------
+Sample message #1  (transactional — confirmation)
+------------------------------------------------------------------------------
+Brighter Tomorrow Therapy: Hi {FirstName}, your appointment is confirmed for {Date} at {Time} PT. To reschedule, call 725-238-6990. Reply STOP to opt out, HELP for help.
+
+------------------------------------------------------------------------------
+Sample message #2  (transactional — reminder)
+------------------------------------------------------------------------------
+Brighter Tomorrow Therapy: Reminder — you have an appointment on {Date} at {Time} PT. Questions or need to reschedule? Call 725-238-6990. Reply STOP to opt out, HELP for help.
+
+------------------------------------------------------------------------------
+Sample message #3  (transactional — schedule change)
+------------------------------------------------------------------------------
+Brighter Tomorrow Therapy: Your appointment has been updated to {Date} at {Time} PT. If this doesn't work, call 725-238-6990. Reply STOP to unsubscribe, HELP for help.
+
+------------------------------------------------------------------------------
+Sample message #4  (marketing — win-back / lapsed client)
+------------------------------------------------------------------------------
+Brighter Tomorrow Therapy: Hi {FirstName}, it's been a while since your last visit. We're here whenever you're ready — call 725-238-6990 to schedule. Msg frequency varies; msg & data rates may apply. Reply STOP to opt out, HELP for help.
+
+------------------------------------------------------------------------------
+Sample message #5  (marketing — general outreach)
+------------------------------------------------------------------------------
+Brighter Tomorrow Therapy: Your mental health matters. We have openings this month — call 725-238-6990 to book a session. Msg frequency varies; msg & data rates may apply. Reply STOP to opt out, HELP for help.
+
+------------------------------------------------------------------------------
+Message contents (checkboxes)
+------------------------------------------------------------------------------
+Messages will include embedded links: NO (text only).
+Messages will include phone numbers: YES (office 725-238-6990).
+Direct lending or other loan arrangement: NO.
+Age-gated content (Carrier/CTIA): NO.
+
+------------------------------------------------------------------------------
+How do end-users consent to receive messages?  (40–2048 chars) — CRITICAL FIELD
+------------------------------------------------------------------------------
+End users opt in to receive text messages from Brighter Tomorrow Therapy through any of these methods: (1) Website — while booking an appointment or submitting the contact form at https://brightertomorrowtherapy.com, the user enters their mobile number and checks an unchecked consent box that reads: "By checking this box, I agree to receive appointment reminders and marketing text messages from Brighter Tomorrow Therapy at the number provided. Consent is not a condition of service. Message frequency varies. Msg & data rates may apply. Reply STOP to cancel, HELP for help." (2) Verbally — during a phone call with our staff or AI scheduling assistant, the caller is read the same disclosure and verbally agrees; the consent is logged to their record. (3) By text — the user texts a keyword such as START, JOIN, or SUBSCRIBE to our practice number. (4) In person — on our paper intake form at the office. Mobile opt-in data and consent are never shared with third parties or sold. Opt-in and opt-out are also described in our privacy policy: https://brightertomorrowtherapy.com/privacy-policy.
+
+------------------------------------------------------------------------------
+Privacy Policy URL
+------------------------------------------------------------------------------
+https://brightertomorrowtherapy.com/privacy-policy
+Note: already includes "Text Messaging Consent and Opt-In," STOP opt-out instructions, "message & data rates may apply," "does not sell/rent/share," and the required line "Text messaging originator opt-in data and consent will never be shared with third parties." — carrier-ready.
+
+------------------------------------------------------------------------------
+Terms and Conditions URL
+------------------------------------------------------------------------------
+https://brightertomorrowtherapy.com/sms-terms
+Note: dedicated SMS Terms page — covers program name/description, message frequency, msg & data rates, support contact (725-238-6990), and bold STOP/HELP. Linked in the site footer as "SMS Terms."
+
+------------------------------------------------------------------------------
+Opt-in Keywords  (max 255 chars)
+------------------------------------------------------------------------------
+START, JOIN, SUBSCRIBE, YES
+
+------------------------------------------------------------------------------
+Opt-in Message  (20–320 chars) — auto-reply when a user texts a join keyword
+------------------------------------------------------------------------------
+Brighter Tomorrow Therapy: You're opted in to appointment & practice texts. Msg frequency varies; msg & data rates may apply. Reply HELP for help, STOP to opt out.
+
+==============================================================================
+MESSAGING SERVICE AUTO-REPLIES (not on this form — set under the Messaging Service "Advanced Opt-Out" in the Console once created; Twilio's defaults are already compliant)
+==============================================================================
+STOP reply (opt-out confirmation):
+Brighter Tomorrow Therapy: You're unsubscribed and will receive no more texts. Reply START to rejoin. For help, call 725-238-6990.
+
+HELP reply:
+Brighter Tomorrow Therapy: For help, call 725-238-6990 or visit brightertomorrowtherapy.com. Msg & data rates may apply. Reply STOP to opt out.
+
+==============================================================================
+COMPLIANCE NOTES
+==============================================================================
+HIPAA: appointment-reminder texts are permitted; we keep PHI out of the body (no diagnosis, service type, or portal links — only brand + date/time + office phone). The {FirstName} token is optional; drop it if you want zero identifiers.
+Marketing consent: because this is a Mixed campaign with win-back marketing, the website checkbox + verbal/keyword disclosures MUST mention marketing texts (the wording above does). Don't market to anyone who only consented to appointment reminders.
+No link shorteners (Bitly/TinyURL) — you chose no links, so nothing to do, but if links are ever added, use the full brightertomorrowtherapy.com domain.
+Frequency wording: the consent checkbox says "Message frequency varies" (no fixed count). If you state a number anywhere (e.g., the opt-in auto-reply), keep it realistic and non-contradictory.
+
+Sources (Twilio / carrier A2P guidance):
+https://help.twilio.com/articles/26149060902555
+https://www.twilio.com/en-us/blog/insights/best-practices/improving-your-chances-of-a2p10dlc-registration-approval

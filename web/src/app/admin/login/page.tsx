@@ -120,6 +120,16 @@ export default function AdminLoginPage() {
           setMfaQr(r.qr);
           setMfaSecret(r.secret);
           setStage('mfaSetup');
+        } else if (r.kind === 'mfa') {
+          // Admin already has a TOTP device enrolled — go straight to the code prompt.
+          setPending(r.user);
+          setStage('mfa');
+        } else if (r.kind === 'success') {
+          await finishWithSession(r.session.getIdToken().getJwtToken());
+        } else {
+          // newPassword again or any unexpected state — don't strand the user.
+          setError('Could not continue sign-in. Please sign in again.');
+          setStage('email');
         }
       } else {
         setError(msg);

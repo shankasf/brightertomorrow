@@ -228,7 +228,8 @@ def _realtime_instructions(channel: str) -> str:
 
 
 def _run_convo_offline_voice(
-    convo: Conversation, seq_start: int, channel: str, llm: Any, instructions: str
+    convo: Conversation, seq_start: int, channel: str, llm: Any, instructions: str,
+    rep: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
     """Text-simulate one voice/phone conversation; return (turn_dicts, next_seq)."""
     from langchain_core.messages import AIMessage, SystemMessage
@@ -266,7 +267,12 @@ def _run_convo_offline_voice(
 
         turns.append({
             "seq": seq,
-            "session_id": f"eval-{channel}-{convo.name}",
+            # Include the repetition index so each repeat is a distinct session.
+            # Without it, OFFLINE_EVAL_REPETITIONS>1 collapses every repeat into
+            # one session_id and aggregate() under-counts n_sessions, corrupting
+            # the per-session escalation/deflection/containment rates.
+            "session_id": f"eval-{channel}-{convo.name}-r{rep}",
+            "rep": rep,
             "convo_name": convo.name,
             "split": convo.split,
             "is_production": False,
@@ -342,7 +348,14 @@ async def run_offline(run_id: str | None = None, channel: str = "chat") -> dict[
                     failures += 1
                     continue
                 try:
-                    turns, seq = _run_convo_offline_voice(convo, seq, channel, llm, instructions)
+                    # Off-load to a thread: the voice sim makes blocking
+                    # llm.invoke + judge_turn HTTP calls per turn, and run_offline
+                    # runs as a background task on the FastAPI event loop. Calling
+                    # it inline would starve every in-flight chat/voice connection
+                    # for the duration of the eval run.
+                    turns, seq = await asyncio.to_thread(
+                        _run_convo_offline_voice, convo, seq, channel, llm, instructions, rep
+                    )
                     all_turns.extend(turns)
                 except Exception as exc:
                     logger.error(
