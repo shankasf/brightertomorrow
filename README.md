@@ -1,6 +1,11 @@
 # Brighter Tomorrow Therapy — Voice & Chat Agents
 
-The AI assistant behind **brightertomorrowtherapy.com**. One LangGraph agent serves three surfaces — text chat, browser voice, and Twilio phone — with HIPAA-safe persistence on AWS.
+The AI assistant behind **brightertomorrowtherapy.com**, serving three surfaces with HIPAA-safe persistence on AWS:
+
+- **Text chat** runs on a **LangGraph** agent (one compiled `StateGraph`).
+- **Browser voice** and **Twilio phone** run on the **OpenAI Realtime** speech-to-speech stack (`gpt-realtime-2`) — a self-contained realtime multi-agent pipeline that does **not** go through LangGraph.
+
+The two stacks are independent. They share business logic only through the same tool implementations (`integrations/voice_tools.py`), gateway PHI endpoints, and persona/scope constants — never through the graph.
 
 This README has two halves:
 
@@ -19,17 +24,22 @@ A patient lands on the website (or dials the clinic's phone number). The bot:
 4. Either books the appointment, files a callback, gives info — or hands off to a human.
 5. Records everything safely so a clinician or admin can pick up where the bot left off.
 
-The same "brain" runs whether the patient typed, spoke into the browser, or called the phone number. Only the audio/text plumbing differs.
+The patient gets the same persona, scope, and safety rules on every surface — but there are **two** runtimes under the hood. Typed chat runs on the LangGraph agent; spoken conversations (browser mic or phone) run on the OpenAI Realtime speech-to-speech stack.
 
 ```
-                ┌──────────────────────────────────┐
-                │   one AI brain (LangGraph app)   │
-                └─────────────┬────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ▼                     ▼                     ▼
-   Website chat          Browser voice         Phone call
-   (typed text)           (microphone)         (Twilio)
+   Website chat            Browser voice          Phone call
+   (typed text)             (microphone)           (Twilio)
+        │                        │                     │
+        ▼                        └──────────┬──────────┘
+  ┌─────────────┐                           ▼
+  │  LangGraph  │              ┌──────────────────────────────┐
+  │   agent     │              │  OpenAI Realtime stack        │
+  │ (graph/)    │              │  (gpt-realtime-2, speech-to-  │
+  └─────────────┘              │   speech; bt_agents/realtime, │
+                               │   voice.py / voice_hc /       │
+                               │   voice_rt / twilio_voice.py) │
+                               └──────────────────────────────┘
+        └──────── shared tools, PHI endpoints, persona ────────┘
 ```
 
 ## B. The patient journey, step by step
@@ -135,17 +145,17 @@ Three services run in the `bt` namespace of a k3d cluster behind a single Traefi
 |---|---|---|
 | `bt-web` | Next.js (App Router) | Marketing site + admin dashboard + ChatWidget |
 | `bt-gateway` | Go (chi) | Public ingress for `/v1/*`, Twilio webhook, internal `/internal/*` PHI API, admin endpoints |
-| `bt-ai` | Python (FastAPI) | LangGraph agent runtime + voice pipelines + canned-reply cache |
+| `bt-ai` | Python (FastAPI) | LangGraph agent (text chat) + OpenAI Realtime voice/phone stack + canned-reply cache |
 
 PHI never lives on Hostinger Postgres. Anything regulated (transcripts, intake details, eligibility responses, graph checkpoints, pending booking requests, admin/safety queue rows) is read from or written to AWS DynamoDB / Lambda via `bt-gateway` (SigV4-signed by `bt-ai` for direct PHI reads).
 
-The brain is one compiled LangGraph `StateGraph`. Every turn — chat, browser voice, or phone — runs one cycle through that same graph. The three transports differ only in how they get audio/text in and out.
+**Text chat** is one compiled LangGraph `StateGraph`; every typed turn runs one cycle through that graph (section 2). **Browser voice and phone** are a separate OpenAI Realtime speech-to-speech stack (section 2a) — the model handles turn-taking, transcription, and TTS natively, and calls the same tool implementations the graph's action nodes use. The two runtimes never call into each other.
 
 ---
 
-## 2. The agent runtime (LangGraph)
+## 2. The text-chat agent runtime (LangGraph)
 
-Everything in `ai/app/graph/`. There is one graph, one set of prompts, and one source of truth for state.
+This section is the **text-chat** runtime. Everything in `ai/app/graph/`. There is one graph, one set of prompts, and one source of truth for state. (Browser voice and phone do **not** use this — see section 2a.)
 
 ### Graph topology
 
@@ -220,23 +230,35 @@ Anti-loop guarantees: gate flags are monotonic, the planner enforces a hard `_MA
   - `scenes.py` holds `SCENE_INSTRUCTIONS` and `FIELD_PROMPTS`.
   - `extract.py` holds the extraction system prompt and the `TurnExtraction` Pydantic schema.
   - `_constants.py` holds the persona / scope / safety / voice-pacing constants reused across surfaces.
-- `graph/runtime/` — three transport adapters (next subsection).
+- `graph/runtime/chat.py` — the chat transport adapter: maps `POST /chat` and `/chat/stream` onto one graph cycle and emits the SSE wire format. (`graph/runtime/legacy_cascaded/` holds the **retired** Deepgram→LangGraph→Cartesia voice pipeline — kept for reference, not wired into prod.)
 - `graph/checkpointer.py` — `DynamoDBSaver` (table `bt-langgraph-checkpoints`, KMS-encrypted, TTL 24 h) with a `MemorySaver` fallback if AWS creds are missing.
 - `graph/tracing.py` — LangSmith project hookup.
 - `graph/config.py` — env-driven model selection and checkpointer selection.
-- `graph/evals/` — eval datasets and runners against LangSmith.
+- `graph/evals/` — eval datasets and runners.
 
-### Transport adapters
+---
 
-All three wrap the same compiled graph; they only translate audio/text and manage one WebSocket or SSE stream per session.
+## 2a. The voice & phone runtime (OpenAI Realtime)
 
-| Adapter | Surface | Audio format | Notes |
-|---|---|---|---|
-| `runtime/chat.py` | HTTP + SSE | n/a | Single `delta` chunk per turn (no token streaming yet — `respond` is one LLM call). |
-| `runtime/voice_browser.py` | WebSocket | PCM16 16 kHz | Driven by `voice_pipeline.py` (Deepgram STT → LangGraph → Cartesia TTS). |
-| `runtime/voice_twilio.py` | WebSocket | μ-law 8 kHz | Same pipeline, plus μ-law↔PCM16 conversion via `audioop`. Phone-keyed thread IDs (`twilio-<e164 digits>`) so a hangup-and-callback resumes mid-flow. |
+Browser voice and Twilio phone do **not** run the LangGraph. They run a self-contained OpenAI **Realtime** speech-to-speech stack — `gpt-realtime-2` does turn-taking (server VAD), transcription, and TTS natively, and calls tools directly. There is no `extract`/`planner`/`respond` cycle and no DynamoDB checkpointer; conversation state lives in the open Realtime session for the duration of the call.
 
-`voice_pipeline.py` is shared between the two voice transports — it owns the LiveKit STT/TTS plugin instances and the LangGraph invocation. We use the LiveKit Agents *plugins* standalone; we do not join LiveKit Rooms.
+**Where it lives (all outside `graph/`):**
+
+- `bt_agents/realtime/` — the realtime multi-agent definitions (`triage.py`, `config.py`) — the agents/handoffs the Realtime session runs.
+- `prompts.py` — the realtime persona/scope/safety prompts (kept in sync with the graph's `_constants.py` by hand).
+- `integrations/voice_tools.py` — the tool implementations the realtime agents call (`book_with_insurance`, `verify_insurance`, `request_intake_callback`, `record_sms_consent`, …). These are the **same business actions** the graph's `actions/` nodes perform, hitting the same gateway PHI endpoints.
+- `voice.py` — `run_voice_session(ws, session_id)`, the browser-mic entrypoint behind `/ws/voice`.
+- Phone bridge, selected at runtime by the **`VOICE_BRIDGE`** env var on `/twilio/media`:
+
+| `VOICE_BRIDGE` | Module | Notes |
+|---|---|---|
+| `hc` | `voice_hc/bridge.py` | **Current prod** — port of the healthcare_prior_auth bridge (VAD 0.75, `gpt-4o-mini-transcribe`). |
+| `raw_ws` | `voice_rt/twilio_bridge.py` | Raw OpenAI Realtime WS, explicit turn-taking (server_vad threshold 0.85). Rollback target. |
+| `sdk` | `twilio_voice.py` | OpenAI Agents SDK bridge (default if the var is unset). |
+
+Twilio frames are μ-law 8 kHz ↔ PCM16 24 kHz. The bridge is pre-warmed at pod startup (`main.py`) because importing the realtime stack cold costs ~4.5 s, which would otherwise hit the first caller after every restart.
+
+> Edit voice behavior in this stack only — **never** in `graph/` for a voice change. Conversely, prompt/tool changes that should affect both surfaces must be propagated to both `graph/` and the realtime stack by hand (grep before marking done).
 
 ### Models
 
@@ -262,23 +284,36 @@ ai/                 Python FastAPI service (the agent)
     integrations/      outbound clients
       aws_signer.py      SigV4 signed_post / signed_get / gateway_post
       tools.py           reused helpers (_fetch_free_slots, _validate_dob, ...)
+      voice_tools.py     tool impls the Realtime voice/phone agents call
     ingestion/         one-shot data loads (run as k8s Jobs)
     caching/           process-local canned-reply cache (hours/locations)
     data/              static reference data (payers, roster)
-    graph/             LangGraph runtime (see section 2)
+
+    # --- TEXT CHAT: LangGraph runtime (section 2) ---
+    graph/             LangGraph runtime
       graph.py, state.py, checkpointer.py, tracing.py, config.py, api.py
       nodes/
         safety_screen.py, extract.py, planner.py, respond.py, rollback.py
-        actions/         insurance, booking, coverage, notify, _legacy
+        actions/         insurance, booking, coverage, notify,
+                         sms_consent, _legacy
         gates/           disclosure, nv_presence, caller_relationship,
                          returning_verify, resume_offer
         handoffs/        crisis, out_of_state, roi_required,
                          mandatory_report, admin_with_note,
                          admin_verification, admin_callback
       prompts/           persona, scenes, extract, _constants
-      runtime/           chat, voice_browser, voice_twilio, voice_pipeline
-      evals/             LangSmith datasets + runners
+      runtime/           chat (the live SSE chat adapter)
+        legacy_cascaded/ retired Deepgram→graph→Cartesia voice (not in prod)
+      evals/             eval datasets + runners
       tests/             pytest smoke + regression tests
+
+    # --- VOICE & PHONE: OpenAI Realtime stack (section 2a) ---
+    bt_agents/realtime/  realtime multi-agent defs (triage.py, config.py)
+    prompts.py           realtime persona/scope/safety prompts
+    voice.py             run_voice_session — browser-mic entrypoint (/ws/voice)
+    voice_hc/            prod phone bridge (VOICE_BRIDGE=hc)
+    voice_rt/            raw-WS phone bridge (VOICE_BRIDGE=raw_ws)
+    twilio_voice.py      Agents-SDK phone bridge (VOICE_BRIDGE=sdk)
 
 gateway/            Go service (chi router)
   cmd/gateway/main.go    routes + wiring
@@ -362,16 +397,16 @@ scripts/            twilio_provision.sh + DDB migration scripts
 
 1. `getUserMedia` (24 kHz mono) in the widget → WebSocket to `GW /v1/voice?session_id=...`.
 2. Gateway IDOR-checks, ensures a `chat_sessions` row exists with `source='voice-agent'`, and proxies the WS to `bt-ai /ws/voice`.
-3. `bt-ai` accepts the WS, then delegates to `graph/runtime/voice_browser.py`.
-4. The pipeline streams PCM16 into Deepgram STT. On each finalised user transcript it invokes the LangGraph; the resulting `last_reply_text` is streamed into Cartesia TTS and pushed back as base64 PCM16 deltas.
-5. Tool calls (book, callback, verify) happen inside the LangGraph and persist as turns in DDB via the gateway.
+3. `bt-ai` accepts the WS and delegates to `voice.py:run_voice_session` — the OpenAI **Realtime** speech-to-speech stack (`gpt-realtime-2`). This is **not** the LangGraph.
+4. The Realtime session handles VAD turn-taking, transcription, and TTS natively; audio streams bidirectionally between the caller and OpenAI (US-pinned `wss://us.api.openai.com/v1/realtime`).
+5. Tool calls (book, verify, callback, SMS consent) are the realtime agents calling `integrations/voice_tools.py`, which hit the same gateway PHI endpoints the graph's action nodes use; turns persist to DDB via the gateway with `agent_source='voice-agent'`.
 
 ### Twilio phone
 
 1. PSTN call hits Twilio → `POST /v1/twilio/voice` on the gateway.
 2. Gateway verifies `X-Twilio-Signature` (HMAC-SHA1 of URL + sorted form params), mints a UUID session, inserts a non-PHI `chat_sessions` row with `source='voice-phone'` and `external_ref=CallSid`, then returns TwiML: `<Connect><Stream url="wss://.../v1/twilio/media"><Parameter session_id|call_sid|caller_phone />`.
 3. Twilio opens the Media Stream WS. Gateway re-verifies the signature on the upgrade URL, upgrades with `Sec-WebSocket-Protocol: audio.twilio.com`, and proxies bytes verbatim to `bt-ai`.
-4. `bt-ai /twilio/media` is handled by `graph/runtime/voice_twilio.py`. μ-law 8 kHz frames are converted to PCM16 16 kHz, pushed through the same `VoicePipeline`, and the synthesised reply is converted back to μ-law for Twilio. Phone callers get a stable thread ID (`twilio-<e164 digits>`), so a hangup-and-callback within the checkpointer TTL resumes mid-conversation.
+4. `bt-ai /twilio/media` hands the accepted WS to `run_twilio_session`, the OpenAI **Realtime** bridge selected by `VOICE_BRIDGE` (`hc` in prod → `voice_hc/bridge.py`; `raw_ws`/`sdk` are rollback paths). Again, **not** the LangGraph. μ-law 8 kHz frames are converted to/from PCM16 24 kHz around the Realtime session, which owns turn-taking and TTS. Tools persist via the gateway with `agent_source='voice-phone'`.
 
 ---
 
@@ -423,7 +458,7 @@ Lambda + API Gateway: eligibility (`/internal/insurance/verify` → CLAIM.MD), p
 - A visible "Start fresh" button lets the visitor clear the saved session on demand.
 - Visitors see a brief HIPAA notice before they start chatting.
 
-Because the session ID is the LangGraph `thread_id`, a refresh mid-booking resumes from the DDB checkpoint with all collected fields intact.
+For **chat**, the session ID is the LangGraph `thread_id`, so a refresh mid-booking resumes from the DDB checkpoint with all collected fields intact. **Voice** uses the OpenAI Realtime stack, which holds conversation state in the open session rather than a DDB checkpoint — closing the tab ends that state; the short 30-min cap on `bt_voice_session` is mainly a shared-device PHI guard.
 
 ---
 
@@ -436,9 +471,9 @@ Because the session ID is the LangGraph `thread_id`, a refresh mid-booking resum
 | GET | `/health` | Liveness check |
 | POST | `/chat` | Single-shot LangGraph turn |
 | POST | `/chat/stream` | SSE: `session` → one `delta` → `done` |
-| WS | `/ws/voice` | Browser voice (PCM16 16 kHz) |
+| WS | `/ws/voice` | Browser voice — OpenAI Realtime (PCM16 24 kHz) |
 | POST | `/twilio/voice` | TwiML that opens the Media Stream |
-| WS | `/twilio/media` | Twilio Media Stream (μ-law 8 kHz, subprotocol `audio.twilio.com`) |
+| WS | `/twilio/media` | Twilio Media Stream → OpenAI Realtime (μ-law 8 kHz, subprotocol `audio.twilio.com`; bridge per `VOICE_BRIDGE`) |
 | POST | `/internal/intake/check-coverage` | Direct eligibility check (admin) |
 | POST | `/internal/embed-faqs` | Re-embed published FAQs (admin trigger) |
 | GET | `/internal/cache/stats` | Canned-reply cache snapshot |
