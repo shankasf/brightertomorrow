@@ -151,6 +151,95 @@ PHI never lives on Hostinger Postgres. Anything regulated (transcripts, intake d
 
 **Text chat** is one compiled LangGraph `StateGraph`; every typed turn runs one cycle through that graph (section 2). **Browser voice and phone** are a separate OpenAI Realtime speech-to-speech stack (section 2a) — the model handles turn-taking, transcription, and TTS natively, and calls the same tool implementations the graph's action nodes use. The two runtimes never call into each other.
 
+### Infrastructure & HIPAA boundary (traffic → services → AWS)
+
+The diagram below shows how traffic enters, which compute serves it, and how the **HIPAA boundary** is drawn: the Hostinger VPS holds **no PHI**, and every regulated read/write crosses into AWS, where it lands in **CMK-encrypted** stores (KMS `alias/bt-phi`) behind authenticated, audited endpoints. OpenAI is covered by a signed BAA, so PHI may be sent to it.
+
+```mermaid
+flowchart TD
+    %% ───── Traffic sources ─────
+    subgraph CLIENT["🌐 Inbound traffic (patients & admins)"]
+        WEB["Website chat<br/>(typed text)"]
+        MIC["Browser voice<br/>(microphone)"]
+        PHONE["Phone call"]
+        ADMIN["Clinic admin<br/>(dashboard)"]
+    end
+
+    TWILIO["Twilio<br/>(programmable voice + A2P SMS)"]
+    DNS["Squarespace DNS<br/>brightertomorrowtherapy.com"]
+
+    WEB --> DNS
+    MIC --> DNS
+    ADMIN --> DNS
+    PHONE --> TWILIO
+
+    %% ───── Hostinger edge: NO PHI at rest ─────
+    subgraph HOST["🖥️ Hostinger VPS — k3s cluster (bt namespace) · NON-PHI compute only"]
+        TRAEFIK["Traefik ingress<br/>TLS: cert-manager / bt-com-tls"]
+        BWEB["bt-web<br/>Next.js (site + admin SPA + ChatWidget)"]
+        BGW["bt-gateway<br/>Go · /v1 public · /internal PHI API · Twilio webhook"]
+        BAI["bt-ai<br/>FastAPI · LangGraph (chat) + OpenAI Realtime (voice/phone)"]
+        VECTOR["Vector DaemonSet<br/>(log shipper)"]
+    end
+
+    DNS --> TRAEFIK
+    TWILIO -->|"signed webhook (TLS)"| TRAEFIK
+    TRAEFIK --> BWEB
+    TRAEFIK --> BGW
+    BWEB -->|"/v1/* chat, coverage, booking"| BGW
+    BGW --> BAI
+    BAI -->|"BAA-covered: PHI OK<br/>gpt-realtime-2 · gpt-5.5 · embeddings"| OPENAI["OpenAI<br/>(Realtime + chat, US data residency)"]
+
+    %% ───── HIPAA boundary crossing ─────
+    BGW -.->|"SigV4-signed · TLS<br/>⟪ PHI crosses here ⟫"| AWS
+    BAI -.->|"SigV4 direct PHI reads"| AWS
+
+    %% ───── AWS HIPAA stack (acct 502263855065 / us-east-1) ─────
+    subgraph AWS["☁️ AWS — HIPAA stack (us-east-1) · all PHI lives here"]
+        APIGW["API Gateway (api.*)<br/>authZ: Cognito JWT / IAM SigV4"]
+        LAMBDA["Lambda (Python 3.12)<br/>PHI handlers · X-Ray traced"]
+        COGNITO["Cognito (admin pool)<br/>MFA required · advanced security"]
+        SES["SES<br/>patient + admin email"]
+
+        subgraph DATA["🔐 Encrypted at rest — KMS CMK alias/bt-phi"]
+            DDB[("DynamoDB<br/>PHI tables + GSIs<br/>phone stored as SHA-256 hash in keys")]
+            S3LOG[("S3 log lake<br/>Parquet, SSE-KMS")]
+            SM["Secrets Manager<br/>OpenAI / Jane / CLAIM.MD"]
+            AUDIT[("PHI audit trail<br/>ENTITY#AUDIT_PHI · 7-yr retention")]
+        end
+
+        ATHENA["Glue + Athena<br/>/admin/logs search (superadmin)"]
+    end
+
+    ADMIN -->|"login (MFA)"| COGNITO
+    APIGW --> LAMBDA
+    LAMBDA --> DDB
+    LAMBDA --> AUDIT
+    LAMBDA --> SES
+    LAMBDA --> SM
+    COGNITO --> APIGW
+    VECTOR -.->|"app logs (scrubbed)"| S3LOG
+    S3LOG --> ATHENA
+
+    %% ───── styling ─────
+    classDef phi fill:#fde2e2,stroke:#c0392b,stroke-width:2px,color:#000;
+    classDef nonphi fill:#e8f5e9,stroke:#2e7d32,color:#000;
+    classDef edge fill:#fff4e0,stroke:#e08600,color:#000;
+    classDef ext fill:#e3eefc,stroke:#2761c3,color:#000;
+    class DDB,S3LOG,SM,AUDIT,DATA phi;
+    class BWEB,BGW,BAI,TRAEFIK,VECTOR,HOST nonphi;
+    class APIGW,LAMBDA,COGNITO,SES,ATHENA edge;
+    class OPENAI,TWILIO,DNS ext;
+```
+
+**Why this is HIPAA-compliant by construction:**
+
+- **No PHI on Hostinger.** The k3s compute layer is stateless for regulated data — transcripts, intake, eligibility, checkpoints, and queues are only ever read/written across the boundary into AWS.
+- **Encryption at rest (§164.312(a)(2)(iv)).** Every PHI store (DynamoDB, S3 log lake, Secrets Manager) uses the customer-managed KMS key `alias/bt-phi` with rotation enabled; TLS in transit everywhere.
+- **Minimum necessary in keys.** DDB GSI keys carry only a SHA-256 hash of the phone number; raw identifiers live in the encrypted item body, never in an index key.
+- **Access control & audit (§164.312(b),(d)).** Admin access is Cognito-gated with MFA; API Gateway authorizes via Cognito JWT or IAM SigV4; every PHI mutation writes a 7-year-retention audit row, and admin log queries are themselves audited.
+- **BAAs in place.** OpenAI (signed BAA, US data residency) and AWS — the only two processors that touch PHI.
+
 ---
 
 ## 2. The text-chat agent runtime (LangGraph)
