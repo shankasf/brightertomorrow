@@ -26,27 +26,25 @@ type Payer = {
 const PAYERS: Payer[] = [
   { id: "aetna", name: "Aetna" },
   { id: "uhc", name: "UnitedHealthcare" },
+  { id: "umr", name: "UMR" },
   { id: "cigna", name: "Cigna" },
   { id: "anthem", name: "Anthem" },
   { id: "bcbs", name: "Blue Cross Blue Shield" },
   { id: "humana", name: "Humana" },
-  { id: "kaiser", name: "Kaiser Permanente" },
   { id: "medicare", name: "Medicare" },
   { id: "tricare", name: "Tricare" },
-  { id: "molina", name: "Molina Healthcare" },
-  { id: "oscar", name: "Oscar Health" },
   { id: "ambetter", name: "Ambetter" },
   { id: "self-pay", name: "Self-pay / Out-of-network", special: "self-pay" },
   { id: "other", name: "Other / not listed", special: "other" },
 ];
 
-type CoverageStatus = "eligible" | "needs_review" | "ineligible" | "verification_error";
-
 type CheckResponse = {
   ok: boolean;
   check_uuid: string;
   eligible: boolean;
-  coverage_status: CoverageStatus;
+  // Raw payer status passed through from CLAIM.MD (e.g. "active") — NOT an enum.
+  // Only "verification_error" is set by the gateway. Use `eligible` for state.
+  coverage_status: string;
   payer: string;
   plan?: string | null;
   copay?: string | null;
@@ -581,10 +579,11 @@ function ResultPanel({
   data: CheckResponse;
   onClose: () => void;
 }) {
-  const status = data.coverage_status;
-  const isEligible = status === "eligible";
-  const isError = status === "verification_error";
-  const isNeedsReview = status === "needs_review" || status === "ineligible";
+  const isError = data.coverage_status === "verification_error";
+  // Trust the authoritative `eligible` boolean — coverage_status is the raw
+  // payer status ("active", "in force", …), none of which equal "eligible".
+  const isEligible = !isError && data.eligible === true;
+  const isNeedsReview = !isEligible && !isError;
 
   const badgeLabel = isEligible
     ? "In-network — coverage confirmed"

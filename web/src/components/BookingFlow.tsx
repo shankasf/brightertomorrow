@@ -33,15 +33,13 @@ type Payer = { id: string; name: string };
 const PAYERS: Payer[] = [
   { id: "aetna", name: "Aetna" },
   { id: "uhc", name: "UnitedHealthcare" },
+  { id: "umr", name: "UMR" },
   { id: "cigna", name: "Cigna" },
   { id: "anthem", name: "Anthem" },
   { id: "bcbs", name: "Blue Cross Blue Shield" },
   { id: "humana", name: "Humana" },
-  { id: "kaiser", name: "Kaiser Permanente" },
   { id: "medicare", name: "Medicare" },
   { id: "tricare", name: "Tricare" },
-  { id: "molina", name: "Molina Healthcare" },
-  { id: "oscar", name: "Oscar Health" },
   { id: "ambetter", name: "Ambetter" },
 ];
 
@@ -117,8 +115,10 @@ type FormState = {
   subscriberRelationship: string;
   // Optional notes
   notes: string;
-  // SMS reminders opt-in (optional, unchecked by default)
+  // SMS opt-ins (optional, unchecked by default). Appointment and marketing
+  // consent are collected separately per A2P/10DLC requirements.
   smsConsent: boolean;
+  smsMarketingConsent: boolean;
 };
 
 const EMPTY_FORM: FormState = {
@@ -139,6 +139,7 @@ const EMPTY_FORM: FormState = {
   subscriberRelationship: "",
   notes: "",
   smsConsent: false,
+  smsMarketingConsent: false,
 };
 
 // =====================================================================
@@ -302,6 +303,7 @@ export default function BookingFlow() {
           : {}),
         notes: buildNotes(form),
         sms_opt_in: form.smsConsent,
+        sms_marketing_opt_in: form.smsMarketingConsent,
       };
       const r = await fetch("/v1/intake", {
         method: "POST",
@@ -1027,10 +1029,25 @@ function ConfirmStep({
           className="mt-0.5 h-4 w-4 shrink-0 accent-[#E1B878]"
         />
         <span className="text-[12px] text-ink-soft leading-relaxed">
-          By checking this box, I agree to receive appointment reminders and marketing text
-          messages from Brighter Tomorrow Therapy at the number provided. Consent is not a
-          condition of service. Message frequency varies. Msg &amp; data rates may apply.
-          Reply STOP to cancel, HELP for help.
+          I agree to receive appointment reminders, confirmations, and schedule changes from
+          Brighter Tomorrow Therapy at the number provided. Message frequency varies. Msg &amp;
+          data rates may apply. Reply STOP to cancel, HELP for help.
+        </span>
+      </label>
+
+      <label htmlFor="bf-sms-marketing-consent" className="mt-4 flex items-start gap-3 cursor-pointer">
+        <input
+          id="bf-sms-marketing-consent"
+          type="checkbox"
+          checked={form.smsMarketingConsent}
+          onChange={(e) => update("smsMarketingConsent", e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[#E1B878]"
+        />
+        <span className="text-[12px] text-ink-soft leading-relaxed">
+          I separately agree to receive marketing and practice-update text messages from
+          Brighter Tomorrow Therapy at the number provided. This is optional and not a condition
+          of service. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to
+          cancel, HELP for help.
         </span>
       </label>
     </div>
