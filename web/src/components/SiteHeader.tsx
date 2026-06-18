@@ -195,18 +195,17 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
             ))}
           </nav>
 
-          {/* Wine "Get Scheduled" CTA — matches live red/burgundy button */}
+          {/* Wine "Get Scheduled" CTA — opens the insurance-verification flow,
+              which then hands off to Jane's "Select a Location" booking page. */}
           <div className="hidden lg:flex items-center shrink-0">
-            <a
-              href="https://brightertomorrow.janeapp.com/"
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              href="/get-scheduled"
               className="group inline-flex items-center gap-2 text-white text-[12px] font-semibold uppercase tracking-[0.14em] px-5 py-3 hover:opacity-90 transition"
               style={{ backgroundColor: "#66202A", borderRadius: "20px 0 20px 20px" }}
             >
               Get Scheduled
               <FiArrowRight className="transition-transform duration-300 group-hover:translate-x-0.5" size={13} />
-            </a>
+            </Link>
           </div>
 
           <button
@@ -259,16 +258,14 @@ export default function SiteHeader({ settings, nav }: { settings: SiteSettings; 
               </div>
 
               <div className="px-4 pb-5 pt-4 border-t border-surface-line space-y-2.5 shrink-0 bg-cream-alt/40">
-                <a
-                  href="https://brightertomorrow.janeapp.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <Link
+                  href="/get-scheduled"
                   className="w-full inline-flex justify-center items-center gap-2 text-white font-semibold uppercase tracking-[0.14em] text-[13px] px-4 py-3.5 transition"
                   style={{ backgroundColor: "#66202A", borderRadius: "20px 0 20px 20px" }}
                   onClick={() => setMobileOpen(false)}
                 >
                   Get Scheduled <FiArrowRight size={14} />
-                </a>
+                </Link>
                 <a
                   href={`tel:${AI_PHONE_TEL}`}
                   aria-label={`Call our AI booking assistant at ${AI_PHONE_DISPLAY}, available 24/7`}
