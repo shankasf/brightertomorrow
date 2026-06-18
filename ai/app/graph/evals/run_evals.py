@@ -29,7 +29,7 @@ from uuid import uuid4
 
 from langchain_core.messages import HumanMessage
 
-from ..config import gateway_base_url, text_model_name
+from ..config import eval_max_usd, gateway_base_url, text_model_name
 from ..graph import get_app
 from ..state import initial_state
 from ..tracing import configure_tracing
@@ -40,6 +40,93 @@ from .gateway_client import list_recent_sessions, get_session_turns, post_run
 from .judge import judge_turn, JudgeResult
 from .judge_calibration import run_calibration
 from .metrics import aggregate
+
+# ---------------------------------------------------------------------------
+# Per-turn cost estimates — kept in sync with infra/lambdas/cost_digest/handler.py.
+# Those are the single source of truth; these constants mirror them exactly.
+# ---------------------------------------------------------------------------
+_OFFLINE_USD_PER_TURN: float = 0.048
+_ONLINE_USD_PER_TURN: float = 0.008
+
+
+class _CostAccumulator:
+    """Track estimated judge LLM spend for one eval run and gate new calls.
+
+    Deterministic (non-LLM) checks are NEVER gated — only ``judge_turn``
+    invocations go through ``allow()``.
+
+    The accumulator is NOT thread-safe; each run_offline / run_online call
+    owns its own instance and never shares it across concurrent tasks.
+    """
+
+    def __init__(self, max_usd: float, usd_per_turn: float) -> None:
+        self._max = max_usd
+        self._per_turn = usd_per_turn
+        self._accumulated: float = 0.0
+        self._judged: int = 0
+        self._skipped: int = 0
+        self._capped: bool = False
+
+    # ---- public interface ----
+
+    @property
+    def accumulated_usd(self) -> float:
+        return self._accumulated
+
+    @property
+    def cost_capped(self) -> bool:
+        return self._capped
+
+    @property
+    def turns_judged(self) -> int:
+        return self._judged
+
+    @property
+    def turns_skipped(self) -> int:
+        return self._skipped
+
+    def allow(self) -> bool:
+        """Return True if the next judge call is within budget; False to skip it.
+
+        When the next call would push the estimate over the cap the accumulator
+        flips ``cost_capped`` and emits a WARNING exactly once.
+        """
+        if self._capped:
+            self._skipped += 1
+            return False
+        projected = self._accumulated + self._per_turn
+        if projected > self._max:
+            self._capped = True
+            self._skipped += 1
+            logger.warning(
+                "eval_cost_cap_hit usd=%.4f max=%.2f turns_judged=%d turns_skipped=%d",
+                self._accumulated,
+                self._max,
+                self._judged,
+                self._skipped,
+            )
+            return False
+        return True
+
+    def record(self) -> None:
+        """Record a completed judge call (call AFTER allow() returned True)."""
+        self._accumulated += self._per_turn
+        self._judged += 1
+
+    def skip(self) -> None:
+        """Record a skipped judge call (called when allow() returned False)."""
+        self._skipped += 1
+
+    def null_judge(self) -> JudgeResult:
+        """Return a neutral placeholder used when a turn's judge call is skipped."""
+        return JudgeResult(
+            faithfulness=3,
+            relevancy=3,
+            tone=3,
+            topic_adherence=True,
+            task_completion=False,
+            rationale="JUDGE_SKIPPED — cost cap reached; scores are not real assessments.",
+        )
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +198,8 @@ def _channel_to_source(channel: str) -> str:
 # ---------------------------------------------------------------------------
 
 async def _run_convo_offline(
-    app: Any, convo: Conversation, seq_start: int, rep: int = 0
+    app: Any, convo: Conversation, seq_start: int, rep: int = 0,
+    cost: "_CostAccumulator | None" = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Run one golden conversation once; return (turn_dicts, next_seq).
 
@@ -157,7 +245,12 @@ async def _run_convo_offline(
         det_all_pass = all(s.passed for s in det_scores)
 
         ctx = _context_snippet(result)
-        judge_result = judge_turn(turn.user_says, reply, context=ctx)
+        if cost is not None and not cost.allow():
+            judge_result = cost.null_judge()
+        else:
+            judge_result = judge_turn(turn.user_says, reply, context=ctx)
+            if cost is not None:
+                cost.record()
 
         turns.append({
             "seq": seq,
@@ -230,6 +323,7 @@ def _realtime_instructions(channel: str) -> str:
 def _run_convo_offline_voice(
     convo: Conversation, seq_start: int, channel: str, llm: Any, instructions: str,
     rep: int = 0,
+    cost: "_CostAccumulator | None" = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Text-simulate one voice/phone conversation; return (turn_dicts, next_seq)."""
     from langchain_core.messages import AIMessage, SystemMessage
@@ -260,10 +354,15 @@ def _run_convo_offline_voice(
         det_scores.append(clinical_advice_guard(reply))
         det_all_pass = all(s.passed for s in det_scores)
 
-        judge_result = judge_turn(
-            turn.user_says, reply,
-            context=f"channel={channel} (text-simulated realtime voice agent)",
-        )
+        if cost is not None and not cost.allow():
+            judge_result = cost.null_judge()
+        else:
+            judge_result = judge_turn(
+                turn.user_says, reply,
+                context=f"channel={channel} (text-simulated realtime voice agent)",
+            )
+            if cost is not None:
+                cost.record()
 
         turns.append({
             "seq": seq,
@@ -311,6 +410,11 @@ async def run_offline(run_id: str | None = None, channel: str = "chat") -> dict[
     seq = 0
     failures = 0
 
+    # Hard cost cap: accumulate estimated judge spend per turn; stop making
+    # judge LLM calls once the run would exceed EVAL_MAX_USD. Deterministic
+    # checks still run on every turn regardless of the cap state.
+    cost = _CostAccumulator(max_usd=eval_max_usd(), usd_per_turn=_OFFLINE_USD_PER_TURN)
+
     # LangSmith num_repetitions pattern: run the whole golden set R times and
     # aggregate across all repeats so per-metric means (esp. tone/judge scores)
     # are stable instead of single-shot noise. Default 1; override with
@@ -326,7 +430,7 @@ async def run_offline(run_id: str | None = None, channel: str = "chat") -> dict[
         for rep in range(repetitions):
             for convo in convos:
                 try:
-                    turns, seq = await _run_convo_offline(app, convo, seq, rep=rep)
+                    turns, seq = await _run_convo_offline(app, convo, seq, rep=rep, cost=cost)
                     all_turns.extend(turns)
                 except Exception as exc:
                     logger.error(
@@ -354,7 +458,8 @@ async def run_offline(run_id: str | None = None, channel: str = "chat") -> dict[
                     # it inline would starve every in-flight chat/voice connection
                     # for the duration of the eval run.
                     turns, seq = await asyncio.to_thread(
-                        _run_convo_offline_voice, convo, seq, channel, llm, instructions, rep
+                        _run_convo_offline_voice, convo, seq, channel, llm, instructions, rep,
+                        cost,
                     )
                     all_turns.extend(turns)
                 except Exception as exc:
@@ -399,6 +504,8 @@ async def run_offline(run_id: str | None = None, channel: str = "chat") -> dict[
         "breakdowns": breakdowns,
         "regression": regression,
         "turns": all_turns,
+        "estimated_usd": round(cost.accumulated_usd, 6),
+        "cost_capped": cost.cost_capped,
     }
 
     # POST to gateway — warn but never crash
@@ -468,6 +575,9 @@ async def run_online(
     all_turns: list[dict[str, Any]] = []
     seq = 0
 
+    # Hard cost cap for online runs (judge only; deterministic checks always run).
+    cost = _CostAccumulator(max_usd=eval_max_usd(), usd_per_turn=_ONLINE_USD_PER_TURN)
+
     for session_meta in sessions:
         sid = session_meta.get("session_id") or ""
         if not sid:
@@ -484,13 +594,19 @@ async def run_online(
             if role in ("user", "human"):
                 prior_user = content
             elif role in ("assistant", "ai") and prior_user:
-                # Judge this assistant turn. Production transcript = PHI —
-                # stays on OpenAI (the only BAA-covered provider).
-                judge_result = judge_turn(
-                    prior_user, content, context=f"session={sid}", for_production=True
-                )
+                # Deterministic safety guards always run, regardless of cost cap.
                 phi_score = phi_leak_guard(content)
                 clinical_score = clinical_advice_guard(content)
+
+                # Judge this assistant turn only if under cost cap.
+                # Production transcript = PHI — stays on OpenAI (only BAA provider).
+                if cost.allow():
+                    judge_result = judge_turn(
+                        prior_user, content, context=f"session={sid}", for_production=True
+                    )
+                    cost.record()
+                else:
+                    judge_result = cost.null_judge()
 
                 all_turns.append({
                     "seq": seq,
@@ -529,6 +645,8 @@ async def run_online(
         "metric_counts": agg.get("counts_by_metric", {}),
         "breakdowns": agg["breakdowns"],
         "turns": all_turns,
+        "estimated_usd": round(cost.accumulated_usd, 6),
+        "cost_capped": cost.cost_capped,
     }
 
     try:

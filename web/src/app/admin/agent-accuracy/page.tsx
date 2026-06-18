@@ -8,6 +8,8 @@ import {
   ErrorBanner,
   Button,
   Pill,
+  Input,
+  Textarea,
   EmptyState,
   LoadingScreen,
   staggerContainer,
@@ -99,6 +101,19 @@ type RunSummary = {
   };
 };
 
+// A human reviewer's verdict on the AI judge's scoring of a single turn.
+// ADDITIVE (optional — turns without a label have never been reviewed).
+type HumanLabel = {
+  verdict: 'agree' | 'disagree';
+  corrected_intent?: string;
+  corrected_task_completion?: boolean;
+  corrected_topic_adherence?: boolean;
+  note?: string;
+  // Optional metadata the gateway may echo back; purely informational.
+  labeled_by?: string;
+  labeled_at?: string;
+};
+
 type TurnDetail = {
   seq: number;
   session_id: string;
@@ -122,9 +137,19 @@ type TurnDetail = {
     rationale: string;
   };
   latency_ms: number;
+  // ADDITIVE (optional). The current human verdict on this turn's judge scoring.
+  human_label?: HumanLabel | null;
 };
 
-type SummaryResp = { latest: RunSummary | null; trend: RunSummary[] };
+type SummaryResp = {
+  latest: RunSummary | null;
+  trend: RunSummary[];
+  // ADDITIVE (all optional). Human-in-the-loop QA stats. Tiles hide when absent.
+  judge_human_kappa?: number | null;
+  judge_human_labeled_count?: number | null;
+  escalation_false_positive_rate?: number | null;
+  escalation_reviewed_count?: number | null;
+};
 type RunDetailResp = { run: RunSummary; turns: TurnDetail[] };
 
 // Brand palette (mirrors dashboard).
@@ -699,7 +724,9 @@ export default function AgentAccuracyPage() {
         <>
           <TabBar tab={tab} setTab={setTab} />
 
-          {tab === 'overview' && <OverviewTab latest={latest} chrono={chrono} channel={channel} />}
+          {tab === 'overview' && (
+            <OverviewTab latest={latest} chrono={chrono} channel={channel} summary={summary} />
+          )}
           {tab === 'breakdowns' && <BreakdownsTab latest={latest} channel={channel} />}
           {tab === 'datasets' && <DatasetsTab trend={summary?.trend ?? []} />}
           {tab === 'failures' && <FailuresTab runId={latest.run_id} />}
@@ -755,10 +782,12 @@ function OverviewTab({
   latest,
   chrono,
   channel,
+  summary,
 }: {
   latest: RunSummary;
   chrono: RunSummary[];
   channel: Channel;
+  summary: SummaryResp | null;
 }) {
   const m = latest.metrics;
   const mc = latest.metric_counts;
@@ -771,6 +800,8 @@ function OverviewTab({
 
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate" className="space-y-6">
+      <HumanQATiles summary={summary} />
+
       {/* Regression vs last run */}
       <RegressionBadge regression={latest.regression} />
 
@@ -1068,6 +1099,106 @@ function OverviewTab({
           </p>
         )}
       </SectionCard>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Human-in-the-loop QA tiles — judge↔human agreement (κ) and escalation
+// false-positive rate. Each tile renders ONLY when its value is present in the
+// summary payload, so older summaries (no human labels yet) show nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+function HumanQATiles({ summary }: { summary: SummaryResp | null }) {
+  if (!summary) return null;
+  const {
+    judge_human_kappa: judgeHumanKappa,
+    judge_human_labeled_count: judgeHumanLabeledCount,
+    escalation_false_positive_rate: escalationFalsePositiveRate,
+    escalation_reviewed_count: escalationReviewedCount,
+  } = summary;
+
+  const showKappa = typeof judgeHumanKappa === 'number' && Number.isFinite(judgeHumanKappa);
+  const showFP =
+    typeof escalationFalsePositiveRate === 'number' && Number.isFinite(escalationFalsePositiveRate);
+
+  if (!showKappa && !showFP) return null;
+
+  // κ thresholds (Cohen's kappa) — ≥0.6 substantial, ≥0.4 moderate, below = weak.
+  const kappaColor = showKappa
+    ? judgeHumanKappa! >= 0.6
+      ? { hex: C.emerald, cls: 'text-emerald-700' }
+      : judgeHumanKappa! >= 0.4
+      ? { hex: C.amber, cls: 'text-amber-700' }
+      : { hex: C.rose, cls: 'text-rose-700' }
+    : { hex: C.emerald, cls: 'text-emerald-700' };
+
+  // Escalation false-positive is a rate where lower is better.
+  const fpColor = showFP ? rateColor(escalationFalsePositiveRate!, true) : { hex: C.emerald, cls: '' };
+
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {showKappa && (
+        <QAStatTile
+          label="Judge–Human agreement (κ)"
+          value={judgeHumanKappa!.toFixed(2)}
+          valueCls={kappaColor.cls}
+          hex={kappaColor.hex}
+          sub={
+            typeof judgeHumanLabeledCount === 'number'
+              ? `${judgeHumanLabeledCount.toLocaleString()} labeled`
+              : 'labeled turns'
+          }
+        />
+      )}
+      {showFP && (
+        <QAStatTile
+          label="Escalation false-positive"
+          value={pct(escalationFalsePositiveRate!)}
+          valueCls={fpColor.cls}
+          hex={fpColor.hex}
+          sub={
+            typeof escalationReviewedCount === 'number'
+              ? `${escalationReviewedCount.toLocaleString()} reviewed`
+              : 'reviewed'
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+function QAStatTile({
+  label,
+  value,
+  valueCls,
+  hex,
+  sub,
+}: {
+  label: string;
+  value: string;
+  valueCls: string;
+  hex: string;
+  sub: string;
+}) {
+  return (
+    <motion.div
+      variants={staggerItem}
+      className="relative overflow-hidden rounded-2xl border border-[#E5E5E5] bg-white p-5 shadow-[0_1px_2px_rgba(25,39,53,0.04)]"
+    >
+      <div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-ink-soft">
+        <span
+          aria-hidden
+          className="inline-block h-1.5 w-1.5 rounded-full"
+          style={{ background: hex, boxShadow: `0 0 8px ${hex}cc` }}
+        />
+        {label}
+      </div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <span className={`font-display text-3xl font-semibold tracking-tight tabular-nums ${valueCls}`}>
+          {value}
+        </span>
+        <span className="text-[10px] tabular-nums text-ink-faint">{sub}</span>
+      </div>
     </motion.div>
   );
 }
@@ -1590,7 +1721,7 @@ function DatasetBlock({
                 </tr>
               </thead>
               <tbody>
-                <DatasetRows kind={kind} turns={turns} />
+                <DatasetRows kind={kind} turns={turns} runId={run.run_id} />
               </tbody>
             </table>
           </div>
@@ -1600,7 +1731,7 @@ function DatasetBlock({
   );
 }
 
-function DatasetRows({ kind, turns }: { kind: RunKind; turns: TurnDetail[] }) {
+function DatasetRows({ kind, turns, runId }: { kind: RunKind; turns: TurnDetail[]; runId: string }) {
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   return (
     <>
@@ -1611,6 +1742,7 @@ function DatasetRows({ kind, turns }: { kind: RunKind; turns: TurnDetail[] }) {
             key={t.seq}
             kind={kind}
             turn={t}
+            runId={runId}
             open={open}
             onToggle={() => setOpenSeq(open ? null : t.seq)}
           />
@@ -1629,11 +1761,13 @@ function shortSession(id: string): string {
 function DatasetRow({
   kind,
   turn,
+  runId,
   open,
   onToggle,
 }: {
   kind: RunKind;
   turn: TurnDetail;
+  runId: string;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -1789,6 +1923,9 @@ function DatasetRow({
                       <p className="text-[12.5px] text-ink-soft">No deterministic checks recorded.</p>
                     )}
                   </div>
+                  <div className="lg:col-span-2">
+                    <TurnLabeler runId={runId} turn={turn} />
+                  </div>
                 </div>
               </motion.div>
             </td>
@@ -1796,6 +1933,320 @@ function DatasetRow({
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Human verdict labeler — sits in each per-turn detail panel. Lets a reviewer
+// agree/disagree with the AI judge and, on disagree, supply corrected fields.
+// Also exposes "Promote to golden", which returns a scrubbed fixture for a human
+// to review and commit manually (NO auto-commit).
+// ─────────────────────────────────────────────────────────────────────────────
+function TurnLabeler({ runId, turn }: { runId: string; turn: TurnDetail }) {
+  // Seed local form state from any existing label so the panel reflects the
+  // current verdict and stays editable.
+  const existing = turn.human_label ?? null;
+  const [label, setLabel] = useState<HumanLabel | null>(existing);
+  const [verdict, setVerdict] = useState<'agree' | 'disagree' | null>(existing?.verdict ?? null);
+  const [correctedIntent, setCorrectedIntent] = useState(existing?.corrected_intent ?? '');
+  const [correctedTask, setCorrectedTask] = useState<boolean | null>(
+    existing?.corrected_task_completion ?? null,
+  );
+  const [correctedTopic, setCorrectedTopic] = useState<boolean | null>(
+    existing?.corrected_topic_adherence ?? null,
+  );
+  const [note, setNote] = useState(existing?.note ?? '');
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const [promoting, setPromoting] = useState(false);
+  const [promoteErr, setPromoteErr] = useState('');
+  const [fixture, setFixture] = useState<string | null>(null);
+
+  const submit = useCallback(async () => {
+    if (!verdict) return;
+    setSaving(true);
+    setSaveErr('');
+    setSaved(false);
+    try {
+      const body: {
+        verdict: 'agree' | 'disagree';
+        corrected_intent?: string;
+        corrected_task_completion?: boolean;
+        corrected_topic_adherence?: boolean;
+        note?: string;
+      } = { verdict };
+      if (verdict === 'disagree') {
+        if (correctedIntent.trim()) body.corrected_intent = correctedIntent.trim();
+        if (correctedTask !== null) body.corrected_task_completion = correctedTask;
+        if (correctedTopic !== null) body.corrected_topic_adherence = correctedTopic;
+        if (note.trim()) body.note = note.trim().slice(0, 500);
+      }
+      const res = await adminFetch(
+        `/admin/agent-accuracy/runs/${encodeURIComponent(runId)}/turns/${turn.seq}/label`,
+        { method: 'POST', body: JSON.stringify(body) },
+      );
+      if (!res.ok) throw new Error(`${res.status}`);
+      setLabel({
+        verdict,
+        ...(verdict === 'disagree'
+          ? {
+              corrected_intent: body.corrected_intent,
+              corrected_task_completion: body.corrected_task_completion,
+              corrected_topic_adherence: body.corrected_topic_adherence,
+              note: body.note,
+            }
+          : {}),
+      });
+      setSaved(true);
+    } catch {
+      setSaveErr('Could not save your verdict. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [verdict, correctedIntent, correctedTask, correctedTopic, note, runId, turn.seq]);
+
+  const promote = useCallback(async () => {
+    setPromoting(true);
+    setPromoteErr('');
+    setFixture(null);
+    try {
+      const res = await adminFetch(
+        `/admin/agent-accuracy/runs/${encodeURIComponent(runId)}/turns/${turn.seq}/promote`,
+        { method: 'POST' },
+      );
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = (await res.json()) as unknown;
+      // Gateway proxies the AI service's `{ scrubbed_fixture: {...} }`; show just
+      // the fixture so a reviewer can copy it straight into datasets.py.
+      const fixtureObj =
+        data && typeof data === 'object' && 'scrubbed_fixture' in data
+          ? (data as { scrubbed_fixture: unknown }).scrubbed_fixture
+          : data;
+      setFixture(JSON.stringify(fixtureObj, null, 2));
+    } catch {
+      setPromoteErr('Could not build a golden fixture for this turn.');
+    } finally {
+      setPromoting(false);
+    }
+  }, [runId, turn.seq]);
+
+  return (
+    <div className="rounded-lg border border-[#E5E5E5] bg-white px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <FieldLabel>Human verdict on the judge</FieldLabel>
+        {label && (
+          <Pill tone={label.verdict === 'agree' ? 'green' : 'red'} dot>
+            {label.verdict === 'agree' ? 'Agreed' : 'Disagreed'}
+          </Pill>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setVerdict('agree');
+            setSaved(false);
+          }}
+          aria-pressed={verdict === 'agree'}
+          className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${
+            verdict === 'agree'
+              ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+              : 'bg-white text-ink-soft ring-[#E5E5E5] hover:bg-cream'
+          }`}
+        >
+          <span aria-hidden>👍</span> Agree
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setVerdict('disagree');
+            setSaved(false);
+          }}
+          aria-pressed={verdict === 'disagree'}
+          className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${
+            verdict === 'disagree'
+              ? 'bg-rose-50 text-rose-800 ring-rose-200'
+              : 'bg-white text-ink-soft ring-[#E5E5E5] hover:bg-cream'
+          }`}
+        >
+          <span aria-hidden>👎</span> Disagree
+        </button>
+      </div>
+
+      <AnimatePresence initial={false}>
+        {verdict === 'disagree' && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
+                  Corrected intent (optional)
+                </span>
+                <Input
+                  value={correctedIntent}
+                  onChange={(e) => setCorrectedIntent(e.target.value)}
+                  placeholder={turn.expected_intent || turn.intent || 'e.g. book_appointment'}
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <TriToggle
+                  label="Task completion"
+                  value={correctedTask}
+                  onChange={setCorrectedTask}
+                />
+                <TriToggle
+                  label="Topic adherence"
+                  value={correctedTopic}
+                  onChange={setCorrectedTopic}
+                />
+              </div>
+              <label className="block sm:col-span-2">
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
+                  Note (optional, max 500)
+                </span>
+                <Textarea
+                  value={note}
+                  maxLength={500}
+                  onChange={(e) => setNote(e.target.value.slice(0, 500))}
+                  placeholder="Why the judge was wrong…"
+                />
+                <span className="mt-0.5 block text-right text-[10px] tabular-nums text-ink-faint">
+                  {note.length}/500
+                </span>
+              </label>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={submit} loading={saving} disabled={!verdict || saving}>
+          Save verdict
+        </Button>
+        <Button size="sm" variant="secondary" onClick={promote} loading={promoting} disabled={promoting}>
+          Promote to golden
+        </Button>
+        {saved && <span className="text-[11.5px] font-medium text-emerald-700">Verdict saved.</span>}
+        {saveErr && <span className="text-[11.5px] font-medium text-rose-700">{saveErr}</span>}
+        {promoteErr && <span className="text-[11.5px] font-medium text-rose-700">{promoteErr}</span>}
+      </div>
+
+      <AnimatePresence>
+        {fixture !== null && (
+          <GoldenFixtureModal fixture={fixture} onClose={() => setFixture(null)} />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** Yes / No / (unset) tri-state toggle for corrected boolean judge fields. */
+function TriToggle({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean | null;
+  onChange: (v: boolean | null) => void;
+}) {
+  return (
+    <div>
+      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-soft">
+        {label}
+      </span>
+      <div className="inline-flex items-center gap-0.5 rounded-full bg-cream/70 p-0.5 ring-1 ring-inset ring-[#EDE6D9]">
+        {([
+          { v: true as const, t: 'Yes' },
+          { v: false as const, t: 'No' },
+        ]).map((opt) => {
+          const active = value === opt.v;
+          return (
+            <button
+              key={opt.t}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onChange(active ? null : opt.v)}
+              className={`inline-flex h-7 items-center justify-center rounded-full px-3 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${
+                active
+                  ? 'bg-white text-ink shadow-[0_1px_2px_rgba(25,39,53,0.08)] ring-1 ring-inset ring-[#E5E5E5]'
+                  : 'text-ink-soft hover:text-ink'
+              }`}
+            >
+              {opt.t}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Read-only preview of a scrubbed golden fixture. A human reviews + commits. */
+function GoldenFixtureModal({ fixture, onClose }: { fixture: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(fixture);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — the user can still select the text */
+    }
+  }, [fixture]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Golden fixture preview"
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12, scale: 0.98 }}
+        transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#E5E5E5] bg-white shadow-[0_24px_60px_rgba(25,39,53,0.25)]"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-[#EDE6D9] px-5 py-4">
+          <div>
+            <h3 className="font-display text-[15px] font-semibold tracking-tight text-ink">
+              Scrubbed golden fixture
+            </h3>
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-soft">
+              A human must review and commit this to datasets.py. Nothing was committed.
+            </p>
+          </div>
+          <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close preview">
+            Close
+          </Button>
+        </div>
+        <div className="overflow-auto px-5 py-4">
+          <pre className="whitespace-pre-wrap break-words rounded-lg border border-[#E5E5E5] bg-cream/40 p-3 font-mono text-[11.5px] leading-relaxed text-ink/85">
+            {fixture}
+          </pre>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-[#EDE6D9] px-5 py-3">
+          <Button size="sm" variant="secondary" onClick={copy}>
+            {copied ? 'Copied' : 'Copy JSON'}
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 

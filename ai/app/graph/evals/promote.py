@@ -53,6 +53,23 @@ def scrub(text: str) -> str:
     return out
 
 
+def scrub_dict(data: Any) -> Any:
+    """Recursively scrub PHI from an arbitrary dict/list/str structure.
+
+    Walks strings through ``scrub()``, recurses into dicts and lists.
+    Non-string scalars (int, bool, float, None) are returned unchanged.
+    Intended for the /internal/evals/promote endpoint which receives a
+    free-form turn/transcript blob.
+    """
+    if isinstance(data, str):
+        return scrub(data)
+    if isinstance(data, dict):
+        return {k: scrub_dict(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [scrub_dict(item) for item in data]
+    return data
+
+
 def propose_fixture(session_id: str) -> str:
     """Return a Python ``Conversation(...)`` skeleton for one session."""
     raw_turns = get_session_turns(session_id)

@@ -4,10 +4,18 @@ import { motion } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
 import {
   PageHeader, PageWrap, TableCard, THead, TH, TD,
-  Pill, Pagination, EmptyState, Input, SkeletonRows, ErrorBanner,
+  Pill, Pagination, EmptyState, Input, Textarea, Button, SkeletonRows, ErrorBanner,
 } from '@/components/admin/ui';
 import { formatPT } from '@/lib/time-pt';
 import { LuPhone } from 'react-icons/lu';
+
+// A reviewer's verdict on whether the agent's decision to escalate (request a
+// callback / hand off) was the right call. ADDITIVE — rows reviewed before this
+// feature shipped won't carry one.
+type EscalationVerdict = {
+  appropriate: boolean;
+  note?: string;
+};
 
 type CallbackRow = {
   id: number;
@@ -17,6 +25,8 @@ type CallbackRow = {
   reason: string;
   source: string;
   created_at: string;
+  // ADDITIVE (optional). Present once a human has reviewed this escalation.
+  escalation_verdict?: EscalationVerdict | null;
 };
 
 type ListResponse = { items: CallbackRow[]; total: number; page: number; limit: number };
@@ -166,9 +176,10 @@ export default function AdminCallbacksPage() {
               <tr>
                 <SortableTH label="Name" col="last_name" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('last_name')} />
                 <SortableTH label="Phone" col="phone" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('phone')} />
-                <SortableTH label="Reason" col="reason" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('reason')} className="bt-col-hide-md" />
+                <SortableTH label="Reason" col="reason" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('reason')} />
                 <SortableTH label="Source" col="source" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('source')} className="bt-col-hide-sm" />
                 <SortableTH label="Submitted" col="created_at" sortKey={sortKey} sortDir={sortDir} onClick={() => toggleSort('created_at')} className="bt-col-hide-lg" />
+                <TH>Escalation appropriate?</TH>
               </tr>
             </THead>
             <motion.tbody initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.015 } } }}>
@@ -181,12 +192,15 @@ export default function AdminCallbacksPage() {
                 >
                   <TD>{fullName}</TD>
                   <TD className="tabular-nums whitespace-nowrap">{c.phone}</TD>
-                  <TD className="bt-col-hide-md max-w-[420px] truncate" title={c.reason}>{c.reason}</TD>
+                  <TD className="max-w-[260px] sm:max-w-[420px] whitespace-normal break-words align-top" title={c.reason}>{c.reason}</TD>
                   <TD className="bt-col-hide-sm">
                     <Pill tone={sourceTone(c.source)} dot>{sourceLabel(c.source)}</Pill>
                   </TD>
                   <TD className="bt-col-hide-lg whitespace-nowrap text-[12.5px] text-ink-soft" title={c.created_at}>
                     {fmtDateTime(c.created_at)}
+                  </TD>
+                  <TD>
+                    <EscalationControl id={c.id} initial={c.escalation_verdict ?? null} />
                   </TD>
                 </motion.tr>
                 );
@@ -197,6 +211,117 @@ export default function AdminCallbacksPage() {
         </>
       )}
     </PageWrap>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Escalation verdict — ✓ Yes / ✗ No (+ optional note) on whether the agent was
+// right to escalate/hand off this contact. Reflects any existing verdict and
+// posts to /admin/api/callbacks/{id}/escalation-verdict.
+// ─────────────────────────────────────────────────────────────────────────────
+function EscalationControl({ id, initial }: { id: number; initial: EscalationVerdict | null }) {
+  const [verdict, setVerdict] = useState<boolean | null>(initial ? initial.appropriate : null);
+  const [saved, setSaved] = useState<boolean | null>(initial ? initial.appropriate : null);
+  const [note, setNote] = useState(initial?.note ?? '');
+  const [showNote, setShowNote] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(false);
+
+  const submit = useCallback(
+    async (appropriate: boolean) => {
+      setVerdict(appropriate);
+      setSaving(true);
+      setErr(false);
+      try {
+        const body: { appropriate: boolean; note?: string } = { appropriate };
+        if (note.trim()) body.note = note.trim().slice(0, 500);
+        const r = await adminFetch(`/admin/callbacks/${id}/escalation-verdict`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        setSaved(appropriate);
+      } catch {
+        setErr(true);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [id, note],
+  );
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="inline-flex items-center gap-0.5 rounded-full bg-cream/70 p-0.5 ring-1 ring-inset ring-[#EDE6D9] w-fit">
+        <button
+          type="button"
+          aria-pressed={verdict === true}
+          aria-label="Escalation was appropriate"
+          disabled={saving}
+          onClick={() => void submit(true)}
+          className={`inline-flex h-7 items-center justify-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 disabled:opacity-50 ${
+            verdict === true
+              ? 'bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-200'
+              : 'text-ink-soft hover:text-ink'
+          }`}
+        >
+          ✓ Yes
+        </button>
+        <button
+          type="button"
+          aria-pressed={verdict === false}
+          aria-label="Escalation was not appropriate"
+          disabled={saving}
+          onClick={() => void submit(false)}
+          className={`inline-flex h-7 items-center justify-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 disabled:opacity-50 ${
+            verdict === false
+              ? 'bg-rose-50 text-rose-800 ring-1 ring-inset ring-rose-200'
+              : 'text-ink-soft hover:text-ink'
+          }`}
+        >
+          ✗ No
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setShowNote((s) => !s)}
+        className="w-fit text-[11px] font-medium text-brand-700 hover:underline underline-offset-2"
+      >
+        {showNote ? 'Hide note' : note ? 'Edit note' : 'Add note'}
+      </button>
+
+      {showNote && (
+        <div className="flex flex-col gap-1">
+          <Textarea
+            value={note}
+            maxLength={500}
+            onChange={(e) => setNote(e.target.value.slice(0, 500))}
+            placeholder="Optional note (max 500)"
+            className="!min-h-[56px] text-[12px]"
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] tabular-nums text-ink-faint">{note.length}/500</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={saving}
+              disabled={verdict === null || saving}
+              onClick={() => void submit(verdict ?? true)}
+            >
+              Save note
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {saved !== null && !err && (
+        <span className="text-[10.5px] text-ink-faint">
+          Saved: {saved ? 'appropriate' : 'not appropriate'}
+        </span>
+      )}
+      {err && <span className="text-[10.5px] text-rose-700">Couldn’t save — try again.</span>}
+    </div>
   );
 }
 

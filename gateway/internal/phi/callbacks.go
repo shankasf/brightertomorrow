@@ -117,6 +117,56 @@ func (s *Store) PutCallback(ctx context.Context, r CallbackRecord) error {
 	return nil
 }
 
+// RecentCallbackByPhone reports whether a non-purged callback already exists
+// for this phone within the trailing window. Used to de-dupe the voice
+// transport's auto-logged "caller hung up mid-call" rows so repeat hang-ups
+// from the same number don't pile up. Phone is matched on the trimmed exact
+// stored value — the voice path always submits the same Twilio ANI. Cheap:
+// the GSI is ordered newest-first, so we stop scanning as soon as a row older
+// than the cutoff appears.
+func (s *Store) RecentCallbackByPhone(ctx context.Context, phone string, within time.Duration) (bool, error) {
+	phone = strings.TrimSpace(phone)
+	if phone == "" || within <= 0 {
+		return false, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	cutoff := time.Now().UTC().Add(-within)
+	out, err := s.ddb.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(s.tableName),
+		IndexName:              aws.String(s.gsi1Name),
+		KeyConditionExpression: aws.String("GSI1PK = :pk"),
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{
+			":pk": &ddbtypes.AttributeValueMemberS{Value: callbackGSI1PKValue},
+		},
+		ScanIndexForward: aws.Bool(false), // newest first
+	})
+	if err != nil {
+		return false, fmt.Errorf("phi: recent callback by phone: %w", err)
+	}
+
+	for _, it := range out.Items {
+		var r CallbackRecord
+		if err := attributevalue.UnmarshalMap(it, &r); err != nil {
+			return false, fmt.Errorf("phi: unmarshal callback: %w", err)
+		}
+		// Newest-first ordering → once we hit a row older than the cutoff,
+		// nothing after it can be inside the window.
+		if r.CreatedAt.Before(cutoff) {
+			break
+		}
+		if r.PurgedAt != nil {
+			continue
+		}
+		if strings.TrimSpace(r.Phone) == phone {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // CallbackFilter narrows ListCallbacks. Empty fields mean "no filter".
 type CallbackFilter struct {
 	Source     string // exact source match: chat-agent | voice-agent | voice-phone

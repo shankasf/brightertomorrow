@@ -581,6 +581,37 @@ async def internal_evals_trigger(request: Request) -> dict[str, Any]:
     return {"run_id": run_id, "status": "started"}
 
 
+@app.post("/internal/evals/promote")
+async def internal_evals_promote(request: Request) -> dict[str, Any]:
+    """De-identify a raw eval turn/transcript blob and return the scrubbed fixture.
+
+    Body: any JSON object — typically one eval turn or a partial transcript:
+        {
+            "transcript": [...],   # optional list of turn dicts
+            "user_says": "...",    # optional free-text field
+            "reply": "...",        # optional
+            "intent": "...",       # optional
+            ...                    # any other fields are scrubbed in-place
+        }
+
+    Response:
+        { "scrubbed_fixture": <PHI-free copy of the input dict> }
+
+    This endpoint DOES NOT write to datasets.py or any storage. The caller
+    receives a proposal they must eyeball for residual PHI before use.
+    PHI stays on OpenAI (BAA covered) — no data leaves the AI service.
+    """
+    body: dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    from .graph.evals.promote import scrub_dict
+    scrubbed = scrub_dict(body)
+    return {"scrubbed_fixture": scrubbed}
+
+
 @app.post("/internal/embed-faqs")
 async def internal_embed_faqs() -> dict[str, Any]:
     """Re-embed all published FAQs. Called by the Go gateway after any FAQ write.

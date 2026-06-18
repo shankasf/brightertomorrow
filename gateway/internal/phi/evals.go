@@ -45,10 +45,10 @@ import (
 // string attribute and decoded back to any on read.
 type EvalRun struct {
 	RunID         string             `dynamodbav:"runId"`
-	Kind          string             `dynamodbav:"kind"`           // "offline" | "online"
-	Channel       string             `dynamodbav:"channel"`        // "chat" | "voice" | "phone"; empty (legacy) means chat
-	Model         string             `dynamodbav:"model"`          // model string, e.g. "gpt-5.5-2026-04-23"
-	PromptVersion string             `dynamodbav:"promptVersion"`  // e.g. "dev" | "v1.2"
+	Kind          string             `dynamodbav:"kind"`          // "offline" | "online"
+	Channel       string             `dynamodbav:"channel"`       // "chat" | "voice" | "phone"; empty (legacy) means chat
+	Model         string             `dynamodbav:"model"`         // model string, e.g. "gpt-5.5-2026-04-23"
+	PromptVersion string             `dynamodbav:"promptVersion"` // e.g. "dev" | "v1.2"
 	CreatedAt     time.Time          `dynamodbav:"createdAt"`
 	RetainUntil   time.Time          `dynamodbav:"retainUntil"`
 	Counts        map[string]int     `dynamodbav:"counts"`
@@ -430,4 +430,399 @@ func cloneAttrMap(src map[string]ddbtypes.AttributeValue) map[string]ddbtypes.At
 		dst[k] = v
 	}
 	return dst
+}
+
+// ---------------------------------------------------------------------------
+// Human eval labels
+// ---------------------------------------------------------------------------
+
+// EvalHumanLabel is a human reviewer's assessment of one eval turn.
+// Stored under PK = "EVALRUN#<runId>", SK = "TURN#<000000 seq>#HUMANLABEL"
+// so it lives in the same partition as the turn it annotates and is returned
+// by the same Query that fetches turns (SK prefix "TURN#").
+//
+// Note: the SK deliberately sorts AFTER the bare turn SK ("TURN#000001" <
+// "TURN#000001#HUMANLABEL" lexicographically) so the label never collides
+// with the turn item itself.
+type EvalHumanLabel struct {
+	RunID                   string    `dynamodbav:"runId"`
+	Seq                     int       `dynamodbav:"seq"`
+	Verdict                 string    `dynamodbav:"verdict"`                           // "agree" | "disagree"
+	CorrectedIntent         string    `dynamodbav:"correctedIntent,omitempty"`         // only meaningful on disagree
+	CorrectedTaskCompletion *bool     `dynamodbav:"correctedTaskCompletion,omitempty"` // only meaningful on disagree
+	CorrectedTopicAdherence *bool     `dynamodbav:"correctedTopicAdherence,omitempty"` // only meaningful on disagree
+	Note                    string    `dynamodbav:"note,omitempty"`                    // max 500 chars; no PHI
+	LabeledBy               string    `dynamodbav:"labeledBy"`
+	LabeledAt               time.Time `dynamodbav:"labeledAt"`
+	RetainUntil             time.Time `dynamodbav:"retainUntil"`
+}
+
+// evalHumanLabelSK is the SK for a human label, placed after the turn SK.
+func evalHumanLabelSK(seq int) string { return fmt.Sprintf("TURN#%06d#HUMANLABEL", seq) }
+
+// PutEvalHumanLabel upserts a human label for one eval turn. An existing label
+// is overwritten (last-write-wins) — callers may revise their verdict.
+func (s *Store) PutEvalHumanLabel(ctx context.Context, label EvalHumanLabel) error {
+	if label.RunID == "" {
+		return fmt.Errorf("phi: EvalHumanLabel.RunID is required")
+	}
+	if label.Verdict != "agree" && label.Verdict != "disagree" {
+		return fmt.Errorf("phi: EvalHumanLabel.Verdict must be 'agree' or 'disagree'")
+	}
+	if label.LabeledBy == "" {
+		return fmt.Errorf("phi: EvalHumanLabel.LabeledBy is required")
+	}
+	if len(label.Note) > 500 {
+		return fmt.Errorf("phi: EvalHumanLabel.Note exceeds 500 chars")
+	}
+	if label.LabeledAt.IsZero() {
+		label.LabeledAt = time.Now().UTC()
+	}
+	if label.RetainUntil.IsZero() {
+		label.RetainUntil = evalRetain(label.LabeledAt)
+	}
+
+	item, err := attributevalue.MarshalMap(label)
+	if err != nil {
+		return fmt.Errorf("phi: marshal eval human label: %w", err)
+	}
+	item["PK"] = &ddbtypes.AttributeValueMemberS{Value: evalRunPK(label.RunID)}
+	item["SK"] = &ddbtypes.AttributeValueMemberS{Value: evalHumanLabelSK(label.Seq)}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	_, err = s.ddb.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(s.tableName),
+		Item:      item,
+	})
+	if err != nil {
+		return fmt.Errorf("phi: put eval human label: %w", err)
+	}
+	s.auditPHI("eval_human_labels", "INSERT", fmt.Sprintf("%s#%06d", label.RunID, label.Seq),
+		actorFromContext(ctx), "")
+	return nil
+}
+
+// GetEvalHumanLabel fetches one human label by runID + seq. Returns ErrNotFound
+// when the turn has not yet been labeled.
+func (s *Store) GetEvalHumanLabel(ctx context.Context, runID string, seq int) (*EvalHumanLabel, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("phi: runID is required")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	out, err := s.ddb.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]ddbtypes.AttributeValue{
+			"PK": &ddbtypes.AttributeValueMemberS{Value: evalRunPK(runID)},
+			"SK": &ddbtypes.AttributeValueMemberS{Value: evalHumanLabelSK(seq)},
+		},
+		ConsistentRead: aws.Bool(true),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("phi: get eval human label: %w", err)
+	}
+	if len(out.Item) == 0 {
+		return nil, ErrNotFound
+	}
+	var label EvalHumanLabel
+	if err := attributevalue.UnmarshalMap(out.Item, &label); err != nil {
+		return nil, fmt.Errorf("phi: unmarshal eval human label: %w", err)
+	}
+	return &label, nil
+}
+
+// ListEvalHumanLabels fetches all human labels for a run in one Query of the
+// run's partition. It filters items whose SK ends with "#HUMANLABEL".
+// Returns a map keyed by seq for O(1) join with the turn list.
+func (s *Store) ListEvalHumanLabels(ctx context.Context, runID string) (map[int]*EvalHumanLabel, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("phi: runID is required")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	out, err := s.ddb.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(s.tableName),
+		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :prefix)"),
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{
+			":pk":     &ddbtypes.AttributeValueMemberS{Value: evalRunPK(runID)},
+			":prefix": &ddbtypes.AttributeValueMemberS{Value: "TURN#"},
+		},
+		ScanIndexForward: aws.Bool(true),
+		// Fetch up to 2000 items — each turn *may* produce a bare TURN# item and
+		// a TURN#...#HUMANLABEL item, so we over-fetch by 2x vs turn cap.
+		Limit: aws.Int32(2000),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("phi: list eval human labels: %w", err)
+	}
+
+	const suffix = "#HUMANLABEL"
+	result := make(map[int]*EvalHumanLabel, len(out.Items)/2)
+	for _, it := range out.Items {
+		skAttr, ok := it["SK"]
+		if !ok {
+			continue
+		}
+		sv, ok := skAttr.(*ddbtypes.AttributeValueMemberS)
+		if !ok || len(sv.Value) < len(suffix) || sv.Value[len(sv.Value)-len(suffix):] != suffix {
+			continue
+		}
+		var label EvalHumanLabel
+		if err := attributevalue.UnmarshalMap(it, &label); err != nil {
+			return nil, fmt.Errorf("phi: unmarshal eval human label (list): %w", err)
+		}
+		result[label.Seq] = &label
+	}
+	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// Callback escalation verdict
+// ---------------------------------------------------------------------------
+
+// CallbackEscalationVerdict is a sibling item on the callback's own PK,
+// stored with SK = "CALLBACK#escalation_verdict". It records whether an
+// escalation (handoff to human) was appropriate or a false positive.
+//
+// Key design — sibling item (same PK as the callback meta row):
+//
+//	PK = "PATIENT#callback-<uuid>"
+//	SK = "CALLBACK#escalation_verdict"
+//
+// This keeps the verdict co-located with the callback without touching the
+// main GSI1 list partition, and avoids adding a new GSI. Summary computation
+// (false-positive rate) over-fetches recent callbacks then batch-fetches
+// verdicts — cheap for the current scale.
+type CallbackEscalationVerdict struct {
+	CallbackID  string    `dynamodbav:"callbackId"`
+	Appropriate bool      `dynamodbav:"appropriate"`
+	Note        string    `dynamodbav:"note,omitempty"` // max 500 chars; no PHI
+	VerdictBy   string    `dynamodbav:"verdictBy"`
+	VerdictAt   time.Time `dynamodbav:"verdictAt"`
+	RetainUntil time.Time `dynamodbav:"retainUntil"`
+}
+
+const escalationVerdictSK = "CALLBACK#escalation_verdict"
+
+// PutEscalationVerdict upserts an escalation verdict for one callback.
+func (s *Store) PutEscalationVerdict(ctx context.Context, v CallbackEscalationVerdict) error {
+	if v.CallbackID == "" {
+		return fmt.Errorf("phi: CallbackEscalationVerdict.CallbackID is required")
+	}
+	if v.VerdictBy == "" {
+		return fmt.Errorf("phi: CallbackEscalationVerdict.VerdictBy is required")
+	}
+	if len(v.Note) > 500 {
+		return fmt.Errorf("phi: CallbackEscalationVerdict.Note exceeds 500 chars")
+	}
+	if v.VerdictAt.IsZero() {
+		v.VerdictAt = time.Now().UTC()
+	}
+	if v.RetainUntil.IsZero() {
+		v.RetainUntil = v.VerdictAt.AddDate(7, 0, 0)
+	}
+
+	item, err := attributevalue.MarshalMap(v)
+	if err != nil {
+		return fmt.Errorf("phi: marshal escalation verdict: %w", err)
+	}
+	item["PK"] = &ddbtypes.AttributeValueMemberS{Value: callbackPK(v.CallbackID)}
+	item["SK"] = &ddbtypes.AttributeValueMemberS{Value: escalationVerdictSK}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	_, err = s.ddb.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(s.tableName),
+		Item:      item,
+	})
+	if err != nil {
+		return fmt.Errorf("phi: put escalation verdict: %w", err)
+	}
+	s.auditPHI("callback_escalation_verdicts", "INSERT", v.CallbackID, actorFromContext(ctx), "")
+	return nil
+}
+
+// GetEscalationVerdict fetches the escalation verdict for one callback.
+// Returns ErrNotFound when no verdict exists yet.
+func (s *Store) GetEscalationVerdict(ctx context.Context, callbackID string) (*CallbackEscalationVerdict, error) {
+	if callbackID == "" {
+		return nil, fmt.Errorf("phi: callbackID is required")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	out, err := s.ddb.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]ddbtypes.AttributeValue{
+			"PK": &ddbtypes.AttributeValueMemberS{Value: callbackPK(callbackID)},
+			"SK": &ddbtypes.AttributeValueMemberS{Value: escalationVerdictSK},
+		},
+		ConsistentRead: aws.Bool(true),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("phi: get escalation verdict: %w", err)
+	}
+	if len(out.Item) == 0 {
+		return nil, ErrNotFound
+	}
+	var v CallbackEscalationVerdict
+	if err := attributevalue.UnmarshalMap(out.Item, &v); err != nil {
+		return nil, fmt.Errorf("phi: unmarshal escalation verdict: %w", err)
+	}
+	return &v, nil
+}
+
+// BatchGetEscalationVerdicts fetches escalation verdicts for a slice of
+// callback IDs using BatchGetItem. Items without a verdict are absent from
+// the returned map (no error). Capped at 100 per AWS limit.
+func (s *Store) BatchGetEscalationVerdicts(ctx context.Context, callbackIDs []string) (map[string]*CallbackEscalationVerdict, error) {
+	result := make(map[string]*CallbackEscalationVerdict, len(callbackIDs))
+	if len(callbackIDs) == 0 {
+		return result, nil
+	}
+
+	// Deduplicate.
+	seen := make(map[string]struct{}, len(callbackIDs))
+	deduped := callbackIDs[:0:0]
+	for _, id := range callbackIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		deduped = append(deduped, id)
+	}
+
+	for start := 0; start < len(deduped); start += 100 {
+		end := start + 100
+		if end > len(deduped) {
+			end = len(deduped)
+		}
+		chunk := deduped[start:end]
+
+		reqKeys := make([]map[string]ddbtypes.AttributeValue, 0, len(chunk))
+		for _, id := range chunk {
+			reqKeys = append(reqKeys, map[string]ddbtypes.AttributeValue{
+				"PK": &ddbtypes.AttributeValueMemberS{Value: callbackPK(id)},
+				"SK": &ddbtypes.AttributeValueMemberS{Value: escalationVerdictSK},
+			})
+		}
+
+		pending := map[string]ddbtypes.KeysAndAttributes{
+			s.tableName: {Keys: reqKeys, ConsistentRead: aws.Bool(true)},
+		}
+
+		for attempt := 0; attempt < 6 && len(pending[s.tableName].Keys) > 0; attempt++ {
+			bctx, bcancel := context.WithTimeout(ctx, s.timeout)
+			resp, err := s.ddb.BatchGetItem(bctx, &dynamodb.BatchGetItemInput{
+				RequestItems: pending,
+			})
+			bcancel()
+			if err != nil {
+				return result, fmt.Errorf("phi: batch get escalation verdicts: %w", err)
+			}
+			for _, items := range resp.Responses {
+				for _, it := range items {
+					var v CallbackEscalationVerdict
+					if err := attributevalue.UnmarshalMap(it, &v); err != nil {
+						return result, fmt.Errorf("phi: unmarshal escalation verdict (batch): %w", err)
+					}
+					result[v.CallbackID] = &v
+				}
+			}
+			if u, ok := resp.UnprocessedKeys[s.tableName]; ok && len(u.Keys) > 0 {
+				pending = map[string]ddbtypes.KeysAndAttributes{s.tableName: u}
+				sleep := time.Duration(50<<attempt) * time.Millisecond
+				select {
+				case <-ctx.Done():
+					return result, ctx.Err()
+				case <-time.After(sleep):
+				}
+				continue
+			}
+			pending = nil
+			break
+		}
+		if pending != nil && len(pending[s.tableName].Keys) > 0 {
+			return result, fmt.Errorf("phi: batch get escalation verdicts: keys unprocessed after retries")
+		}
+	}
+	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// Chat feedback
+// ---------------------------------------------------------------------------
+
+// ChatFeedback is a thumbs-up/thumbs-down rating for one chat turn submitted
+// from the public website widget.
+//
+// Key design:
+//
+//	PK = "CHATFEEDBACK#<session_id>"
+//	SK = "TURN#<zero-padded turn_index>"
+//
+// Rationale: the chat-session PK ("CHAT#<session_id>") uses timestamp-based
+// SKs that are not safely addressable by integer turn_index from the widget
+// (the widget only knows the ordinal position, not the timestamp). A separate
+// CHATFEEDBACK# partition keeps feedback cleanly isolated and queryable per
+// session without touching the PHI chat-turn partition. Rating only — no
+// message text is stored.
+type ChatFeedback struct {
+	SessionID   string    `dynamodbav:"sessionId"`
+	TurnIndex   int       `dynamodbav:"turnIndex"`
+	Rating      string    `dynamodbav:"rating"` // "up" | "down"
+	CreatedAt   time.Time `dynamodbav:"createdAt"`
+	RetainUntil time.Time `dynamodbav:"retainUntil"`
+}
+
+func chatFeedbackPK(sessionID string) string { return "CHATFEEDBACK#" + sessionID }
+func chatFeedbackSK(turnIndex int) string    { return fmt.Sprintf("TURN#%06d", turnIndex) }
+
+// PutChatFeedback upserts a rating for one chat turn. An existing rating is
+// overwritten (last-write-wins — user may change their mind).
+func (s *Store) PutChatFeedback(ctx context.Context, f ChatFeedback) error {
+	if f.SessionID == "" {
+		return fmt.Errorf("phi: ChatFeedback.SessionID is required")
+	}
+	if f.Rating != "up" && f.Rating != "down" {
+		return fmt.Errorf("phi: ChatFeedback.Rating must be 'up' or 'down'")
+	}
+	if f.TurnIndex < 0 {
+		return fmt.Errorf("phi: ChatFeedback.TurnIndex must be >= 0")
+	}
+	if f.CreatedAt.IsZero() {
+		f.CreatedAt = time.Now().UTC()
+	}
+	if f.RetainUntil.IsZero() {
+		// Feedback is not clinical PHI; retain for 2 years (operational data).
+		f.RetainUntil = f.CreatedAt.AddDate(2, 0, 0)
+	}
+
+	item, err := attributevalue.MarshalMap(f)
+	if err != nil {
+		return fmt.Errorf("phi: marshal chat feedback: %w", err)
+	}
+	item["PK"] = &ddbtypes.AttributeValueMemberS{Value: chatFeedbackPK(f.SessionID)}
+	item["SK"] = &ddbtypes.AttributeValueMemberS{Value: chatFeedbackSK(f.TurnIndex)}
+
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	_, err = s.ddb.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(s.tableName),
+		Item:      item,
+	})
+	if err != nil {
+		return fmt.Errorf("phi: put chat feedback: %w", err)
+	}
+	// No PHI audit needed — rating only, no message content, no identifiers.
+	return nil
 }

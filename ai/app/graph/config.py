@@ -124,6 +124,21 @@ def gateway_base_url() -> str:
     return os.environ.get("BT_GATEWAY_URL", "http://bt-gateway").rstrip("/")
 
 
+def eval_max_usd() -> float:
+    """Hard cost cap per eval run in USD.
+
+    If the accumulated estimated spend for judge LLM calls would exceed this
+    value, the runner stops making judge calls for the remainder of the run.
+    Deterministic checks still run on every turn.
+
+    Override with EVAL_MAX_USD (float). Default $10.00.
+    """
+    try:
+        return float(os.environ.get("EVAL_MAX_USD") or 10.0)
+    except (ValueError, TypeError):
+        return 10.0
+
+
 # ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------

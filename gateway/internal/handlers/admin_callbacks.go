@@ -12,6 +12,7 @@ import (
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	appmw "github.com/brightertomorrowtherapy/bt-gateway/internal/middleware"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,6 +36,68 @@ type callbackRow struct {
 	Reason    string `json:"reason"`
 	Source    string `json:"source"`
 	CreatedAt string `json:"created_at"`
+	// ADDITIVE — present once a human has reviewed whether this escalation
+	// was the right call. Absent for unreviewed rows.
+	EscalationVerdict *callbackEscalationVerdictJSON `json:"escalation_verdict,omitempty"`
+}
+
+// callbackEscalationVerdictJSON is the row-level shape of a stored escalation
+// verdict. No PHI (the note is reviewer commentary, capped + PHI-free).
+type callbackEscalationVerdictJSON struct {
+	Appropriate bool   `json:"appropriate"`
+	Note        string `json:"note,omitempty"`
+	VerdictBy   string `json:"verdict_by,omitempty"`
+	VerdictAt   string `json:"verdict_at,omitempty"`
+}
+
+// escalationVerdictRequest is the body for POST .../escalation-verdict.
+type escalationVerdictRequest struct {
+	Appropriate bool   `json:"appropriate"`
+	Note        string `json:"note,omitempty"` // max 500 chars; no PHI
+}
+
+// PutEscalationVerdict handles POST /admin/api/callbacks/{id}/escalation-verdict.
+// Superadmin-only (enforced at the router level). Records whether the escalation
+// (handoff to a human) was appropriate or a false positive.
+func (h *AdminCallbacksHandler) PutEscalationVerdict(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		httpx.WriteValidationError(w, "id is required")
+		return
+	}
+
+	u, ok := appmw.AdminFromContext(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	admin.LogPHIAccess(r.Context(), h.PHI, r, u, "put_escalation_verdict", "callback_requests", id)
+
+	var req escalationVerdictRequest
+	if err := httpx.ReadJSON(w, r, &req); err != nil {
+		httpx.WriteValidationError(w, "invalid JSON")
+		return
+	}
+	if len(req.Note) > 500 {
+		httpx.WriteValidationError(w, "note must be 500 characters or fewer")
+		return
+	}
+
+	verdict := phi.CallbackEscalationVerdict{
+		CallbackID:  id,
+		Appropriate: req.Appropriate,
+		Note:        req.Note,
+		VerdictBy:   u.Email,
+		VerdictAt:   time.Now().UTC(),
+	}
+
+	if err := h.PHI.PutEscalationVerdict(r.Context(), verdict); err != nil {
+		slog.Error("admin callbacks: put escalation verdict", "id", id, "err", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // List handles GET /admin/api/callbacks. Pagination is in-memory after a
@@ -103,6 +166,30 @@ func (h *AdminCallbacksHandler) List(w http.ResponseWriter, r *http.Request) {
 			Source:    r.Source,
 			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
 		})
+	}
+
+	// Attach any human escalation verdicts so the UI reflects prior reviews on
+	// reload. One batched read keyed by callback ID — no N+1. Best-effort: a
+	// lookup failure just leaves rows unreviewed rather than failing the list.
+	if len(out) > 0 {
+		ids := make([]string, len(out))
+		for i, row := range out {
+			ids[i] = row.ID
+		}
+		if verdicts, vErr := h.PHI.BatchGetEscalationVerdicts(r.Context(), ids); vErr != nil {
+			slog.Error("admin callbacks: batch get escalation verdicts", "err", vErr)
+		} else {
+			for i := range out {
+				if v := verdicts[out[i].ID]; v != nil {
+					out[i].EscalationVerdict = &callbackEscalationVerdictJSON{
+						Appropriate: v.Appropriate,
+						Note:        v.Note,
+						VerdictBy:   v.VerdictBy,
+						VerdictAt:   v.VerdictAt.UTC().Format(time.RFC3339),
+					}
+				}
+			}
+		}
 	}
 
 	// HIPAA §164.312(b) — record one access_log row per callback viewed,

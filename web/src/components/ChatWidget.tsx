@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiPhone, FiPhoneOff, FiRefreshCw } from "react-icons/fi";
+import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiPhone, FiPhoneOff, FiRefreshCw, FiThumbsUp, FiThumbsDown } from "react-icons/fi";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -22,7 +22,6 @@ const THERAPIST_PICKER_MARKER = "[[THERAPIST_PICKER]]";
 // pick the soonest slot across the roster".
 const THERAPIST_OPTIONS: string[] = [
   "Any therapist",
-  "Sagar Shankaran",
   "Elisia Danley",
   "Keunshea Fleming",
   "Alayna Hammond",
@@ -38,17 +37,15 @@ const THERAPIST_OPTIONS: string[] = [
 // fuzzy-match whatever the visitor sends, so minor drift is non-fatal.
 const INSURANCE_OPTIONS: string[] = [
   "UnitedHealthcare",
+  "UMR",
   "Aetna",
   "Cigna",
   "Humana",
   "Blue Cross Blue Shield",
   "Anthem",
-  "Kaiser Permanente",
   "Medicare",
   "Tricare",
-  "Molina Healthcare",
   "WellCare",
-  "Oscar Health",
   "Health Net",
   "Blue Shield of California",
   "EmblemHealth",
@@ -225,6 +222,11 @@ export default function ChatWidget() {
   });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // Conversation-level feedback: a single thumbs up/down for the whole chat,
+  // shown once at the end of the conversation. Null until the visitor rates;
+  // once set, the control collapses to a thank-you line and further clicks are
+  // ignored. Reset whenever a fresh session starts.
+  const [sessionFeedback, setSessionFeedback] = useState<"up" | "down" | null>(null);
   const greetedRef = useRef(false);
   const [muted, setMuted] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
@@ -360,6 +362,7 @@ export default function ChatWidget() {
       }
       setMsgs([]);
       setSessionId(null);
+      setSessionFeedback(null);
       greetedRef.current = false;
     }, CHAT_MSGS_MAX_AGE_MS);
     return () => clearTimeout(t);
@@ -390,6 +393,7 @@ export default function ChatWidget() {
     }
     setMsgs([]);
     setSessionId(null);
+    setSessionFeedback(null);
     greetedRef.current = true; // we greet explicitly below; block the open-effect
     void send(GREET_MARKER, { freshSession: true });
   }
@@ -536,6 +540,32 @@ export default function ChatWidget() {
     } finally {
       setLoading(false);
       if (!muted) void playChime(audioCtxRef);
+    }
+  }
+
+  // Fire-and-forget conversation-level rating. One thumbs up/down for the whole
+  // chat, keyed to the last assistant turn so it lands on a real turn_index.
+  // Optimistically record the choice (so the UI collapses immediately) and
+  // never surface an error if the POST fails.
+  function sendFeedback(rating: "up" | "down") {
+    if (sessionFeedback) return; // already rated — ignore further clicks
+    setSessionFeedback(rating);
+    const sid = sessionId;
+    if (!sid) return;
+    // Anchor the rating to the most recent assistant message (fallback 0).
+    let turnIndex = 0;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "assistant") { turnIndex = i; break; }
+    }
+    try {
+      void fetch("/v1/chat/feedback", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ session_id: sid, turn_index: turnIndex, rating }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {
+      // Best-effort only — never block the UI or show an error.
     }
   }
 
@@ -858,6 +888,15 @@ export default function ChatWidget() {
                   </div>
                 </div>
               )}
+              {/* One conversation-level rating, shown at the end of the chat once
+                  there's a real exchange (≥1 visitor + ≥1 assistant turn) and we
+                  aren't mid-stream or in a voice call. */}
+              {!voiceActive &&
+                !loading &&
+                msgs.some((m) => m.role === "user") &&
+                msgs.some((m) => m.role === "assistant") && (
+                  <FeedbackBar feedback={sessionFeedback} onFeedback={sendFeedback} />
+                )}
             </div>
 
             {!voiceActive && !msgs.some((m) => m.role === "user") && (
@@ -937,11 +976,6 @@ export default function ChatWidget() {
                   <FiSend size={16} />
                 </button>
               </div>
-              <div className="mt-1 px-3 text-[10.5px] text-ink-soft">
-                <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Enter</kbd> to send · <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Shift</kbd>
-                {" + "}
-                <kbd className="rounded border border-surface-line bg-surface px-1 font-mono text-[10px]">Enter</kbd> for new line
-              </div>
               {/*
                 HIPAA-required reasonable safeguard: tell the visitor this
                 chat carries PHI and they shouldn't continue on a shared
@@ -950,7 +984,18 @@ export default function ChatWidget() {
                 other.
               */}
               <div className="mt-1 px-3 flex items-center justify-between gap-2 text-[10.5px] text-ink-soft">
-                <span>🔒 Private &amp; HIPAA-protected.</span>
+                <span className="whitespace-nowrap">🔒 Private &amp; HIPAA-protected.</span>
+                <span className="whitespace-nowrap">
+                  Powered by{" "}
+                  <a
+                    href="https://callsphere.ai/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-blue-600 underline decoration-blue-600 underline-offset-2 transition"
+                  >
+                    CallSphere LLC
+                  </a>
+                </span>
               </div>
             </form>
           </motion.div>
@@ -1027,26 +1072,71 @@ function Bubble({
         // the same width with an invisible placeholder so bubble edges align.
         isLastInGroup ? <AssistantAvatar /> : <AssistantAvatar hidden />
       )}
-      <div
-        className={`max-w-[82%] sm:max-w-[80%] rounded-2xl px-3.5 py-2.5 text-[15px] leading-[1.6] tracking-[-0.005em] break-words [overflow-wrap:anywhere] ${tail} ${
-          isUser
-            ? "bg-gradient-to-br from-brand to-brand-600 text-white font-medium shadow-[0_2px_8px_-2px_rgba(var(--brand-rgb,124,99,182),0.35)]"
-            : "bg-white text-ink border border-surface-line shadow-[0_1px_2px_rgba(15,23,42,0.04),0_2px_8px_-4px_rgba(15,23,42,0.06)]"
-        }`}
-      >
-        {isUser ? (
-          <span className="whitespace-pre-wrap">{content}</span>
-        ) : (
-          <RichMarkdown text={visibleText} />
-        )}
-        {hasInsurancePicker && onPickInsurance && isLastOverall && (
-          <InsurancePicker onPick={onPickInsurance} />
-        )}
-        {hasTherapistPicker && onPickTherapist && isLastOverall && (
-          <TherapistPicker onPick={onPickTherapist} />
-        )}
+      <div className={`flex max-w-[82%] sm:max-w-[80%] flex-col ${isUser ? "items-end" : "items-start"}`}>
+        <div
+          className={`rounded-2xl px-3.5 py-2.5 text-[15px] leading-[1.6] tracking-[-0.005em] break-words [overflow-wrap:anywhere] ${tail} ${
+            isUser
+              ? "bg-gradient-to-br from-brand to-brand-600 text-white font-medium shadow-[0_2px_8px_-2px_rgba(var(--brand-rgb,124,99,182),0.35)]"
+              : "bg-white text-ink border border-surface-line shadow-[0_1px_2px_rgba(15,23,42,0.04),0_2px_8px_-4px_rgba(15,23,42,0.06)]"
+          }`}
+        >
+          {isUser ? (
+            <span className="whitespace-pre-wrap">{content}</span>
+          ) : (
+            <RichMarkdown text={visibleText} />
+          )}
+          {hasInsurancePicker && onPickInsurance && isLastOverall && (
+            <InsurancePicker onPick={onPickInsurance} />
+          )}
+          {hasTherapistPicker && onPickTherapist && isLastOverall && (
+            <TherapistPicker onPick={onPickTherapist} />
+          )}
+        </div>
       </div>
     </motion.div>
+  );
+}
+
+// One conversation-level 👍/👎, rendered once at the end of the chat. After a
+// click it collapses to a single thank-you line with the chosen thumb marked
+// active; the parent guards against further submissions.
+function FeedbackBar({
+  feedback,
+  onFeedback,
+}: {
+  feedback: "up" | "down" | null;
+  onFeedback: (rating: "up" | "down") => void;
+}) {
+  if (feedback) {
+    return (
+      <div className="mt-3 flex items-center justify-center gap-1.5 px-1 text-[11px] text-ink-soft">
+        <span aria-hidden className="text-brand">
+          {feedback === "up" ? <FiThumbsUp size={12} /> : <FiThumbsDown size={12} />}
+        </span>
+        <span>Your feedback will improve the response.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 flex items-center justify-center gap-2 px-0.5 text-[11px] text-ink-soft">
+      <span>Was this helpful?</span>
+      <button
+        type="button"
+        onClick={() => onFeedback("up")}
+        aria-label="Helpful"
+        className="grid h-6 w-6 place-items-center rounded-full text-ink-soft/70 transition hover:bg-brand/5 hover:text-brand focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      >
+        <FiThumbsUp size={13} />
+      </button>
+      <button
+        type="button"
+        onClick={() => onFeedback("down")}
+        aria-label="Not helpful"
+        className="grid h-6 w-6 place-items-center rounded-full text-ink-soft/70 transition hover:bg-brand/5 hover:text-brand focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      >
+        <FiThumbsDown size={13} />
+      </button>
+    </div>
   );
 }
 

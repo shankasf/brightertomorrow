@@ -169,6 +169,7 @@ func main() {
 	adminAppointmentsH := &handlers.AdminAppointmentsHandler{Pool: pool, PHI: phiStore, Notify: notifyStore, NotifyEnabled: cfg.AppointmentNotifyEnabled}
 	adminInsuranceChecksH := &handlers.AdminInsuranceChecksHandler{Pool: pool, PHI: phiStore}
 	adminCallbacksH := &handlers.AdminCallbacksHandler{Pool: pool, PHI: phiStore}
+	chatFeedbackH := &handlers.ChatFeedbackHandler{PHI: phiStore}
 	adminLogsH := &handlers.AdminLogsHandler{Pool: pool, PHI: phiStore, AIServiceURL: cfg.AIServiceURL, Athena: athenaClient}
 	frontendLogsH := &handlers.FrontendLogsHandler{}
 	adminCalendarH := &handlers.AdminCalendarHandler{Pool: pool, PHI: phiStore, Cal: calStore}
@@ -258,6 +259,9 @@ func main() {
 		// /chat/end — invoked via navigator.sendBeacon on tab-close so the
 		// session flips out of "active" immediately, not 20 min later.
 		r.With(httprate.LimitByIP(60, time.Minute)).Post("/chat/end", (&handlers.ChatEndHandler{Pool: pool, CookieSecure: cfg.CookieSecure}).ServeHTTP)
+		// Public thumbs rating for chat turns — no auth, rate-limited per IP.
+		// Stores only "up"/"down" — no message text, no PHI.
+		r.With(httprate.LimitByIP(30, time.Minute)).Post("/chat/feedback", chatFeedbackH.ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Get("/voice", (&handlers.VoiceHandler{Pool: pool, AIServiceURL: cfg.AIServiceURL, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/coverage/check", (&handlers.CoverageCheckHandler{PHI: phiStore, CoverageChecker: ai}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/match", (&handlers.MatchHandler{Pool: pool, PHI: phiStore}).ServeHTTP)
@@ -445,6 +449,14 @@ func main() {
 				r.Get("/agent-accuracy/runs", adminAgentAccuracyH.ListRuns)
 				r.Get("/agent-accuracy/runs/{runId}", adminAgentAccuracyH.GetRun)
 				r.Post("/agent-accuracy/run", adminAgentAccuracyH.TriggerRun)
+				// Human eval labels — upsert a reviewer verdict on one turn.
+				r.Post("/agent-accuracy/runs/{runId}/turns/{seq}/label", adminAgentAccuracyH.LabelTurn)
+				// Promote to golden — scrub transcript via AI, return fixture JSON.
+				// Nothing is persisted; reviewer copies output into datasets.py.
+				r.Post("/agent-accuracy/runs/{runId}/turns/{seq}/promote", adminAgentAccuracyH.PromoteTurn)
+
+				// Escalation feedback loop — record whether a handoff was appropriate.
+				r.Post("/callbacks/{id}/escalation-verdict", adminCallbacksH.PutEscalationVerdict)
 			})
 		})
 	})

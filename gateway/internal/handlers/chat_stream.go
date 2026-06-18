@@ -63,8 +63,22 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientCtx := ctx
 	sessionID := body.SessionID
 
-	if sessionID == "" {
-		// Create a new session tied to this visitor.
+	// The synthetic greeting opener the widget posts on first open. A visitor
+	// who only sees the greeting and leaves is NOT a real conversation, so we
+	// must not log it on /admin/chat. We give the greeting an ephemeral session
+	// id (used for the AI/LangGraph thread + the SSE "session" event the client
+	// adopts) but create NO chat_sessions row and persist NOTHING. When the
+	// visitor sends their first real message it arrives with this id, which the
+	// IDOR branch below lazily promotes into a durable session — so the thread
+	// is logged from the first real turn onward.
+	const greetMarker = "__BT_GREET__"
+	isGreet := body.Message == greetMarker
+
+	switch {
+	case isGreet:
+		sessionID = uuid.NewString()
+	case sessionID == "":
+		// Real first message with no prior session — create it now.
 		row := h.Pool.QueryRow(ctx,
 			`INSERT INTO bt.chat_sessions (visitor_id) VALUES ($1) RETURNING id`,
 			visitorID,
@@ -74,23 +88,34 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
-	} else {
+	default:
 		// IDOR check: verify the session belongs to the current visitor.
 		var owner *string
 		err := h.Pool.QueryRow(ctx,
 			`SELECT visitor_id FROM bt.chat_sessions WHERE id = $1`,
 			sessionID,
 		).Scan(&owner)
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteError(w, http.StatusNotFound, "session not found")
-			return
-		}
-		if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			// Session id minted during a greeting we intentionally did not
+			// persist. Lazily create the durable row now, tied to this visitor,
+			// so the first real turn is logged. The id is a server-minted UUID
+			// the client only learned via its own SSE stream, so binding it to
+			// the current visitor is safe.
+			if _, err := h.Pool.Exec(ctx,
+				`INSERT INTO bt.chat_sessions (id, visitor_id) VALUES ($1, $2)
+				 ON CONFLICT (id) DO NOTHING`,
+				sessionID, visitorID,
+			); err != nil {
+				slog.Error("chat_stream: lazy create session", "err", err)
+				httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+		case err != nil:
 			slog.Error("chat_stream: lookup session", "err", err)
 			httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 			return
-		}
-		if owner == nil || *owner != visitorID {
+		case owner == nil || *owner != visitorID:
 			slog.Warn("chat_stream: visitor mismatch", "session_id", sessionID)
 			httpx.WriteError(w, http.StatusNotFound, "session not found")
 			return
@@ -98,7 +123,6 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Persist the user message to DynamoDB — skip the synthetic greeting marker.
-	const greetMarker = "__BT_GREET__"
 	if body.Message != greetMarker {
 		if err := recordTurn(ctx, h.Pool, h.PHI, sessionID, "user", body.Message, 0); err != nil {
 			slog.Error("chat_stream: ddb put user turn", "err", err)
@@ -115,7 +139,7 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Fallback: the transport doesn't support flushing (e.g. test recorder).
 		// Use the regular Chat path and emit a single SSE frame.
 		slog.Warn("chat_stream: flusher not supported, falling back to non-stream")
-		h.fallback(w, ctx, sessionID, body.Message, start)
+		h.fallback(w, ctx, sessionID, body.Message, start, isGreet)
 		return
 	}
 
@@ -135,7 +159,9 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSSEEvent(w, "message", chatFallback)
 		writeSSEEvent(w, "done", "")
 		flusher.Flush()
-		h.persistReply(sessionID, chatFallback, int(time.Since(start).Milliseconds()))
+		if !isGreet {
+			h.persistReply(sessionID, chatFallback, int(time.Since(start).Milliseconds()))
+		}
 		return
 	}
 	defer upstreamResp.Body.Close()
@@ -145,7 +171,9 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSSEEvent(w, "message", chatFallback)
 		writeSSEEvent(w, "done", "")
 		flusher.Flush()
-		h.persistReply(sessionID, chatFallback, int(time.Since(start).Milliseconds()))
+		if !isGreet {
+			h.persistReply(sessionID, chatFallback, int(time.Since(start).Milliseconds()))
+		}
 		return
 	}
 
@@ -219,12 +247,15 @@ func (h *ChatStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"client_disconnected", clientGone,
 	)
 
-	h.persistReply(sessionID, reply, int(time.Since(start).Milliseconds()))
+	// Never persist the greeting-only opener — it has no durable session row.
+	if !isGreet {
+		h.persistReply(sessionID, reply, int(time.Since(start).Milliseconds()))
+	}
 }
 
 // fallback is used when the ResponseWriter doesn't support http.Flusher.
 // It calls the non-streaming AI path and writes a single SSE frame.
-func (h *ChatStreamHandler) fallback(w http.ResponseWriter, ctx context.Context, sessionID, message string, start time.Time) {
+func (h *ChatStreamHandler) fallback(w http.ResponseWriter, ctx context.Context, sessionID, message string, start time.Time, isGreet bool) {
 	// Headers must still be set before first write.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -242,7 +273,9 @@ func (h *ChatStreamHandler) fallback(w http.ResponseWriter, ctx context.Context,
 
 	writeSSEEvent(w, "message", reply)
 	writeSSEEvent(w, "done", "")
-	h.persistReply(sessionID, reply, int(time.Since(start).Milliseconds()))
+	if !isGreet {
+		h.persistReply(sessionID, reply, int(time.Since(start).Milliseconds()))
+	}
 }
 
 // persistReply records the assistant reply in DynamoDB using a background

@@ -24,6 +24,13 @@ type callbackRequest struct {
 	Phone     string `json:"phone"`
 	Reason    string `json:"reason"`
 	Source    string `json:"source,omitempty"`
+	// DedupeByPhoneHours, when > 0, makes the handler skip the write if a
+	// non-purged callback already exists for this phone within the trailing
+	// window. The voice transport sets this (24) on auto-logged "caller hung
+	// up mid-call" rows so a caller who redials and drops again doesn't pile
+	// up duplicates. Deliberate callback requests (chat/voice tool) leave it
+	// 0 — every explicit "please call me back" is always recorded.
+	DedupeByPhoneHours int `json:"dedupe_by_phone_hours,omitempty"`
 }
 
 var (
@@ -32,6 +39,7 @@ var (
 	errCallbackPhone     = errors.New("phone must be 1–50 characters")
 	errCallbackReason    = errors.New("reason must be 1–500 characters")
 	errCallbackSource    = errors.New("source must be at most 50 characters")
+	errCallbackDedupe    = errors.New("dedupe_by_phone_hours must be between 0 and 8760")
 )
 
 func (b *callbackRequest) normalize() {
@@ -57,6 +65,9 @@ func (b *callbackRequest) validate() error {
 	}
 	if utf8.RuneCountInString(b.Source) > 50 {
 		return errCallbackSource
+	}
+	if b.DedupeByPhoneHours < 0 || b.DedupeByPhoneHours > 8760 {
+		return errCallbackDedupe
 	}
 	return nil
 }
@@ -96,6 +107,25 @@ func (h *CallbackInternalHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	source := body.Source
 	if source == "" {
 		source = "chat-agent"
+	}
+
+	// De-dupe auto-logged abandoned-call rows: if this phone already has a
+	// recent callback, ACK without writing a second one. Only triggered when
+	// the caller asks for it (DedupeByPhoneHours > 0) — explicit requests skip
+	// this and always persist.
+	if body.DedupeByPhoneHours > 0 {
+		within := time.Duration(body.DedupeByPhoneHours) * time.Hour
+		recent, err := h.PHI.RecentCallbackByPhone(r.Context(), body.Phone, within)
+		if err != nil {
+			slog.Error("callback: dedupe check failed", "err", err, "source", source)
+			httpx.WriteError(w, http.StatusServiceUnavailable, "phi store unavailable")
+			return
+		}
+		if recent {
+			slog.Info("callback: deduped recent phone", "source", source, "within_h", body.DedupeByPhoneHours)
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "deduped": true})
+			return
+		}
 	}
 
 	now := time.Now().UTC()
