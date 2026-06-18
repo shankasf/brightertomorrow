@@ -589,7 +589,7 @@ def check_insurance_support(payer_name: str) -> dict[str, Any]:
     Call this BEFORE asking the visitor for any verification fields when
     they just want to know whether their plan is accepted. The tool fuzzy-
     matches `payer_name` against the canonical payer roster (Aetna, UHC,
-    BCBS, Medicaid, Medicare, Tricare, Kaiser, etc.) and returns:
+    BCBS, Medicare, Tricare, etc.) and returns:
 
       {
         "query":          original input,
@@ -638,7 +638,7 @@ def check_insurance_support(payer_name: str) -> dict[str, Any]:
                 "note": (
                     f"We can't auto-verify **{payer_name.strip()}** with our "
                     "tool right now. We accept most major plans (UnitedHealthcare, "
-                    "Aetna, Cigna, Blue Cross Blue Shield, Anthem, Kaiser, Medicare, "
+                    "UMR, Aetna, Cigna, Blue Cross Blue Shield, Anthem, Medicare, "
                     "Tricare, and more) — and we offer out-of-network "
                     "cash rates if your plan isn't on the list."
                 ),
@@ -666,6 +666,64 @@ def check_insurance_support(payer_name: str) -> dict[str, Any]:
                 "coverage with CLAIM.MD."
             ),
         }
+
+
+@function_tool
+def set_coverage_path(path: str) -> dict[str, Any]:
+    """Latch the caller's coverage decision so the booking flow stops
+    re-deriving it from their wording turn to turn.
+
+    Call this the MOMENT the caller chooses how to handle payment at the
+    verify-vs-defer-vs-self-pay fork — especially after verify_coverage can't
+    auto-verify their plan (e.g. UMR) and you've offered "book now and the care
+    team verifies benefits later, or self-pay". Pass exactly one of:
+
+      "verify_now"   — caller wants their specific plan/benefits checked now
+                       (only valid for an auto-verifiable payer).
+      "defer_verify" — caller will use insurance but is fine letting the care
+                       team verify benefits before the visit. Covers phrasings
+                       like "verify later", "check it later", "continue
+                       booking", or a plain "yes" to the defer offer.
+      "self_pay"     — caller will pay out of pocket / no insurance / cash.
+
+    Returns {"ok", "path", "next_step"}. `next_step` is the ONLY action you may
+    take next — follow it verbatim. Once latched, do NOT re-interpret later
+    wording (a stray "verify"/"later") back into a different path. To change it
+    (the caller corrects themselves) call this tool again with the new value.
+    """
+    with _log_call("set_coverage_path", path=str(path)[:20]):
+        norm = (path or "").strip().lower().replace(" ", "_").replace("-", "_")
+        steps = {
+            "verify_now": (
+                "Caller wants their plan verified now. Collect the five CLAIM.MD "
+                "fields (first name, last name, DOB, insurance company, member "
+                "ID) and call verify_coverage. Only valid for an auto-verifiable "
+                "payer."
+            ),
+            "defer_verify": (
+                "Booking with benefits verified later by the care team. Do NOT "
+                "call verify_coverage. Do NOT ask for the member ID or any other "
+                "insurance field. Acknowledge once ('I'll book you now and the "
+                "care team verifies benefits before the visit'), then go straight "
+                "to STEP 2 — collect the booking fields one at a time."
+            ),
+            "self_pay": (
+                "Self-pay / out of pocket. Do NOT call verify_coverage. Do NOT "
+                "ask for the member ID or any insurance field. Acknowledge once, "
+                "then go straight to STEP 2 — collect the booking fields one at a "
+                "time."
+            ),
+        }
+        if norm not in steps:
+            return {
+                "ok": False,
+                "path": None,
+                "next_step": (
+                    "Unrecognized path. Ask the caller to choose: verify now, "
+                    "book now and verify benefits later, or self-pay."
+                ),
+            }
+        return {"ok": True, "path": norm, "next_step": steps[norm]}
 
 
 _ELIGIBLE_STATES = {"active", "approved", "eligible", "in force", "in network"}

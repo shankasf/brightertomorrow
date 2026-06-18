@@ -42,9 +42,12 @@ type intakeRequest struct {
 	SubscriberName         string `json:"subscriber_name"`
 	SubscriberRelationship string `json:"subscriber_relationship"`
 	Notes                  string `json:"notes"`
-	// SMSOptIn is the optional, unchecked-by-default SMS consent checkbox on
-	// the booking form. When true we record an A2P consent row in DDB.
-	SMSOptIn bool `json:"sms_opt_in"`
+	// SMSOptIn / SMSMarketingOptIn are the two optional, unchecked-by-default SMS
+	// consent checkboxes on the booking form. A2P requires marketing consent be
+	// collected separately, so each is recorded as its own scoped A2P consent
+	// row in DDB when true.
+	SMSOptIn          bool `json:"sms_opt_in"`           // appointment texts
+	SMSMarketingOptIn bool `json:"sms_marketing_opt_in"` // marketing/practice updates
 	// Source is only honoured on the internal endpoint; on the public
 	// endpoint it is derived from Flow.
 	Source string `json:"source,omitempty"`
@@ -377,14 +380,19 @@ func (h *IntakeHandler) submit(ctx context.Context, body intakeRequest) (intakeR
 			return intakeResponse{}, http.StatusServiceUnavailable, fmt.Errorf("phi_store_unavailable")
 		}
 		// Best-effort A2P SMS consent — never fail the booking over it.
-		if body.SMSOptIn && strings.TrimSpace(body.Phone) != "" {
-			if err := h.PHI.PutSMSConsent(ctx, phi.SMSConsentInput{
-				Phone:   body.Phone,
-				OptedIn: true,
-				Method:  phi.SMSMethodWebBooking,
-				Source:  "web",
-			}); err != nil {
-				slog.Warn("intake: sms consent record failed", "err", err, "submission_uuid", submissionUUID)
+		// Appointment and marketing consent are recorded as separate scoped
+		// items so we never market to an appointment-only opt-in.
+		if strings.TrimSpace(body.Phone) != "" {
+			for _, c := range scopedConsents(body.SMSOptIn, body.SMSMarketingOptIn) {
+				if err := h.PHI.PutSMSConsent(ctx, phi.SMSConsentInput{
+					Phone:   body.Phone,
+					OptedIn: true,
+					Method:  phi.SMSMethodWebBooking,
+					Scope:   c,
+					Source:  "web",
+				}); err != nil {
+					slog.Warn("intake: sms consent record failed", "err", err, "scope", c, "submission_uuid", submissionUUID)
+				}
 			}
 		}
 	}

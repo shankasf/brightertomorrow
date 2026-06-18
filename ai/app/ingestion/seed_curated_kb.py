@@ -108,6 +108,7 @@ DOCS: tuple[Doc, ...] = (
             "  - Anthem Blue Cross Blue Shield\n"
             "  - Cigna\n"
             "  - United Healthcare (UHC)\n"
+            "  - UMR\n"
             "  - Ambetter / Silver Summit Health Plans\n"
             "  - Health Plan of Nevada\n"
             "  - Aetna\n"

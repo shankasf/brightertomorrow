@@ -24,6 +24,9 @@ class Payer:
 
 PAYERS: tuple[Payer, ...] = (
     Payer("87726", "UnitedHealthcare", ("UHC", "United Healthcare", "United")),
+    # UMR is a UnitedHealthcare third-party administrator; its own CLAIM.MD id
+    # (39026) — NOT UHC's 87726 — is what eligibility checks must use.
+    Payer("39026", "UMR", ("U M R", "U.M.R.")),
     Payer("60054", "Aetna"),
     Payer("62308", "Cigna", ("Cigna Healthcare",)),
     Payer("00590", "Humana"),
@@ -33,12 +36,9 @@ PAYERS: tuple[Payer, ...] = (
     # needs_manual_review for every NV member — do not reintroduce it.
     Payer("45302", "Blue Cross Blue Shield", ("BCBS", "Blue Cross", "Blue Shield")),
     Payer("45302", "Anthem", ("Anthem Blue Cross", "Anthem BCBS", "Anthem BCBS NV")),
-    Payer("SB580", "Kaiser Permanente", ("Kaiser",)),
     Payer("MCARE", "Medicare", ("Original Medicare", "Medicare Part B")),
     Payer("TRICR", "Tricare", ("TriCare", "Tri Care")),
-    Payer("87815", "Molina Healthcare", ("Molina",)),
     Payer("56205", "WellCare"),
-    Payer("13265", "Oscar Health", ("Oscar",)),
     Payer("25463", "Health Net"),
     Payer("BS001", "Blue Shield of California"),
     Payer("47198", "EmblemHealth"),
@@ -58,7 +58,7 @@ PAYERS: tuple[Payer, ...] = (
 #
 # NOTE: this only fires when the caller explicitly names Medicaid (or Medi-Cal,
 # California's Medicaid). Commercial plans that ALSO run Medicaid managed-care
-# lines (Molina, Centene, WellCare, Ambetter) stay on the accepted roster above
+# lines (Centene, WellCare, Ambetter) stay on the accepted roster above
 # and are unaffected — a member naming the carrier still verifies normally.
 DECLINED_PAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Medicaid", (

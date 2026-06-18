@@ -47,6 +47,7 @@ from ...integrations.voice_tools import (
     record_sms_consent,
     request_intake_callback,
     search_faqs,
+    set_coverage_path,
     verify_coverage,
 )
 from ...data.roster import ELIGIBLE_FOR_BOOKING, THERAPISTS_WITHOUT_FEEDS
@@ -60,7 +61,7 @@ _AGENT_TOOLS = [
     # matching
     list_team_members,
     # insurance
-    check_insurance_support, list_payers, verify_coverage,
+    check_insurance_support, list_payers, verify_coverage, set_coverage_path,
     # booking
     get_free_slots, propose_slots, book_appointment,
     # post-booking consent
@@ -283,7 +284,8 @@ def build_realtime_triage(caller_phone: str | None = None) -> RealtimeAgent:
             "STEP 0 — Inspect the conversation. If verify_coverage already "
             "returned ok:true earlier, reuse those 5 fields + eligibility "
             "(never re-ask) and go to Step 2. If the caller is self-pay "
-            "('no insurance', 'cash', 'out of pocket'), skip to Step 2. "
+            "('no insurance', 'cash', 'out of pocket'), call "
+            "set_coverage_path('self_pay') and go to Step 2. "
             "Otherwise do Step 1.\n"
             "STEP 1 — Verify insurance. Collect the five CLAIM.MD fields: "
             "first name, last name, date of birth, insurance company, member "
@@ -291,10 +293,16 @@ def build_realtime_triage(caller_phone: str | None = None) -> RealtimeAgent:
             "YYYYMMDD. When you have all five, call verify_coverage, speak its "
             "`display_text` verbatim, then continue to Step 2 on the same "
             "turn. On ok:false field error, clarify just that field and "
-            "retry. On a system error, do NOT retry — say warmly you'll "
-            "finish the booking and the care team verifies benefits before "
-            "the visit; offer to continue or switch to self-pay. Never say "
-            "'system error'.\n"
+            "retry. If the plan can't be auto-verified (a small regional plan "
+            "we don't recognize) or verify_coverage returns a system error, do NOT retry "
+            "and do NOT ask for the member ID again — say warmly the care team "
+            "will verify benefits before the visit, and offer two choices: book "
+            "now (verify later) or self-pay. The MOMENT the caller picks, call "
+            "set_coverage_path('defer_verify' or 'self_pay') and do EXACTLY what "
+            "its `next_step` says. Once a coverage path is latched, never re-read "
+            "later wording (a stray 'verify'/'later') back into verification; to "
+            "change it (the caller corrects themselves) call set_coverage_path "
+            "again. Never say 'system error'.\n"
             "STEP 2 — Collect these 5 required fields ONE AT A TIME (ask for "
             "one, wait for the answer, then ask the next — never list several "
             "in a single question): reason for visit, phone, email, home "

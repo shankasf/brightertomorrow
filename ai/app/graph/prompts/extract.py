@@ -51,7 +51,7 @@ class FieldDeltas(BaseModel):
     )
     payer_name: str | None = Field(
         default=None,
-        description="Canonical insurance company name (Aetna, UHC, BCBS, Anthem, Cigna, Kaiser, Medicare, Medicaid, Tricare, etc.).",
+        description="Canonical insurance company name (Aetna, UHC, UMR, BCBS, Anthem, Cigna, Medicare, Medicaid, Tricare, etc.).",
     )
     member_id: str | None = None
 
@@ -106,7 +106,7 @@ class FieldDeltas(BaseModel):
             "available\", \"you pick\", \"surprise me\", \"earliest available\", "
             "\"I don't care\". Do NOT set this when the caller says a name, "
             "asks about a specific therapist, asks for an intro, or excludes "
-            "a therapist (\"anyone except Sagar\")."
+            "a therapist (\"anyone except Elisia\")."
         ),
     )
     selected_slot_index: int | None = Field(

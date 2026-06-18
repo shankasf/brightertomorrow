@@ -252,6 +252,54 @@ def _mark_session_ended(session_id: str) -> None:
         logger.exception("twilio_end_failed session=%s", session_id)
 
 
+# Reason stamped on /admin/callbacks rows for phone callers who dropped the
+# line before the agent finished. Written for the staff member who'll phone
+# them back, not the caller.
+_ABANDONED_CALL_REASON = (
+    "Caller hung up before the call finished — please call them back to complete intake."
+)
+
+
+def _log_abandoned_callback(phone: str) -> None:
+    """Create a /admin/callbacks row for a phone caller who dropped mid-call.
+
+    Fires only for calls that ended by caller hangup ("remote-close") or the
+    120s silence timeout — never a clean agent-ended call. The caller's name is
+    unknown at hangup, so the row is logged as "Unknown caller" against the
+    Twilio ANI. The gateway de-dupes by phone over a 24h window, so a caller who
+    redials and drops again doesn't pile up duplicate rows. Best-effort: a
+    failure here just means staff won't see this particular missed call.
+    """
+    phone = (phone or "").strip()
+    if not phone:
+        return
+    import urllib.request
+    base = os.environ.get("BT_GATEWAY_URL", "http://bt-gateway")
+    payload = json.dumps({
+        "first_name": "Unknown",
+        "last_name": "caller",
+        "phone": phone,
+        "reason": _ABANDONED_CALL_REASON,
+        "source": "voice-phone",
+        "dedupe_by_phone_hours": 24,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/internal/callback/submit",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=3) as r:
+            if r.status >= 400:
+                logger.warning(
+                    "twilio_abandoned_callback_status phone=***%s status=%s",
+                    phone[-4:], r.status,
+                )
+    except Exception:
+        logger.exception("twilio_abandoned_callback_failed phone=***%s", phone[-4:])
+
+
 # ---------------------------------------------------------------------------
 # Twilio protocol helpers
 # ---------------------------------------------------------------------------
@@ -528,6 +576,11 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
     t_first_tool_call: float | None = None
     tool_calls_count = 0
     handoffs_count = 0
+    # Set True once book_appointment confirms an appointment on this call, so a
+    # caller who finishes booking and then hangs up (or goes silent) isn't
+    # logged as a missed-call callback. See the RealtimeToolEnd handler + the
+    # abandoned-callback guard in the finally block below.
+    booking_succeeded = False
     # Created here, lives in a contextvar so the end_call tool can set it
     # without us needing to plumb it through the SDK.
     hangup_event = asyncio.Event()
@@ -801,7 +854,7 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                 )
 
             nonlocal t_first_audio_out, t_first_tool_call
-            nonlocal tool_calls_count, handoffs_count
+            nonlocal tool_calls_count, handoffs_count, booking_succeeded
             async for event in session:
                 if isinstance(event, RealtimeAudio):
                     silence.on_assistant_audio_frame()
@@ -936,10 +989,19 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
 
                 if isinstance(event, RealtimeToolEnd):
                     tool_name = getattr(event.tool, "name", "?")
+                    tool_out = str(getattr(event, "output", ""))
                     logger.info(
                         "twilio_tool_end call_sid=%s tool=%s output=%s",
-                        call_sid, tool_name, str(getattr(event, "output", ""))[:400],
+                        call_sid, tool_name, tool_out[:400],
                     )
+                    # A confirmed booking means the caller got what they came
+                    # for — suppress the missed-call callback even if they then
+                    # hang up or go silent. book_appointment only returns the
+                    # "appointment_id" key on success; every failure path returns
+                    # an "error" instead.
+                    if tool_name == "book_appointment" and "appointment_id" in tool_out:
+                        booking_succeeded = True
+                        logger.info("twilio_booking_succeeded call_sid=%s", call_sid)
                     if tool_name == "end_call":
                         # Side-channel signal in case the contextvar path
                         # in the tool function ran in an SDK-owned context
@@ -1139,3 +1201,19 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
             await asyncio.get_running_loop().run_in_executor(
                 None, _mark_session_ended, session_id,
             )
+
+            # A caller who hangs up mid-call (remote-close) or goes silent for
+            # 120s (silence-timeout) never got what they called for — log a
+            # callback row so staff can phone them back. Clean agent-ended
+            # ("end-call-tool") and max-duration calls are excluded, as are
+            # calls where the caller already confirmed a booking (they got what
+            # they came for). Needs the Twilio ANI to have a number to call.
+            # De-duped by phone (24h) at the gateway; best-effort.
+            if (
+                end_reason in ("remote-close", "silence-timeout")
+                and _ani
+                and not booking_succeeded
+            ):
+                await asyncio.get_running_loop().run_in_executor(
+                    None, _log_abandoned_callback, _ani,
+                )
