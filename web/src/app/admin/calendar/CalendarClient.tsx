@@ -89,7 +89,7 @@ export default function CalendarClient() {
   }, []);
 
   // -------------------- events fetch (view + cursor aware) --------------------
-  const loadEvents = useCallback(async (v: ViewMode, c: Cursor) => {
+  const loadEvents = useCallback(async (v: ViewMode, c: Cursor, signal?: AbortSignal) => {
     setLoadingEvents(true);
     setEventsError('');
     const { fromISO, toISO } =
@@ -102,11 +102,13 @@ export default function CalendarClient() {
     try {
       const r = await adminFetch(
         `/admin/api/calendar/events?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`,
+        { signal },
       );
       if (!r.ok) throw new Error(`${r.status}`);
       const body = (await r.json()) as EventsResponse;
       setEvents(Array.isArray(body.events) ? body.events : []);
-    } catch {
+    } catch (e) {
+      if ((e as { name?: string })?.name === 'AbortError') return; // superseded fetch — leave state alone
       setEvents([]);
       setEventsError('Could not load calendar events. The team has been notified.');
     } finally {
@@ -114,8 +116,13 @@ export default function CalendarClient() {
     }
   }, []);
 
+  // AbortController guards against React StrictMode's double-mount (and rapid
+  // view/cursor changes) firing two GETs — each GET is an audited access write,
+  // so a duplicate fetch produced duplicate "viewed Calendar Events" audit rows.
   useEffect(() => {
-    loadEvents(view, cursor);
+    const ctrl = new AbortController();
+    loadEvents(view, cursor, ctrl.signal);
+    return () => ctrl.abort();
   }, [view, cursor, loadEvents]);
 
   // -------------------- derived --------------------

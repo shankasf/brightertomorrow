@@ -22,8 +22,10 @@ export const dynamic = "force-dynamic";
 // STATIC_PATHS — keep in sync when a static page is added/removed).
 const STATIC_PAGES: ReadonlyArray<{ path: string; title: string; desc: string }> = [
   { path: "", title: "Home", desc: "Las Vegas & North Las Vegas therapy for children, teens, and adults — in-person and online, evenings and weekends." },
-  { path: "about", title: "About", desc: "Who we are and how the collective approaches compassionate, accessible mental health care." },
-  { path: "story", title: "Our Story", desc: "The story behind Brighter Tomorrow Therapy Collective." },
+  // NOTE: no "about" entry — /about 308-redirects to /story. Pointing AI
+  // engines at a redirect wastes a fetch and risks them citing a non-canonical
+  // URL; /story below is the real, indexable page.
+  { path: "story", title: "Our Story", desc: "Who we are, the story behind Brighter Tomorrow Therapy Collective, and how the collective approaches compassionate, accessible mental health care." },
   { path: "approach", title: "Our Approach", desc: "How we work with clients and the modalities our therapists use." },
   { path: "team", title: "Meet the Team", desc: "Our therapists and clinicians, their specialties, and availability." },
   { path: "services", title: "Services", desc: "Therapy services we offer across individual, couples, family, and group care." },

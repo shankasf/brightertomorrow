@@ -119,12 +119,12 @@ export default function AdminContactsPage() {
                     </TD>
                     <TD className="bt-col-hide-sm break-all">{c.email}</TD>
                     <TD className="bt-col-hide-sm whitespace-nowrap">{val(c.phone)}</TD>
-                    <TD className="bt-col-hide-md max-w-[240px] truncate" title={c.help_topic ?? c.subject ?? ''}>
+                    <TD className="bt-col-hide-md min-w-[180px] max-w-[280px] whitespace-normal break-words" title={c.help_topic ?? c.subject ?? ''}>
                       {val(c.help_topic ?? c.subject)}
                     </TD>
-                    <TD className="bt-col-hide-lg whitespace-nowrap">{val(c.preferred_contact_method)}</TD>
-                    <TD className="bt-col-hide-lg max-w-[160px] truncate" title={c.best_time ?? ''}>{val(c.best_time)}</TD>
-                    <TD className="bt-col-hide-lg max-w-[160px] truncate" title={c.therapist_requested ?? ''}>{val(c.therapist_requested)}</TD>
+                    <TD className="bt-col-hide-lg whitespace-normal break-words">{val(c.preferred_contact_method)}</TD>
+                    <TD className="bt-col-hide-lg min-w-[120px] max-w-[200px] whitespace-normal break-words" title={c.best_time ?? ''}>{val(c.best_time)}</TD>
+                    <TD className="bt-col-hide-lg min-w-[140px] max-w-[220px] whitespace-normal break-words" title={c.therapist_requested ?? ''}>{val(c.therapist_requested)}</TD>
                     <TD className="bt-col-hide-lg whitespace-nowrap text-[12.5px] text-ink-soft" title={formatPT(c.created_at)}>
                       {relativeTime(c.created_at)}
                     </TD>

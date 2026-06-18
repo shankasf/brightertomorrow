@@ -18,7 +18,9 @@ export const dynamic = "force-dynamic";
 // Discovered from src/app/*; keep in sync when a static page is added/removed.
 const STATIC_PATHS = [
   "", // homepage
-  "about",
+  // NOTE: "about" intentionally omitted — it 308-redirects to /story (the
+  // canonical, listed below). A redirecting URL in the sitemap shows up in GSC
+  // as "Page with redirect" and never indexes; list only the 200 destination.
   "affordable-therapy",
   "approach",
   "careers",

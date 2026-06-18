@@ -32,7 +32,6 @@ export type CalEvent = {
 // Mirror of the canonical roster — keep in sync with the gateway. The four
 // "not connected" therapists are flagged so the legend can render them faded.
 export const FALLBACK_ROSTER: Therapist[] = [
-  { staffId: 71, name: 'Sagar Shankaran',    feedConnected: true,  colorHex: '#7C3AED' },
   { staffId: 47, name: 'Elisia Danley',      feedConnected: true,  colorHex: '#DB2777' },
   { staffId: 24, name: 'Keunshea Fleming',   feedConnected: true,  colorHex: '#2563EB' },
   { staffId: 21, name: 'Alayna Hammond',     feedConnected: true,  colorHex: '#059669' },
