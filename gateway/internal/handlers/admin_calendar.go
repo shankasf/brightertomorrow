@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -179,10 +180,20 @@ func (h *AdminCalendarHandler) Events(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Audit: log each event id read. Holds have no separate PHI but we
-	// include them so the audit row set matches the response set.
-	admin.LogPHIAccessBatch(r.Context(), h.PHI, r, u,
-		"view_calendar_events", "calendar_events", resourceIDs)
+	// Audit: ONE row per calendar view, not one per event. The list response
+	// carries only metadata (summary/status/presence-of-details) — never the
+	// PHI description, which is read (and audited per-event) by EventDetails.
+	// Logging every visible event id here flooded the audit trail with
+	// thousands of identical-timestamp rows per browse; the range + staff
+	// filter + count (all non-PHI) capture the access precisely and let the
+	// visible event set be reconstructed from the calendar at that time.
+	staffFilter := "all"
+	if staffID > 0 {
+		staffFilter = strconv.Itoa(staffID)
+	}
+	auditScope := fmt.Sprintf("from=%s;to=%s;staff=%s;events=%d", from, to, staffFilter, len(resourceIDs))
+	admin.LogPHIAccess(r.Context(), h.PHI, r, u,
+		"view_calendar_events", "calendar_events", auditScope)
 
 	slog.Info("admin calendar events",
 		"staff_id", staffID,
