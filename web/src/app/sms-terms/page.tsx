@@ -81,7 +81,7 @@ const CONTENT: Block[] = [
   {
     kind: "p",
     text:
-      "Consent to receive text messages is not a condition of purchasing any goods or services. By providing your mobile number and opting in — through our website consent checkbox, verbally with our staff or scheduling assistant, by texting a keyword to our number, or on an in-person intake form — you agree to receive recurring automated appointment and marketing text messages at the number provided.",
+      "Consent to receive text messages is not a condition of purchasing any goods or services. We collect two separate consents, and you may agree to either, both, or neither: (1) appointment texts — confirmations, reminders, and schedule changes; and (2) marketing texts — occasional practice updates and outreach. Marketing consent is always optional and is collected separately from appointment consent. You provide your mobile number and opt in through our website consent checkboxes, verbally with our staff or scheduling assistant, by texting a keyword to our number, or on an in-person intake form. Messages are recurring and automated.",
   },
   { kind: "h2", text: "Carrier disclaimer" },
   {

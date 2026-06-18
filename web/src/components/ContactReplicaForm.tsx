@@ -44,6 +44,7 @@ export default function ContactReplicaForm() {
   const [therapist, setTherapist] = useState("");
   const [consent, setConsent] = useState(false);
   const [smsConsent, setSmsConsent] = useState(false);
+  const [smsMarketingConsent, setSmsMarketingConsent] = useState(false);
   const [state, setState] = useState<SubmitState>("idle");
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -73,6 +74,7 @@ export default function ContactReplicaForm() {
       best_time: bestTime.trim(),
       therapist_requested: therapist.trim(),
       sms_opt_in: smsConsent,
+      sms_marketing_opt_in: smsMarketingConsent,
     };
 
     try {
@@ -94,6 +96,7 @@ export default function ContactReplicaForm() {
       setTherapist("");
       setConsent(false);
       setSmsConsent(false);
+      setSmsMarketingConsent(false);
     } catch {
       setState("err");
     }
@@ -288,10 +291,25 @@ export default function ContactReplicaForm() {
           className="mt-0.5 h-4 w-4 shrink-0 accent-[#E1B878]"
         />
         <span className="text-[14px] text-ink leading-snug">
-          By checking this box, I agree to receive appointment reminders and marketing text
-          messages from Brighter Tomorrow Therapy at the number provided. Consent is not a
-          condition of service. Message frequency varies. Msg &amp; data rates may apply.
-          Reply STOP to cancel, HELP for help.
+          I agree to receive appointment reminders, confirmations, and schedule changes from
+          Brighter Tomorrow Therapy at the number provided. Message frequency varies. Msg &amp;
+          data rates may apply. Reply STOP to cancel, HELP for help.
+        </span>
+      </label>
+
+      <label htmlFor="cf-sms-marketing-consent" className="mt-4 flex items-start gap-3 cursor-pointer">
+        <input
+          id="cf-sms-marketing-consent"
+          type="checkbox"
+          checked={smsMarketingConsent}
+          onChange={(e) => setSmsMarketingConsent(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-[#E1B878]"
+        />
+        <span className="text-[14px] text-ink leading-snug">
+          I separately agree to receive marketing and practice-update text messages from
+          Brighter Tomorrow Therapy at the number provided. This is optional and not a condition
+          of service. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to
+          cancel, HELP for help.
         </span>
       </label>
 

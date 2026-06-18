@@ -33,10 +33,27 @@ type contactRequest struct {
 	BestTime               string `json:"best_time"`
 	TherapistRequested     string `json:"therapist_requested"`
 
-	// SMSOptIn is the optional, unchecked-by-default SMS consent checkbox.
-	// The contact submission lands in Postgres (non-BAA), so the consent
-	// itself is recorded separately in DDB via h.PHI — never as a PG column.
-	SMSOptIn bool `json:"sms_opt_in"`
+	// SMSOptIn / SMSMarketingOptIn are the two optional, unchecked-by-default SMS
+	// consent checkboxes. A2P requires marketing consent be collected separately
+	// from appointment (transactional) consent, so they are independent booleans
+	// and recorded as separate scoped consent items in DDB via h.PHI — never as a
+	// PG column (the contact submission itself lands in non-BAA Postgres).
+	SMSOptIn          bool `json:"sms_opt_in"`           // appointment texts
+	SMSMarketingOptIn bool `json:"sms_marketing_opt_in"` // marketing/practice updates
+}
+
+// scopedConsents maps the two consent checkboxes to the consent scopes that
+// should be recorded. Used by the contact and booking handlers so the mapping
+// stays identical across forms.
+func scopedConsents(appointment, marketing bool) []string {
+	var scopes []string
+	if appointment {
+		scopes = append(scopes, phi.SMSScopeTransactional)
+	}
+	if marketing {
+		scopes = append(scopes, phi.SMSScopeMarketing)
+	}
+	return scopes
 }
 
 var (
@@ -129,15 +146,19 @@ func (h *ContactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Best-effort A2P SMS consent (DDB, not Postgres) — never fail the
-	// submission over it.
-	if body.SMSOptIn && h.PHI != nil && strings.TrimSpace(body.Phone) != "" {
-		if err := h.PHI.PutSMSConsent(r.Context(), phi.SMSConsentInput{
-			Phone:   body.Phone,
-			OptedIn: true,
-			Method:  phi.SMSMethodWebContact,
-			Source:  "web",
-		}); err != nil {
-			slog.Warn("contact: sms consent record failed", "err", err)
+	// submission over it. Appointment and marketing consent are recorded as
+	// separate scoped items so we never market to an appointment-only opt-in.
+	if h.PHI != nil && strings.TrimSpace(body.Phone) != "" {
+		for _, c := range scopedConsents(body.SMSOptIn, body.SMSMarketingOptIn) {
+			if err := h.PHI.PutSMSConsent(r.Context(), phi.SMSConsentInput{
+				Phone:   body.Phone,
+				OptedIn: true,
+				Method:  phi.SMSMethodWebContact,
+				Scope:   c,
+				Source:  "web",
+			}); err != nil {
+				slog.Warn("contact: sms consent record failed", "err", err, "scope", c)
+			}
 		}
 	}
 
