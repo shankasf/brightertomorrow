@@ -48,7 +48,7 @@ export const ATHENA_LOG_WORKGROUP = "bt-log-search";
 // larger would scan years of logs and probably means a missing WHERE clause.
 export const ATHENA_LOG_QUERY_SCAN_LIMIT_BYTES = 1024 * 1024 * 1024;
 
-export const JANE_STAFF_IDS = [71, 47, 24, 21, 34, 53, 59, 16, 45, 66] as const;
+export const JANE_STAFF_IDS = [47, 24, 21, 34, 53, 59, 16, 45, 66] as const;
 
 export const SECRET_NAMES = {
   CLAIM_MD: "bt/claim-md/account-key",

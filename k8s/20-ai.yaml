@@ -12,7 +12,7 @@ spec:
     spec:
       containers:
         - name: ai
-          image: bt-ai:prod-237faed-1781390843
+          image: bt-ai:prod-a2475be-1781811772
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
           env:
@@ -30,6 +30,10 @@ spec:
               valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_MODEL, optional: true } }
             - name: REALTIME_TRANSCRIPTION_MODEL
               valueFrom: { secretKeyRef: { name: bt-config, key: REALTIME_TRANSCRIPTION_MODEL, optional: true } }
+            # Side-channel transcription model for the hc voice bridge (stored
+            # transcript only; the Realtime model hears raw audio directly).
+            - name: HC_TRANSCRIBE_MODEL
+              valueFrom: { secretKeyRef: { name: bt-config, key: HC_TRANSCRIBE_MODEL, optional: true } }
             - name: BT_API_URL
               value: "https://api.brightertomorrowtherapy.com"
             - name: BT_GATEWAY_URL
