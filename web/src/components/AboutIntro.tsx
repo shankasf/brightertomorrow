@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
+import IntroVideo from "./IntroVideo";
 import { FiArrowRight } from "react-icons/fi";
 
 export default function AboutIntro() {
@@ -28,12 +29,16 @@ export default function AboutIntro() {
             Nevada through telehealth.
           </p>
 
-          <Link
-            href="/story"
-            className="mt-8 inline-flex items-center gap-2 text-brand-700 hover:text-brand font-semibold border-b border-brand-300 hover:border-brand pb-1 transition-colors"
-          >
-            Read our story <FiArrowRight />
-          </Link>
+          <IntroVideo />
+
+          <div className="mt-9">
+            <Link
+              href="/story"
+              className="inline-flex items-center gap-2 text-brand-700 hover:text-brand font-semibold border-b border-brand-300 hover:border-brand pb-1 transition-colors"
+            >
+              Read our story <FiArrowRight />
+            </Link>
+          </div>
         </Reveal>
 
         {/* RIGHT — editorial stat panel */}

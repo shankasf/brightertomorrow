@@ -360,7 +360,12 @@ func (h *AdminStatsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			series := make([]int, seriesDays)
 			todayStart := time.Now().UTC().Truncate(24 * time.Hour)
 			for _, rec := range recs {
-				// ListIntakePointers already skips purged rows.
+				// ListIntakePointers already skips purged rows. Archived
+				// records are excluded so this KPI matches the Appointments
+				// list's default "Active" filter (admin_appointments.go).
+				if rec.WorkflowStatus == "archived" {
+					continue
+				}
 				if !rec.CreatedAt.Before(todayStart) {
 					intakes.today++
 				}

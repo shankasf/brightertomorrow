@@ -75,3 +75,6 @@ image.png
 # GCP service-account keys — never commit
 brighter-tomorrow-*.json
 *-service-account*.json
+
+# Raw video source export (optimized .mp4 lives in web/public/media)
+Intro video- Home page.mov
