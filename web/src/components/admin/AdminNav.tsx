@@ -1,6 +1,5 @@
 'use client';
 import type { ReactElement } from 'react';
-import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -27,7 +26,7 @@ import {
   LuX,
 } from 'react-icons/lu';
 import { AdminUser } from './useAdminAuth';
-import { useNavCounts } from './useNavCounts';
+import NotificationBell from './NotificationBell';
 
 type Icon = (props: { className?: string }) => ReactElement;
 
@@ -91,27 +90,20 @@ export default function AdminNav({
   user,
   onLogout,
   onClose,
+  counts,
+  notifTotal,
+  onOpenNotifications,
 }: {
   user: AdminUser;
   onLogout: () => void;
   onClose?: () => void;
+  counts: Record<string, number>;
+  notifTotal: number;
+  onOpenNotifications: () => void;
 }) {
   const pathname = usePathname();
   const isSuperadmin = user.role === 'superadmin';
   const initial = (user.email[0] ?? 'A').toUpperCase();
-
-  const { counts, markSeen } = useNavCounts(true);
-
-  // Opening a badged section (click, direct load, or back/forward) clears it.
-  useEffect(() => {
-    const match = nav.find(
-      (item): item is NavLink =>
-        'section' in item &&
-        !!item.section &&
-        (pathname === item.href || pathname.startsWith(item.href + '/')),
-    );
-    if (match?.section) markSeen(match.section);
-  }, [pathname, markSeen]);
 
   return (
     <aside className="relative flex h-full w-64 shrink-0 flex-col overflow-hidden border-r border-black/30 bg-gradient-to-b from-[#192735] via-[#1d2c3d] to-[#253A4D] text-cream/90">
@@ -130,16 +122,19 @@ export default function AdminNav({
             <div className="text-[10.5px] font-medium uppercase tracking-[0.18em] text-brand/85">Admin Console</div>
           </div>
         </div>
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close navigation"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-cream/70 ring-1 ring-inset ring-white/15 transition hover:bg-white/10 hover:text-white lg:hidden"
-          >
-            <LuX width={16} height={16} strokeWidth={2} />
-          </button>
-        )}
+        <div className="flex items-center gap-1.5">
+          <NotificationBell total={notifTotal} onClick={onOpenNotifications} tone="dark" />
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close navigation"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-cream/70 ring-1 ring-inset ring-white/15 transition hover:bg-white/10 hover:text-white lg:hidden"
+            >
+              <LuX width={16} height={16} strokeWidth={2} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* User */}

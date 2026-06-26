@@ -4,6 +4,10 @@ import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAdminAuth } from './useAdminAuth';
 import AdminNav from './AdminNav';
+import NotificationPanel from './NotificationPanel';
+import NotificationBell from './NotificationBell';
+import { useNavCounts } from './useNavCounts';
+import { sectionForPath, totalUnread } from './notifSections';
 import { BTSpinner } from './Spinner';
 import { LuMenu } from 'react-icons/lu';
 
@@ -11,19 +15,31 @@ function ChromedShell({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = useAdminAuth();
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
 
-  // Close mobile drawer on route change.
+  // Shared notification counts — one poll for the whole shell (badges + drawer).
+  const { counts, markSeen } = useNavCounts(!!user);
+  const notifTotal = totalUnread(counts);
+
+  // Opening a badged section (click, direct load, or back/forward) clears it.
+  useEffect(() => {
+    const section = sectionForPath(pathname);
+    if (section) markSeen(section);
+  }, [pathname, markSeen]);
+
+  // Close the mobile nav drawer + notification drawer on route change.
   useEffect(() => {
     setNavOpen(false);
+    setNotifOpen(false);
   }, [pathname]);
 
-  // Lock body scroll while drawer is open on mobile.
+  // Lock body scroll while either drawer is open.
   useEffect(() => {
-    if (!navOpen) return;
+    if (!navOpen && !notifOpen) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev; };
-  }, [navOpen]);
+  }, [navOpen, notifOpen]);
 
   if (loading) {
     return (
@@ -39,7 +55,13 @@ function ChromedShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen overflow-hidden bg-cream-alt font-sans text-ink antialiased">
       {/* Desktop sidebar */}
       <div className="hidden lg:flex">
-        <AdminNav user={user} onLogout={logout} />
+        <AdminNav
+          user={user}
+          onLogout={logout}
+          counts={counts}
+          notifTotal={notifTotal}
+          onOpenNotifications={() => setNotifOpen(true)}
+        />
       </div>
 
       {/* Mobile drawer */}
@@ -67,8 +89,38 @@ function ChromedShell({ children }: { children: React.ReactNode }) {
               aria-modal="true"
               aria-label="Admin navigation"
             >
-              <AdminNav user={user} onLogout={logout} onClose={() => setNavOpen(false)} />
+              <AdminNav
+                user={user}
+                onLogout={logout}
+                onClose={() => setNavOpen(false)}
+                counts={counts}
+                notifTotal={notifTotal}
+                onOpenNotifications={() => { setNavOpen(false); setNotifOpen(true); }}
+              />
             </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Notification drawer (right slide-over) — desktop + mobile */}
+      <AnimatePresence>
+        {notifOpen && (
+          <>
+            <motion.div
+              key="notif-scrim"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setNotifOpen(false)}
+              className="fixed inset-0 z-40 bg-ink/40 backdrop-blur-sm"
+              aria-hidden
+            />
+            <NotificationPanel
+              counts={counts}
+              markSeen={markSeen}
+              onClose={() => setNotifOpen(false)}
+            />
           </>
         )}
       </AnimatePresence>
@@ -92,6 +144,9 @@ function ChromedShell({ children }: { children: React.ReactNode }) {
               <div className="text-[12.5px] font-semibold tracking-tight text-ink">Brighter Tomorrow</div>
               <div className="text-[9.5px] font-medium uppercase tracking-[0.18em] text-ink-soft">Admin Console</div>
             </div>
+          </div>
+          <div className="ml-auto">
+            <NotificationBell total={notifTotal} onClick={() => setNotifOpen(true)} tone="light" />
           </div>
         </div>
 
