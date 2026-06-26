@@ -185,6 +185,11 @@ func shouldSkipActivityLog(path string) bool {
 	if path == "/admin/api/stats" {
 		return true
 	}
+	// Nav notification badges — polled on a timer, aggregate counts only (no
+	// PHI), so the read carries no audit value and would otherwise flood the log.
+	if strings.HasPrefix(path, "/admin/api/notifications/") {
+		return true
+	}
 	return false
 }
 

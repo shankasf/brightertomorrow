@@ -169,6 +169,7 @@ func main() {
 	adminAppointmentsH := &handlers.AdminAppointmentsHandler{Pool: pool, PHI: phiStore, Notify: notifyStore, NotifyEnabled: cfg.AppointmentNotifyEnabled}
 	adminInsuranceChecksH := &handlers.AdminInsuranceChecksHandler{Pool: pool, PHI: phiStore}
 	adminCallbacksH := &handlers.AdminCallbacksHandler{Pool: pool, PHI: phiStore}
+	adminNotificationsH := &handlers.AdminNotificationsHandler{Pool: pool, PHI: phiStore}
 	chatFeedbackH := &handlers.ChatFeedbackHandler{PHI: phiStore}
 	adminLogsH := &handlers.AdminLogsHandler{Pool: pool, PHI: phiStore, AIServiceURL: cfg.AIServiceURL, Athena: athenaClient}
 	frontendLogsH := &handlers.FrontendLogsHandler{}
@@ -346,6 +347,13 @@ func main() {
 
 			r.Get("/stats", adminStatsH.ServeHTTP)
 
+			// Sidebar unread-count badges. Available to every admin (auditor +
+			// superadmin) — returns aggregate counts only, no PHI. Excluded from
+			// the access-audit log (shouldSkipActivityLog) since the client polls
+			// it on a timer, same as /stats.
+			r.Get("/notifications/counts", adminNotificationsH.Counts)
+			r.Post("/notifications/seen", adminNotificationsH.Seen)
+
 			// PHI: contacts (access logged on detail view §164.312(b)).
 			r.Get("/contacts", adminContactsH.List)
 			r.Get("/contacts/{id}", adminContactsH.Get)
@@ -408,6 +416,7 @@ func main() {
 				r.Get("/content/blog", adminContentH.ListBlogPosts)
 				r.Get("/content/blog/{id}", adminContentH.GetBlogPost)
 				r.Post("/content/blog", adminContentH.CreateBlogPost)
+				r.Post("/content/blog/publish", adminContentH.BulkPublishBlogPosts)
 				r.Put("/content/blog/{id}", adminContentH.UpdateBlogPost)
 				r.Delete("/content/blog/{id}", adminContentH.DeleteBlogPost)
 

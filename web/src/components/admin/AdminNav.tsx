@@ -1,5 +1,6 @@
 'use client';
 import type { ReactElement } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -26,6 +27,7 @@ import {
   LuX,
 } from 'react-icons/lu';
 import { AdminUser } from './useAdminAuth';
+import { useNavCounts } from './useNavCounts';
 
 type Icon = (props: { className?: string }) => ReactElement;
 
@@ -51,19 +53,21 @@ const I = {
   logout: ({ className = '' }) => <LuLogOut className={className} strokeWidth={1.7} />,
 };
 
-type NavLink = { href: string; label: string; icon: Icon; superadminOnly?: boolean };
+// `section` ties a nav item to a notification-badge key returned by
+// GET /admin/api/notifications/counts. Items without one never show a badge.
+type NavLink = { href: string; label: string; icon: Icon; superadminOnly?: boolean; section?: string };
 type NavGroup = { group: string; superadminOnly?: boolean };
 type NavEntry = NavLink | NavGroup;
 
 const nav: NavEntry[] = [
   { href: '/admin', label: 'Dashboard', icon: I.dashboard },
-  { href: '/admin/appointments', label: 'Appointment Requests', icon: I.calendar },
+  { href: '/admin/appointments', label: 'Appointment Requests', icon: I.calendar, section: 'appointments' },
   { href: '/admin/calendar', label: 'Calendar', icon: I.calendar },
-  { href: '/admin/insurance-checks', label: 'Insurance Checks', icon: I.shield },
-  { href: '/admin/callbacks', label: 'Callback Req. — Chatbot', icon: I.chat },
-  { href: '/admin/contacts', label: 'Enquiries — Website', icon: I.mail },
-  { href: '/admin/chat', label: 'Chat Sessions', icon: I.chat },
-  { href: '/admin/newsletter', label: 'Newsletter', icon: I.newsletter },
+  { href: '/admin/insurance-checks', label: 'Insurance Checks', icon: I.shield, section: 'insurance_checks' },
+  { href: '/admin/callbacks', label: 'Callback Req. — Chatbot', icon: I.chat, section: 'callbacks' },
+  { href: '/admin/contacts', label: 'Enquiries — Website', icon: I.mail, section: 'contacts' },
+  { href: '/admin/chat', label: 'Chat Sessions', icon: I.chat, section: 'chat' },
+  { href: '/admin/newsletter', label: 'Newsletter', icon: I.newsletter, section: 'newsletter' },
   { group: 'Agent Accuracy', superadminOnly: true },
   { href: '/admin/agent-accuracy', label: 'Accuracy Overview', icon: I.accuracy, superadminOnly: true },
   { group: 'HIPAA Compliance', superadminOnly: true },
@@ -95,6 +99,19 @@ export default function AdminNav({
   const pathname = usePathname();
   const isSuperadmin = user.role === 'superadmin';
   const initial = (user.email[0] ?? 'A').toUpperCase();
+
+  const { counts, markSeen } = useNavCounts(true);
+
+  // Opening a badged section (click, direct load, or back/forward) clears it.
+  useEffect(() => {
+    const match = nav.find(
+      (item): item is NavLink =>
+        'section' in item &&
+        !!item.section &&
+        (pathname === item.href || pathname.startsWith(item.href + '/')),
+    );
+    if (match?.section) markSeen(match.section);
+  }, [pathname, markSeen]);
 
   return (
     <aside className="relative flex h-full w-64 shrink-0 flex-col overflow-hidden border-r border-black/30 bg-gradient-to-b from-[#192735] via-[#1d2c3d] to-[#253A4D] text-cream/90">
@@ -156,6 +173,7 @@ export default function AdminNav({
           if (item.superadminOnly && !isSuperadmin) return null;
           const active = pathname === item.href || (item.href !== '/admin' && pathname.startsWith(item.href));
           const Icon = item.icon;
+          const badge = item.section ? counts[item.section] ?? 0 : 0;
           return (
             <Link
               key={item.href}
@@ -181,7 +199,15 @@ export default function AdminNav({
                 />
               )}
               <Icon className={`relative z-10 h-[18px] w-[18px] shrink-0 transition-transform ${active ? 'text-brand' : 'text-cream/50 group-hover:text-cream'}`} />
-              <span className="relative z-10 truncate">{item.label}</span>
+              <span className="relative z-10 min-w-0 flex-1 truncate">{item.label}</span>
+              {badge > 0 && (
+                <span
+                  className="relative z-10 ml-auto inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[#66202A] px-1.5 text-[10px] font-bold leading-none text-white ring-1 ring-inset ring-white/20 shadow-[0_2px_8px_rgba(102,32,42,0.5)]"
+                  aria-label={`${badge} new`}
+                >
+                  {badge > 99 ? '99+' : badge}
+                </span>
+              )}
             </Link>
           );
         })}

@@ -260,26 +260,100 @@ _ABANDONED_CALL_REASON = (
 )
 
 
-def _log_abandoned_callback(phone: str) -> None:
+# Model for the best-effort abandoned-call summary. Runs only after the caller
+# has already hung up, so latency doesn't matter — a small/fast model is fine.
+# Falls back to the extract model, then the main chat model. PHI stays on the
+# BAA-covered US-residency OpenAI endpoint (same as every other call).
+_SUMMARY_MODEL = (
+    os.environ.get("OPENAI_SUMMARY_MODEL")
+    or os.environ.get("OPENAI_EXTRACT_MODEL")
+    or os.environ.get("OPENAI_MODEL")
+    or "gpt-5.5-2026-04-23"
+)
+
+_SUMMARY_SYSTEM = (
+    "You summarize an abandoned inbound phone call for the practice staff member "
+    "who will call the patient back. The caller hung up before the call finished. "
+    "Return STRICT JSON with exactly these keys: first_name, last_name, summary.\n"
+    "- first_name / last_name: the caller's own name ONLY if they stated it during "
+    "the call; otherwise empty strings. Never guess or invent a name.\n"
+    "- summary: 1–2 plain sentences, written for staff, on what the caller wanted "
+    "and where the call dropped off (e.g. \"Wanted to update insurance to Blue "
+    "Cross Blue Shield; line dropped while spelling the policy first name.\"). "
+    "Max 400 characters. No greetings, no pleasantries."
+)
+
+
+def _summarize_abandoned_call(
+    transcript: list[tuple[str, str]],
+) -> tuple[str, str, str]:
+    """Best-effort: pull (first_name, last_name, summary) from a dropped call's
+    transcript so the auto-logged callback row carries the caller's name and a
+    staff-facing reason. Any failure returns ("", "", "") and the caller is still
+    logged as "Unknown caller" with the default reason.
+    """
+    turns = [(r, t) for r, t in (transcript or []) if (t or "").strip()]
+    if not turns:
+        return "", "", ""
+    convo = "\n".join(
+        f"{'Caller' if r == 'user' else 'Assistant'}: {t.strip()}" for r, t in turns
+    )
+    try:
+        from .integrations.voice_tools import _openai
+        resp = _openai().chat.completions.create(
+            model=_SUMMARY_MODEL,
+            messages=[
+                {"role": "system", "content": _SUMMARY_SYSTEM},
+                {"role": "user", "content": convo[:6000]},
+            ],
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.choices[0].message.content or "{}").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            raw = raw[raw.find("{"):raw.rfind("}") + 1] if "{" in raw else "{}"
+        data = json.loads(raw or "{}")
+        first = str(data.get("first_name") or "").strip()[:100]
+        last = str(data.get("last_name") or "").strip()[:100]
+        summary = str(data.get("summary") or "").strip()[:480]
+        return first, last, summary
+    except Exception:
+        logger.exception("twilio_abandoned_summary_failed")
+        return "", "", ""
+
+
+def _log_abandoned_callback(
+    phone: str,
+    first_name: str = "",
+    last_name: str = "",
+    reason: str = "",
+) -> None:
     """Create a /admin/callbacks row for a phone caller who dropped mid-call.
 
     Fires only for calls that ended by caller hangup ("remote-close") or the
-    120s silence timeout — never a clean agent-ended call. The caller's name is
-    unknown at hangup, so the row is logged as "Unknown caller" against the
-    Twilio ANI. The gateway de-dupes by phone over a 24h window, so a caller who
-    redials and drops again doesn't pile up duplicate rows. Best-effort: a
-    failure here just means staff won't see this particular missed call.
+    silence / max-duration timeout — never a clean agent-ended call. When the
+    transcript yields the caller's name and a call summary, they're passed in;
+    otherwise the row falls back to "Unknown caller" against the Twilio ANI with
+    a generic reason. The gateway de-dupes by phone over a 24h window, so a
+    caller who redials and drops again doesn't pile up duplicate rows.
+    Best-effort: a failure here just means staff won't see this particular
+    missed call.
     """
     phone = (phone or "").strip()
     if not phone:
         return
+    # Gateway requires 1–100 char first/last and 1–500 char reason. Fall back to
+    # the "Unknown caller" placeholder for whatever the transcript didn't yield.
+    first_name = (first_name or "").strip() or "Unknown"
+    last_name = (last_name or "").strip() or "caller"
+    reason = (reason or "").strip() or _ABANDONED_CALL_REASON
     import urllib.request
     base = os.environ.get("BT_GATEWAY_URL", "http://bt-gateway")
     payload = json.dumps({
-        "first_name": "Unknown",
-        "last_name": "caller",
+        "first_name": first_name[:100],
+        "last_name": last_name[:100],
         "phone": phone,
-        "reason": _ABANDONED_CALL_REASON,
+        "reason": reason[:500],
         "source": "voice-phone",
         "dedupe_by_phone_hours": 24,
     }).encode("utf-8")

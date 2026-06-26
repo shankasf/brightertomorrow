@@ -8,6 +8,7 @@ import (
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/aiclient"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/httpx"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -238,6 +239,42 @@ func (h *AdminContentHandler) DeleteBlogPost(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *AdminContentHandler) BulkPublishBlogPosts(w http.ResponseWriter, r *http.Request) {
+	type bulkPublishBody struct {
+		IDs       []int64 `json:"ids"`
+		Published bool    `json:"published"`
+	}
+	var b bulkPublishBody
+	if err := httpx.ReadJSON(w, r, &b); err != nil {
+		httpx.WriteValidationError(w, "invalid JSON")
+		return
+	}
+	if len(b.IDs) == 0 {
+		httpx.WriteValidationError(w, "ids must be a non-empty array")
+		return
+	}
+
+	var (
+		tag pgconn.CommandTag
+		err error
+	)
+	if b.Published {
+		tag, err = h.Pool.Exec(r.Context(),
+			`UPDATE bt.blog_posts SET published = true, published_at = now() WHERE id = ANY($1)`,
+			b.IDs)
+	} else {
+		tag, err = h.Pool.Exec(r.Context(),
+			`UPDATE bt.blog_posts SET published = false WHERE id = ANY($1)`,
+			b.IDs)
+	}
+	if err != nil {
+		slog.Error("admin blog bulk publish", "err", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "updated": tag.RowsAffected()})
 }
 
 // ─── Site Settings ────────────────────────────────────────────────────────────

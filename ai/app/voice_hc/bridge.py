@@ -49,8 +49,10 @@ from ..bt_agents.realtime import (
 # Read-only glue from the existing SDK bridge — identical end_call / persistence
 # behaviour across all three bridges. We import, never modify.
 from ..twilio_voice import (
+    _log_abandoned_callback,
     _mark_session_ended,
     _schedule_persist,
+    _summarize_abandoned_call,
     _twilio_rest_hangup,
     end_call_event,
 )
@@ -275,6 +277,13 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
     hangup_task: dict[str, Any] = {"v": None}
     dispatched_calls: set[str] = set()
     transcript_seen = {"started": False}
+    # Running transcript (role, text) + flags used to auto-log a missed-call
+    # callback if the caller hangs up mid-conversation. booking_succeeded is set
+    # once the caller has completed what they came for (booked / verified /
+    # asked for a callback) so we don't double-log a row for them.
+    transcript: list[tuple[str, str]] = []
+    user_turns = {"n": 0}
+    booking_succeeded = {"v": False}
 
     hangup_event = asyncio.Event()
     end_call_event.set(hangup_event)
@@ -554,6 +563,16 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                         output = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
                         logger.info("voicehc_tool_end call_sid=%s tool=%s output=%s",
                                     call_sid, name, output[:400])
+                        # The caller completed their intent (booked, verified
+                        # insurance, or explicitly asked for a callback) — don't
+                        # also auto-log a missed-call row if they then hang up.
+                        if (
+                            (name == "book_appointment" and "appointment_id" in output)
+                            or (name in ("book_with_insurance", "request_intake_callback")
+                                and isinstance(result, dict) and result.get("ok"))
+                        ):
+                            booking_succeeded["v"] = True
+                            logger.info("voicehc_intent_completed call_sid=%s tool=%s", call_sid, name)
                         await oai.send(json.dumps({
                             "type": "conversation.item.create",
                             "item": {"type": "function_call_output",
@@ -591,6 +610,8 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                             continue
                         logger.info("voicehc_turn call_sid=%s role=user text=%r", call_sid, rep_text[:200])
                         _schedule_persist(session_id, "user", rep_text)
+                        transcript.append(("user", rep_text))
+                        user_turns["n"] += 1
                         # NO manual response.create — create_response:true already
                         # made the reply when server_vad committed this turn.
 
@@ -601,6 +622,7 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                             logger.info("voicehc_turn call_sid=%s role=assistant text=%r",
                                         call_sid, ai_text[:200])
                             _schedule_persist(session_id, "assistant", ai_text)
+                            transcript.append(("assistant", ai_text))
 
                     elif t == "error":
                         logger.error("voicehc_openai_error call_sid=%s err=%s",
@@ -654,3 +676,28 @@ async def run_twilio_session(twilio_ws: WebSocket) -> None:
                 pass
             await asyncio.get_running_loop().run_in_executor(None, _twilio_rest_hangup, call_sid)
         await asyncio.get_running_loop().run_in_executor(None, _mark_session_ended, session_id)
+
+        # A caller who hung up mid-call ("remote-close"/"openai-close") or ran
+        # into the max-duration cutoff never got what they called for — log a
+        # /admin/callbacks row so staff can phone them back. We summarize the
+        # transcript to fill in the caller's name and a staff-facing reason;
+        # the number to call is the Twilio ANI. Clean agent-ended calls
+        # ("end-call-tool") and callers who already completed their intent are
+        # skipped. De-duped by phone (24h) at the gateway; best-effort.
+        if (
+            end_reason in ("remote-close", "openai-close", "max-duration")
+            and ani
+            and user_turns["n"] > 0
+            and not booking_succeeded["v"]
+        ):
+            loop = asyncio.get_running_loop()
+            first, last, summary = await loop.run_in_executor(
+                None, _summarize_abandoned_call, transcript,
+            )
+            logger.info(
+                "voicehc_abandoned_callback call_sid=%s caller=***%s named=%s summarized=%s",
+                call_sid, ani[-4:], bool(first or last), bool(summary),
+            )
+            await loop.run_in_executor(
+                None, _log_abandoned_callback, ani, first, last, summary,
+            )
