@@ -141,7 +141,13 @@ def handler(event: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     put({
         "PK": f"PATIENT#{body['patient_id']}",
         "SK": f"INSURANCE#{date}",
-        "GSI1PK": "ENTITY#INSURANCE",
+        # This is the raw CLAIM.MD eligibility *cache* row, not the patient-facing
+        # PHI record (that is written separately by the gateway as the full
+        # InsuranceCheckRecord). It carries none of the admin display fields
+        # (firstName/lastName/payerName/...), so it MUST NOT share the admin
+        # list's GSI1PK ("ENTITY#INSURANCE") or it renders as a blank row in
+        # /admin/insurance-checks. Use a distinct entity tag.
+        "GSI1PK": "ENTITY#INSURANCE_CACHE",
         "GSI1SK": now_iso(),
         "status": status,
         "copay": copay,
