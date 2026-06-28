@@ -1,7 +1,8 @@
 import { FiArrowRight } from "react-icons/fi";
 import Reveal from "./Reveal";
 
-const JOTFORM_MATCH_URL = "https://form.jotform.com/253014448330448";
+// In-house therapist-match flow (replaced the JotForm questionnaire).
+const MATCH_URL = "/get-scheduled";
 
 export default function NotSureWhereToStart() {
   return (
@@ -44,9 +45,7 @@ export default function NotSureWhereToStart() {
 
             <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
               <a
-                href={JOTFORM_MATCH_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={MATCH_URL}
                 className="btn-primary"
               >
                 Find My Therapist <FiArrowRight size={14} />

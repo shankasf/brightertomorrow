@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from ._constants import THERAPIST_MATCH_FORM_URL
+# THERAPIST_MATCH_FORM_URL import removed 2026-06-27: the inline [[MATCH_QUIZ]]
+# widget replaced the JotForm link. The constant is kept in _constants.py in
+# case other code imports it, but scenes no longer instruct agents to share it.
 
 Scene = Literal[
     "greeting",
@@ -197,32 +199,35 @@ SCENE_INSTRUCTIONS: dict[str, str] = {
         "from `available_therapists` in the context — every name, in a "
         "clean readable list. Keep it warm and brief: a one-line intro, "
         "the names, then ONE short offer that covers the two ways forward: "
-        "(1) if they already have someone in mind, you'll book them; (2) if "
-        "they're not sure who's the right fit, they can use our quick "
-        "matching form, then come back and you'll get them booked. Include "
-        "the matching form link from `matching_form_url` in the context "
-        "EXACTLY as given (a plain https:// URL — the chat renders it). "
-        "Do NOT claim you will match them or pick a 'best fit' yourself, "
-        "and do NOT invent specialties, credentials, or availability — you "
-        "only have the names. If `booking_status` shows a booking is "
-        "already in progress, list the names and then in ONE short clause "
-        "offer to pick the booking back up."
+        "(1) if they already have someone in mind, you'll book them right "
+        "here; (2) if they're not sure who's the right fit, you can run a "
+        "quick quiz to find their best match — output the literal marker "
+        "`[[MATCH_QUIZ]]` on its own line at the END of your reply on chat "
+        "channels (the widget renders the inline quiz; do NOT emit it on "
+        "voice). Do NOT claim you will match them or pick a 'best fit' "
+        "yourself, and do NOT invent specialties, credentials, or "
+        "availability — you only have the names. If `booking_status` shows "
+        "a booking is already in progress, list the names and then in ONE "
+        "short clause offer to pick the booking back up."
     ),
 
     "matching_referral": (
-        "The caller wants help choosing the right therapist (to be matched, "
-        "or asked who's 'best' for a need — see `user_just_said`). You do "
-        "NOT match or recommend a clinician yourself. Warmly hand them the "
-        "self-service matching form: include the link from `matching_form_"
-        "url` in the context EXACTLY as given (a plain https:// URL — the "
-        "chat renders it). In ONE short, friendly message: (1) acknowledge "
-        "what they're looking for; (2) give the link as the way to get "
-        "matched; (3) tell them to come back here afterward with the "
-        "therapist it suggests and you'll get them booked. Do NOT name or "
-        "rank any clinician, do NOT invent specialties, and do NOT pull up "
-        "the roster. If they'd rather not use the form, offer to book with "
-        "anyone they already have in mind or take a callback. Keep it to "
-        "2–3 sentences and end with a gentle next-step question."
+        "The caller wants help choosing the right therapist (they asked "
+        "who's 'best' for their needs, or said they're not sure who to see "
+        "— see `user_just_said`). You do NOT match or recommend a "
+        "clinician yourself. Instead:\n"
+        "  CHAT channel: In ONE short, warm message (1) acknowledge what "
+        "they're looking for; (2) let them know you have a quick quiz that "
+        "will match them to the right fit; (3) output the literal marker "
+        "`[[MATCH_QUIZ]]` on its own line at the very end — the widget "
+        "renders the inline quiz steps and result cards. Do NOT output the "
+        "marker on voice channels. Do NOT name or rank any clinician. Do "
+        "NOT send an external URL. If they'd rather not use the quiz, offer "
+        "to book with anyone they already have in mind, or go to "
+        "/get-scheduled, or take a callback. Keep it to 2–3 sentences.\n"
+        "  VOICE channel: this scene should not fire for voice — the "
+        "realtime agent handles matching conversationally via the "
+        "match_therapists tool without markers or links."
     ),
 
     "present_slots": (

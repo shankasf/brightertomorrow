@@ -464,12 +464,13 @@ def planner(state: State) -> str:
     is_chat = state.get("channel") == "chat"
 
     # ---- 12-pre. "Which therapist is right for me?" -------------------
-    # The assistant NEVER matches a therapist itself — it refers the caller
-    # to the self-service matching form and invites them back to book. Takes
-    # precedence over the roster/availability branches so "who's best for X?"
-    # routes to the referral, not a name list. Chat only (the form URL is a
-    # link); on voice this signal never fires into a link — voice simply
-    # doesn't offer matching (see triage.py). Same active-booking guard.
+    # Chat: assistant emits [[MATCH_QUIZ]] — the widget renders the inline
+    # quiz, calls POST /v1/match/therapists, and posts results back into the
+    # thread. The LangGraph chat agent never calls match_therapists itself.
+    # Voice: the realtime triage agent handles this conversationally via the
+    # match_therapists tool — that path never reaches this LangGraph planner.
+    # This branch therefore fires only on chat (and only outside active booking
+    # so a stray "who's best?" doesn't abandon a half-finished booking).
     if state.get("_wants_therapist_match") and (is_chat or not mid_booking):
         return _route(state, N.RESPOND, "matching_referral")
 

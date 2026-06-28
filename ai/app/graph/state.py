@@ -300,7 +300,7 @@ class State(TypedDict, total=False):
     _info_this_turn: bool             # caller asked a KB/FAQ question THIS turn — answer it as a one-turn detour without flipping the sticky booking/callback intent
     _asks_therapist_roster: bool      # caller asked WHO the therapists are (roster/names) — planner routes to the list_therapists scene
     _asks_booking_availability: bool  # caller asked whether a/any therapist has open slots to book — planner checks the real calendar (propose_slots) before intake, then continues booking
-    _wants_therapist_match: bool      # caller wants help choosing a therapist — chat planner refers them to the matching form (never picks); voice never offers matching
+    _wants_therapist_match: bool      # caller wants help choosing a therapist — chat planner emits [[MATCH_QUIZ]] (widget handles it); voice realtime agent calls match_therapists tool conversationally
     _time_of_day: str | None          # caller's slot pref: morning/afternoon/evening/any
     _earliest_day_offset: int | None  # caller's earliest day offset
     _payer_check: dict | None         # last check_insurance_support result

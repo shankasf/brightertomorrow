@@ -425,6 +425,97 @@ def list_team_members() -> list[dict[str, Any]]:
 
 
 @function_tool
+def match_therapists(
+    type: str,
+    modality: str | None = None,
+    location: str | None = None,
+    insurance: str | None = None,
+) -> dict[str, Any]:
+    """Match clinicians to the caller's needs via the gateway roster.
+
+    Call this on VOICE after gathering the caller's answers conversationally
+    (ask ONE question per turn, wait for the answer, then ask the next):
+      1. type     — kind of support the caller needs. Common values:
+                    "individual", "couples", "child", "teen", "family".
+      2. modality — "telehealth" or "in-person" (always ask this).
+      3. location — office slug when modality=="in-person":
+                    "e-russell" (East Russell office) or
+                    "n-durango" (North Durango office).
+                    ONLY ask when modality is in-person; skip for telehealth.
+      4. insurance — "in-network"  (caller wants in-network only),
+                     "private-pay" (cash / self-pay),
+                     "no-pref"     (no preference / not sure).
+
+    Do NOT call this on text-chat channels — the [[MATCH_QUIZ]] widget
+    handles matching on chat and calls the gateway directly from the browser.
+
+    Returns (on success):
+      {
+        "ok": True,
+        "result_count": int,
+        "results": [
+          {
+            "name": str, "credentials": str, "specialties": [str],
+            "rate": str, "in_network": bool,
+            "staff_id": int,      # > 0 means self-service bookable
+            "bookable": bool      # True when staff_id > 0
+          },
+          ...  (sorted by match quality / sort_order)
+        ]
+      }
+
+    Present the top 1–3 matched clinicians by name and one or two key
+    specialties. Let the caller pick, then carry that therapist's staff_id
+    into propose_slots and book_appointment.
+
+    Returns {"ok": False, "error": "..."} when the gateway is unreachable or
+    no clinicians match — in that case offer to take a callback instead.
+    """
+    src = agent_source.get()
+    channel = "voice" if "voice" in src else "chat"
+
+    answers: dict[str, str | None] = {
+        "type": type,
+        "modality": modality,
+        "location": location,
+        "insurance": insurance,
+    }
+    with _log_call("match_therapists", type=type, channel=channel):
+        from .match_client import call_match_therapists as _call
+        resp = _call(channel, answers)
+
+    if not resp.get("ok"):
+        logger.info(
+            "tool_result tool=match_therapists ok=false error=%r",
+            resp.get("error"),
+        )
+        return {"ok": False, "error": resp.get("error", "match_failed")}
+
+    raw: list[dict[str, Any]] = resp.get("results") or []
+    results = [
+        {
+            "name": c.get("name", ""),
+            "credentials": c.get("credentials", ""),
+            "specialties": c.get("specialties") or [],
+            "rate": c.get("rate", ""),
+            "in_network": bool(c.get("in_network")),
+            "staff_id": int(c.get("staff_id") or 0),
+            "bookable": int(c.get("staff_id") or 0) > 0,
+        }
+        for c in raw
+    ]
+    logger.debug(
+        "tool_result tool=match_therapists channel=%s count=%d",
+        channel, len(results),
+    )
+    return {
+        "ok": True,
+        "result_count": resp.get("result_count", len(results)),
+        "results": results,
+    }
+
+
+@function_tool
 def kb_search(query: str, k: int = 5) -> list[dict[str, Any]]:
     """Semantic search over the scraped brightertomorrowtherapy.com knowledge base.
 
@@ -473,6 +564,7 @@ ALL_TOOLS = [
     get_service,
     list_specialties,
     list_team_members,
+    match_therapists,
     list_locations,
     get_business_hours_and_contact,
     search_faqs,
@@ -494,6 +586,7 @@ INFO_TOOLS = [
 
 MATCHING_TOOLS = [
     list_team_members,
+    match_therapists,
     list_specialties,
     list_services,
 ]

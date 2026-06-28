@@ -96,9 +96,7 @@ export default function HowWeHelp() {
               </p>
             </div>
             <a
-              href="https://form.jotform.com/253014448330448"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/get-scheduled"
               className="btn-primary mt-6 sm:mt-0 shrink-0"
             >
               Find My Therapist <FiArrowRight />

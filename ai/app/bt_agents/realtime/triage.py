@@ -43,6 +43,7 @@ from ...integrations.voice_tools import (
     list_specialties,
     list_team_members,
     lookup_appointment,
+    match_therapists,
     propose_slots,
     record_sms_consent,
     request_intake_callback,
@@ -58,8 +59,8 @@ _AGENT_TOOLS = [
     # info / FAQ
     kb_search, list_services, get_service, list_specialties, list_locations,
     get_business_hours_and_contact, search_faqs,
-    # matching
-    list_team_members,
+    # matching — list_team_members for roster info; match_therapists for needs-based match
+    list_team_members, match_therapists,
     # insurance
     check_insurance_support, list_payers, verify_coverage, set_coverage_path,
     # booking
@@ -249,12 +250,35 @@ def build_realtime_triage(caller_phone: str | None = None) -> RealtimeAgent:
             "five fields and run verify_coverage (see BOOKING Step 1). Do not "
             "re-list the in-network carriers more than once.\n\n"
 
-            "• CHOOSING A THERAPIST — you do NOT match or recommend a 'best' "
-            "therapist for the caller, and you never say one clinician is the "
-            "right fit for their needs. If the caller is unsure who to see, "
-            "call list_team_members and read a few names so THEY can choose, "
-            "or offer to take a callback so the team can help them find the "
-            "right fit. All of these therapists are bookable via self-service: "
+            "• CHOOSING A THERAPIST — two paths, ONE per turn:\n"
+            "  PATH A — CALLER ALREADY KNOWS WHO THEY WANT: if they name a "
+            "therapist directly, or say a pronoun right after you described "
+            "someone ('book with her', 'let's go with him'), take that as "
+            "their choice. State the name clearly, carry it into the booking "
+            "flow, and do NOT ask them to choose again.\n"
+            "  PATH B — CALLER WANTS HELP FINDING THE RIGHT FIT: if they say "
+            "things like 'who's best for me', 'I don't know who to see', "
+            "'help me find a therapist', or 'who works with X', run the "
+            "MATCHING FLOW below (4 questions, 1 per turn):\n"
+            "    1. Ask: 'What kind of support are you looking for — individual "
+            "therapy, couples, a child or teen, or something else?'\n"
+            "    2. Ask: 'Are you looking for telehealth or in-person sessions?'\n"
+            "    3. If in-person → ask: 'Our in-person offices are East Russell "
+            "and North Durango — which is more convenient?'. If telehealth, skip.\n"
+            "    4. Ask: 'Do you have a preference for an in-network provider, "
+            "self-pay, or no preference?'\n"
+            "    Then call match_therapists(type, modality, location, insurance) "
+            "with those answers. Read back the top 1–3 results by name and one "
+            "or two key specialties — e.g. 'Elisia Danley (individual and family "
+            "therapy, $125/session, in-network)'. Ask: 'Would you like to book "
+            "with one of those, or hear more?'. On a pick, carry that therapist's "
+            "name and staffId into the booking flow.\n"
+            "    If match_therapists returns ok:false or result_count:0, say "
+            "warmly you couldn't find a match and offer to take a callback so "
+            "the team can help.\n\n"
+            "  GENERAL ROSTER: call list_team_members to describe the team "
+            "when the caller asks 'who are your therapists?'. "
+            "All of these therapists are bookable via self-service: "
             f"{_roster_lines()}. "
             + (
                 f"These clinicians are NOT self-service bookable right now: "
@@ -262,14 +286,9 @@ def build_realtime_triage(caller_phone: str | None = None) -> RealtimeAgent:
                 "and offer to take a callback request instead. "
                 if THERAPISTS_WITHOUT_FEEDS else ""
             )
-            + "Once the caller names who they want — by name, OR by pronoun "
-            "right after you've described a therapist (\"book with her\", "
-            "\"let's go with him\") — treat that as their choice, state that "
-            "therapist's name clearly, and carry it through the rest of the "
-            "booking. Do NOT ask them to choose again. A team member's name "
-            "the caller gives here is the THERAPIST they want — not the "
-            "caller's own name (you collect the caller's name in Step 1). "
-            "Never quote an appointment time here.\n\n"
+            + "A team member's name the caller gives is the THERAPIST they "
+            "want — not the caller's own name (collect that in Step 1). "
+            "Never quote an appointment time in the matching phase.\n\n"
 
             "• CALLBACK — if the caller wants a teammate to call them back "
             "(or wants a non-bookable clinician), collect 4 fields one per "

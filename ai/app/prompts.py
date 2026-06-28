@@ -347,6 +347,8 @@ VOICE_PACING_RULE = (
     "turn, then call the tool:\n"
     "  • verify_coverage  → 'Give me just a moment to check that with your "
     "    insurance.'\n"
+    "  • match_therapists → 'Let me find some great options for you — "
+    "    one moment.'\n"
     "  • propose_slots / get_free_slots → 'Let me pull up some openings — "
     "    one sec.'\n"
     "  • book_appointment → 'Booking that for you now — one moment.'\n"

@@ -62,6 +62,7 @@ const nav: NavEntry[] = [
   { href: '/admin', label: 'Dashboard', icon: I.dashboard },
   { href: '/admin/appointments', label: 'Appointment Requests', icon: I.calendar, section: 'appointments' },
   { href: '/admin/calendar', label: 'Calendar', icon: I.calendar },
+  { href: '/admin/matching', label: 'Therapist Matching', icon: I.users, section: 'matching' },
   { href: '/admin/insurance-checks', label: 'Insurance Checks', icon: I.shield, section: 'insurance_checks' },
   { href: '/admin/callbacks', label: 'Callback Req. — Chatbot', icon: I.chat, section: 'callbacks' },
   { href: '/admin/contacts', label: 'Enquiries — Website', icon: I.mail, section: 'contacts' },

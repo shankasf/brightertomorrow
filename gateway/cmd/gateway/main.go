@@ -23,6 +23,7 @@ import (
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/config"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/db"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/handlers"
+	"github.com/brightertomorrowtherapy/bt-gateway/internal/match"
 	appmw "github.com/brightertomorrowtherapy/bt-gateway/internal/middleware"
 	"github.com/brightertomorrowtherapy/bt-gateway/internal/phi"
 	"github.com/go-chi/chi/v5"
@@ -73,6 +74,28 @@ func main() {
 		slog.Error("phi store init failed", "err", err)
 		os.Exit(1)
 	}
+
+	// Match store — clinician roster, quiz config, match events (non-PHI).
+	// Uses the same DDB table as the PHI store but separate key namespaces.
+	matchStore, err := match.NewStore(match.StoreConfig{
+		DDB:       ddbClient,
+		TableName: cfg.DDBTable,
+		Timeout:   5 * time.Second,
+	})
+	if err != nil {
+		slog.Error("match store init failed", "err", err)
+		os.Exit(1)
+	}
+	// Auto-seed clinician roster on first boot only (idempotent).
+	go func() {
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer seedCancel()
+		if err := matchStore.AutoSeed(seedCtx); err != nil {
+			slog.Warn("match: auto-seed failed (non-fatal)", "err", err)
+		} else {
+			slog.Info("match: auto-seed complete")
+		}
+	}()
 
 	// Calendar store — reads bt-jane-events and bt-soft-holds.
 	calStore, err := calendar.NewStore(calendar.StoreConfig{
@@ -229,6 +252,19 @@ func main() {
 		slog.Info("twilio voice enabled", "public_host", cfg.TwilioPublicHost)
 	}
 
+	// Therapist-match handlers.
+	matchTherapistH := &handlers.MatchTherapistHandler{
+		Clinicians: matchStore,
+		Config:     matchStore,
+		Events:     matchStore,
+	}
+	adminMatchH := &handlers.AdminMatchHandler{
+		Clinicians: matchStore,
+		Config:     matchStore,
+		Events:     matchStore,
+		PHI:        phiStore,
+	}
+
 	readyzH := &handlers.ReadyzHandler{Pool: pool, PHI: phiStore}
 
 	r := chi.NewRouter()
@@ -266,6 +302,11 @@ func main() {
 		r.With(httprate.LimitByIP(10, time.Minute)).Get("/voice", (&handlers.VoiceHandler{Pool: pool, AIServiceURL: cfg.AIServiceURL, CookieSecure: cfg.CookieSecure}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/coverage/check", (&handlers.CoverageCheckHandler{PHI: phiStore, CoverageChecker: ai}).ServeHTTP)
 		r.With(httprate.LimitByIP(10, time.Minute)).Post("/match", (&handlers.MatchHandler{Pool: pool, PHI: phiStore}).ServeHTTP)
+
+		// Therapist-match quiz: options, run match, record pick.
+		r.With(httprate.LimitByIP(30, time.Minute)).Get("/match/options", matchTherapistH.Options)
+		r.With(httprate.LimitByIP(20, time.Minute)).Post("/match/therapists", matchTherapistH.Therapists)
+		r.With(httprate.LimitByIP(30, time.Minute)).Post("/match/picked", matchTherapistH.Picked)
 
 		// Twilio Voice — phone callers reach the same realtime agent graph.
 		// Both endpoints are signature-gated (X-Twilio-Signature) inside
@@ -315,6 +356,10 @@ func main() {
 		r.With(httprate.LimitByIP(300, time.Minute)).Post("/calendar/lookup_appointment", internalCalendarH.LookupAppointment)
 		r.With(httprate.LimitByIP(300, time.Minute)).Post("/calendar/cancel", internalCalendarH.CancelAppointment)
 		r.With(httprate.LimitByIP(300, time.Minute)).Post("/calendar/reschedule", internalCalendarH.RescheduleAppointment)
+
+		// Match options + therapist-match for AI agents (no rate limit, cluster-only).
+		r.Get("/match/options", matchTherapistH.Options)
+		r.Post("/match/therapists", matchTherapistH.Therapists)
 
 		// Clinical-intake gate endpoints — called by LangGraph gate nodes.
 		// Rate-limited to 5 req/s burst (300/min per source) — gates fire at most
@@ -375,6 +420,15 @@ func main() {
 
 			// Callbacks (non-PHI lightweight requests — name + phone + reason).
 			r.Get("/callbacks", adminCallbacksH.List)
+
+			// Therapist matching — clinician roster + quiz config + stats.
+			r.Get("/clinicians", adminMatchH.ListClinicians)
+			r.Post("/clinicians", adminMatchH.CreateClinician)
+			r.Put("/clinicians/{slug}", adminMatchH.UpdateClinician)
+			r.Delete("/clinicians/{slug}", adminMatchH.DeleteClinician)
+			r.Get("/match-config", adminMatchH.GetMatchConfig)
+			r.Put("/match-config", adminMatchH.PutMatchConfig)
+			r.Get("/match-stats", adminMatchH.GetMatchStats)
 
 			// Calendar: therapist roster + events (PHI: description field gated
 			// behind a separate /details endpoint). §164.312(b) audited.

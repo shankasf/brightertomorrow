@@ -326,16 +326,17 @@ def _context_for_scene(scene: str, state: State) -> str:
         bits.append(f"available_therapists: {roster}")
     elif scene == "list_therapists":
         from ...data.roster import ELIGIBLE_FOR_BOOKING
-        from ...graph.prompts._constants import THERAPIST_MATCH_FORM_URL
         roster = ", ".join(t["name"] for t in ELIGIBLE_FOR_BOOKING)
         bits.append(f"available_therapists: {roster}")
-        bits.append(f"matching_form_url: {THERAPIST_MATCH_FORM_URL}")
+        # matching_form_url removed 2026-06-27: [[MATCH_QUIZ]] widget replaced
+        # the JotForm link. The scene instruction emits the marker directly.
         bs = state.get("booking_status") or "none"
         if bs in ("collecting", "ready_for_slots", "slot_selected", "pending_confirm"):
             bits.append("booking_status: in_progress")
     elif scene == "matching_referral":
-        from ...graph.prompts._constants import THERAPIST_MATCH_FORM_URL
-        bits.append(f"matching_form_url: {THERAPIST_MATCH_FORM_URL}")
+        # matching_form_url removed 2026-06-27: [[MATCH_QUIZ]] widget replaced
+        # the JotForm link. The scene instruction emits the marker directly.
+        pass
     elif scene == "present_slots":
         slots = state.get("proposed_slots") or []
         # Pinned = the caller chose a specific clinician (not the any-mode

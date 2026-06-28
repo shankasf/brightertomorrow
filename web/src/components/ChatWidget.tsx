@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiMessageCircle, FiX, FiSend, FiVolume2, FiVolumeX, FiPhone, FiPhoneOff, FiRefreshCw, FiThumbsUp, FiThumbsDown } from "react-icons/fi";
+import MatchQuizInline from "@/components/match/MatchQuizInline";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -16,6 +17,12 @@ const INSURANCE_PICKER_MARKER = "[[INSURANCE_PICKER]]";
 // the LLM puts the marker on its own line, we strip it from the bubble
 // text and render a dropdown of full names.
 const THERAPIST_PICKER_MARKER = "[[THERAPIST_PICKER]]";
+
+// Mirror of the `[[MATCH_QUIZ]]` marker the agent emits when a visitor wants
+// help choosing a therapist. The widget strips it out and renders the inline
+// match quiz (dropdowns → /v1/match/therapists → result cards), per memory
+// "dropdowns are text-chat only".
+const MATCH_QUIZ_MARKER = "[[MATCH_QUIZ]]";
 
 // Display labels mirror THERAPISTS_WITH_FEEDS in ai/app/data/roster.py.
 // "Any therapist" sits at the top — the agent treats it as "no preference,
@@ -877,6 +884,7 @@ export default function ChatWidget() {
                     isLastOverall={isLast}
                     onPickInsurance={isLast && !loading ? (name) => void send(name) : undefined}
                     onPickTherapist={isLast && !loading ? (name) => void send(name) : undefined}
+                    onMatchSummary={isLast && !loading ? (text) => void send(text) : undefined}
                   />
                 );
               })}
@@ -1026,6 +1034,7 @@ function Bubble({
   isLastOverall,
   onPickInsurance,
   onPickTherapist,
+  onMatchSummary,
 }: {
   role: "user" | "assistant";
   content: string;
@@ -1034,15 +1043,18 @@ function Bubble({
   isLastOverall: boolean;
   onPickInsurance?: (name: string) => void;
   onPickTherapist?: (name: string) => void;
+  onMatchSummary?: (text: string) => void;
 }) {
   const isUser = role === "user";
   const hasInsurancePicker = !isUser && content.includes(INSURANCE_PICKER_MARKER);
   const hasTherapistPicker = !isUser && content.includes(THERAPIST_PICKER_MARKER);
+  const hasMatchQuiz = !isUser && content.includes(MATCH_QUIZ_MARKER);
   const visibleText = (() => {
     if (isUser) return content;
     let t = content;
     if (hasInsurancePicker) t = t.split(INSURANCE_PICKER_MARKER).join("");
     if (hasTherapistPicker) t = t.split(THERAPIST_PICKER_MARKER).join("");
+    if (hasMatchQuiz) t = t.split(MATCH_QUIZ_MARKER).join("");
     return t.replace(/\n{3,}/g, "\n\n").trim();
   })();
 
@@ -1090,6 +1102,9 @@ function Bubble({
           )}
           {hasTherapistPicker && onPickTherapist && isLastOverall && (
             <TherapistPicker onPick={onPickTherapist} />
+          )}
+          {hasMatchQuiz && isLastOverall && (
+            <MatchQuizInline onSummary={onMatchSummary} />
           )}
         </div>
       </div>

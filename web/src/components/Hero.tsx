@@ -8,7 +8,8 @@ import type { SiteSettings } from "@/lib/queries";
 const HEADLINE =
   "Las Vegas Therapy Services For Children, Teens and Adults";
 
-const JOTFORM_MATCH_URL = "https://form.jotform.com/253014448330448";
+// In-house therapist-match flow (replaced the JotForm questionnaire).
+const MATCH_URL = "/get-scheduled";
 
 export default function Hero({ settings }: { settings: SiteSettings }) {
   const reduce = useReducedMotion();
@@ -84,9 +85,7 @@ export default function Hero({ settings }: { settings: SiteSettings }) {
             className="inline-flex items-center"
           >
             <a
-              href={JOTFORM_MATCH_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={MATCH_URL}
               className="inline-flex items-center gap-2 text-white text-[11px] font-semibold uppercase tracking-[0.18em] px-5 py-2.5 hover:opacity-90 transition"
               style={{ backgroundColor: "#66202A", borderRadius: "20px 0 20px 20px" }}
             >

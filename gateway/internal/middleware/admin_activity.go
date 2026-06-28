@@ -294,6 +294,19 @@ var staticActions = []actionEntry{
 
 	// AI log stream.
 	{method: "GET", pathSuffix: "/admin/api/logs/ai", action: "stream_ai_logs", resourceType: "admin_console"},
+
+	// Therapist matching — clinicians.
+	{method: "GET", pathSuffix: "/admin/api/clinicians", action: "view_clinicians_list", resourceType: "clinicians"},
+	{method: "POST", pathSuffix: "/admin/api/clinicians", action: "create_clinician", resourceType: "clinicians"},
+	{method: "PUT", pathPrefix: "/admin/api/clinicians/", action: "update_clinician", resourceType: "clinicians"},
+	{method: "DELETE", pathPrefix: "/admin/api/clinicians/", action: "deactivate_clinician", resourceType: "clinicians"},
+
+	// Therapist matching — quiz config.
+	{method: "GET", pathSuffix: "/admin/api/match-config", action: "view_match_config", resourceType: "match_config"},
+	{method: "PUT", pathSuffix: "/admin/api/match-config", action: "update_match_config", resourceType: "match_config"},
+
+	// Therapist matching — stats.
+	{method: "GET", pathSuffix: "/admin/api/match-stats", action: "view_match_stats", resourceType: "match_stats"},
 }
 
 // deriveAction maps an HTTP method + path to a (action, resourceType, resourceID) triple.

@@ -31,9 +31,7 @@ export default function FirstStepCta() {
             </p>
             <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
               <a
-                href="https://form.jotform.com/253014448330448"
-                target="_blank"
-                rel="noopener noreferrer"
+                href="/get-scheduled"
                 className="btn-primary"
               >
                 Find My Therapist

@@ -46,6 +46,7 @@ var notifSections = []string{
 	"contacts",
 	"chat",
 	"newsletter",
+	"matching", // therapist-match quiz activity (count is always 0 — section exists for seen-state)
 }
 
 func isNotifSection(s string) bool {
@@ -244,6 +245,10 @@ func (h *AdminNotificationsHandler) Counts(w http.ResponseWriter, r *http.Reques
 		set("callbacks", 0)
 		set("insurance_checks", 0)
 	}
+
+	// "matching" section: badge count is always 0 (section exists for seen-state
+	// tracking only — the admin opens the Therapist Matching page to dismiss it).
+	set("matching", 0)
 
 	wg.Wait()
 	if first != nil {

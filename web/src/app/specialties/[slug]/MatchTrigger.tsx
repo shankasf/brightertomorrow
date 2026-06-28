@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { FiArrowUpRight } from "react-icons/fi";
 
-const JOTFORM_MATCH_URL = "https://form.jotform.com/253014448330448";
+// Repointed off JotForm to the in-house match flow at /get-scheduled.
+const MATCH_URL = "/get-scheduled";
 
 export default function MatchTrigger({
   label = "Get matched",
@@ -10,13 +12,8 @@ export default function MatchTrigger({
   className?: string;
 }) {
   return (
-    <a
-      href={JOTFORM_MATCH_URL}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={className}
-    >
+    <Link href={MATCH_URL} className={className}>
       {label} <FiArrowUpRight />
-    </a>
+    </Link>
   );
 }

@@ -7,7 +7,8 @@ import { FiX } from "react-icons/fi";
 const WINE = "#66202A";
 const INK = "#192735";
 
-const JOTFORM_URL = "https://form.jotform.com/253014448330448";
+// Repointed off JotForm/Google to the in-house match flow at /get-scheduled.
+const MATCH_URL = "/get-scheduled";
 
 // "Non-annoying intervals": never show in the first few seconds, require a bit of
 // scrolling OR dwell time, and once dismissed/shown stay quiet for a cooldown that
@@ -136,9 +137,7 @@ export default function TherapistPopup() {
             </h2>
 
             <a
-              href={JOTFORM_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={MATCH_URL}
               onClick={close}
               className="mt-7 inline-block font-display font-bold tracking-[0.12em] text-[14px] uppercase px-10 py-4 text-white transition hover:opacity-90"
               style={{ backgroundColor: WINE, borderRadius: "30px 0 30px 30px" }}

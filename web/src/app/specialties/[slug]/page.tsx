@@ -12,7 +12,8 @@ import MatchTrigger from "./MatchTrigger";
 // (e.g. specialties/anxiety-therapy/) take precedence over this dynamic segment.
 export const dynamic = "force-dynamic";
 
-const JOTFORM_MATCH_URL = "https://form.jotform.com/253014448330448";
+// In-house therapist-match flow (replaced the JotForm questionnaire).
+const MATCH_URL = "/get-scheduled";
 
 export async function generateMetadata(
   { params }: { params: Promise<{ slug: string }> },
@@ -163,9 +164,7 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
               )}
               <div className="mt-8 flex flex-wrap gap-3">
                 <a
-                  href={JOTFORM_MATCH_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={MATCH_URL}
                   className="btn-primary"
                 >
                   Find My Therapist
@@ -269,9 +268,7 @@ export default async function SpecialtyDetail({ params }: { params: Promise<{ sl
 
             <div className="mt-12 pt-8 border-t border-surface-line flex flex-wrap gap-3">
               <a
-                href={JOTFORM_MATCH_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={MATCH_URL}
                 className="btn-primary"
               >
                 Find My Therapist
