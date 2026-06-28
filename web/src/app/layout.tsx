@@ -9,6 +9,7 @@ import AccessibilityWidget from "@/components/AccessibilityWidget";
 import TherapistPopup from "@/components/TherapistPopup";
 import { LoggerInit } from "@/components/LoggerInit";
 import GoogleAnalytics from "@/components/GoogleAnalytics";
+import GoogleTagManager, { GoogleTagManagerNoscript } from "@/components/GoogleTagManager";
 import { getNav, getSiteSettings } from "@/lib/queries";
 import { SITE_URL, IS_CANONICAL_HOST, SITE_NAME, TITLE_SUFFIX, DEFAULT_OG_IMAGE } from "@/lib/seo";
 
@@ -90,6 +91,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const gaMeasurementId =
     IS_CANONICAL_HOST && !isAdmin ? (process.env.GA4_MEASUREMENT_ID ?? "") : "";
 
+  // GTM gated identically to GA4: public canonical host only, never /admin.
+  const gtmContainerId =
+    IS_CANONICAL_HOST && !isAdmin ? (process.env.GTM_CONTAINER_ID ?? "GTM-W6BG4H9P") : "";
+
   if (isAdmin) {
     return (
       <html lang="en" className={fontClasses}>
@@ -110,7 +115,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" className={fontClasses}>
       <body id="top">
+        {gtmContainerId ? <GoogleTagManagerNoscript containerId={gtmContainerId} /> : null}
         <LoggerInit />
+        {gtmContainerId ? <GoogleTagManager containerId={gtmContainerId} /> : null}
         {gaMeasurementId ? <GoogleAnalytics measurementId={gaMeasurementId} /> : null}
         <SiteHeader settings={settings} nav={headerNav} />
         <main>{children}</main>

@@ -93,7 +93,9 @@ const nextConfig = {
       //   yvette-howard  → not in roster → /team
       //   jordan-fuller-student → /team/jordan-fuller (his only bio)
       { source: "/alayna-hammond", destination: "/team/alayna-hammond", permanent: true },
-      { source: "/alexzandria-summers", destination: "/team/alexzandria-summers", permanent: true },
+      // Alexzandria Summers resigned 2026-06-26 — old bio URL now redirects to the roster.
+      { source: "/alexzandria-summers", destination: "/team", permanent: true },
+      { source: "/team/alexzandria-summers", destination: "/team", permanent: true },
       { source: "/elisia-danley", destination: "/team/elisia-danley", permanent: true },
       { source: "/estefania-gil", destination: "/team", permanent: true },
       { source: "/janelle-thompson", destination: "/team/janelle-thompson", permanent: true },
