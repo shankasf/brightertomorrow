@@ -66,20 +66,22 @@ func (h *AdminMatchHandler) ListClinicians(w http.ResponseWriter, r *http.Reques
 // clinicianInput is the accepted JSON shape for create / update.
 // created_at is server-managed (not accepted from client; decoded but ignored).
 type clinicianInput struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Credentials string   `json:"credentials"`
-	Initials    string   `json:"initials"`
-	Types       []string `json:"types"`
-	Locations   []string `json:"locations"`
-	Telehealth  bool     `json:"telehealth"`
-	Specialties []string `json:"specialties"`
-	Rate        string   `json:"rate"`
-	InNetwork   bool     `json:"in_network"`
-	StaffID     int      `json:"staff_id"`
-	PhotoURL    string   `json:"photo_url"`
-	Active      bool     `json:"active"`
-	SortOrder   int      `json:"sort_order"`
+	Slug               string   `json:"slug"`
+	Name               string   `json:"name"`
+	Credentials        string   `json:"credentials"`
+	Initials           string   `json:"initials"`
+	Types              []string `json:"types"`
+	Locations          []string `json:"locations"`
+	Telehealth         bool     `json:"telehealth"`
+	Specialties        []string `json:"specialties"`
+	Rate               string   `json:"rate"`
+	InNetwork          bool     `json:"in_network"`
+	StaffID            int      `json:"staff_id"`
+	PhotoURL           string   `json:"photo_url"`
+	BookingURLVirtual  string   `json:"booking_url_virtual"`
+	BookingURLInPerson string   `json:"booking_url_in_person"`
+	Active             bool     `json:"active"`
+	SortOrder          int      `json:"sort_order"`
 }
 
 func (b *clinicianInput) toMatchClinician(createdAt time.Time) match.Clinician {
@@ -88,22 +90,24 @@ func (b *clinicianInput) toMatchClinician(createdAt time.Time) match.Clinician {
 		createdAt = now
 	}
 	return match.Clinician{
-		Slug:        strings.TrimSpace(b.Slug),
-		Name:        strings.TrimSpace(b.Name),
-		Credentials: strings.TrimSpace(b.Credentials),
-		Initials:    strings.TrimSpace(b.Initials),
-		Types:       normalizeStrSlice(b.Types),
-		Locations:   normalizeStrSlice(b.Locations),
-		Telehealth:  b.Telehealth,
-		Specialties: normalizeStrSlice(b.Specialties),
-		Rate:        strings.TrimSpace(b.Rate),
-		InNetwork:   b.InNetwork,
-		StaffID:     b.StaffID,
-		PhotoURL:    strings.TrimSpace(b.PhotoURL),
-		Active:      b.Active,
-		SortOrder:   b.SortOrder,
-		CreatedAt:   createdAt,
-		UpdatedAt:   now,
+		Slug:               strings.TrimSpace(b.Slug),
+		Name:               strings.TrimSpace(b.Name),
+		Credentials:        strings.TrimSpace(b.Credentials),
+		Initials:           strings.TrimSpace(b.Initials),
+		Types:              normalizeStrSlice(b.Types),
+		Locations:          normalizeStrSlice(b.Locations),
+		Telehealth:         b.Telehealth,
+		Specialties:        normalizeStrSlice(b.Specialties),
+		Rate:               strings.TrimSpace(b.Rate),
+		InNetwork:          b.InNetwork,
+		StaffID:            b.StaffID,
+		PhotoURL:           strings.TrimSpace(b.PhotoURL),
+		BookingURLVirtual:  strings.TrimSpace(b.BookingURLVirtual),
+		BookingURLInPerson: strings.TrimSpace(b.BookingURLInPerson),
+		Active:             b.Active,
+		SortOrder:          b.SortOrder,
+		CreatedAt:          createdAt,
+		UpdatedAt:          now,
 	}
 }
 

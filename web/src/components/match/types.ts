@@ -55,6 +55,11 @@ export type Clinician = {
   in_network: boolean;
   staff_id: number;
   photo_url: string;
+  /** Per-clinician booking redirect links, managed in the admin portal. The
+   *  Get Scheduled form sends the visitor to the one matching their chosen
+   *  format (telehealth → virtual, in-person → in_person). Either may be empty. */
+  booking_url_virtual?: string;
+  booking_url_in_person?: string;
   active: boolean;
   sort_order: number;
   created_at?: string;

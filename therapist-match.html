@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Find Your Therapist — Brighter Tomorrow Therapy Collective</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #F5EBDD; color: #1a1a1a; min-height: 100vh; padding: 2rem 1rem; }
+  .bt-wrap { max-width: 640px; margin: 0 auto; }
+  .bt-logo { text-align: center; margin-bottom: 2.5rem; }
+  .bt-logo-wordmark { font-size: 20px; font-weight: 600; color: #5A1A2B; letter-spacing: 0.01em; }
+  .bt-logo-sub { font-size: 11px; color: #8a6a55; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2px; }
+  .bt-loading { text-align: center; padding: 3rem 1rem; color: #8a6a55; font-size: 15px; }
+  .bt-loading-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #5A1A2B; margin: 0 3px; animation: blink 1.2s infinite; }
+  .bt-loading-dot:nth-child(2) { animation-delay: 0.2s; }
+  .bt-loading-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,80%,100%{opacity:0.2} 40%{opacity:1} }
+  .bt-error { text-align: center; padding: 2rem; background: #fff0f2; border: 1px solid #e8c8cc; border-radius: 12px; color: #5A1A2B; font-size: 14px; line-height: 1.6; }
+  .bt-error strong { display: block; font-size: 16px; margin-bottom: 6px; }
+  .bt-progress { display: flex; gap: 6px; margin-bottom: 2rem; }
+  .bt-progress-dot { flex: 1; height: 4px; border-radius: 99px; background: #e8d8c8; transition: background 0.3s; }
+  .bt-progress-dot.active { background: #5A1A2B; }
+  .bt-progress-dot.done { background: #D9B26A; }
+  .bt-card { background: #ffffff; border: 1px solid #e8d8c8; border-radius: 16px; padding: 2rem; box-shadow: 0 2px 16px rgba(90,26,43,0.07); }
+  .bt-eyebrow { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: #D9B26A; font-weight: 600; margin-bottom: 0.6rem; }
+  .bt-question { font-size: 22px; font-weight: 600; color: #1a1a1a; margin-bottom: 0.4rem; line-height: 1.3; }
+  .bt-sub { font-size: 14px; color: #7a6a62; margin-bottom: 1.75rem; }
+  .bt-options { display: grid; gap: 10px; }
+  .bt-option { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1.5px solid #e8d8c8; border-radius: 12px; cursor: pointer; transition: border-color 0.18s, background 0.18s; background: #ffffff; text-align: left; width: 100%; }
+  .bt-option:hover { border-color: #5A1A2B; background: #fdf8f4; }
+  .bt-option.selected { border-color: #5A1A2B; background: #fdf0f2; }
+  .bt-option-icon { width: 42px; height: 42px; border-radius: 50%; background: #F5EBDD; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 20px; }
+  .bt-option-text { flex: 1; }
+  .bt-option-label { font-size: 15px; font-weight: 600; color: #1a1a1a; }
+  .bt-option-desc { font-size: 13px; color: #7a6a62; margin-top: 2px; }
+  .bt-check { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid #d0c0b0; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: background 0.18s, border-color 0.18s; }
+  .bt-option.selected .bt-check { background: #5A1A2B; border-color: #5A1A2B; }
+  .bt-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 1.75rem; }
+  .bt-btn-back { background: none; border: none; color: #8a7a72; font-size: 14px; cursor: pointer; padding: 8px 0; }
+  .bt-btn-back:hover { color: #5A1A2B; }
+  .bt-btn-next { background: #5A1A2B; color: #F5EBDD; border: none; border-radius: 10px; padding: 12px 32px; font-size: 15px; font-weight: 600; cursor: pointer; transition: opacity 0.2s, transform 0.1s; }
+  .bt-btn-next:disabled { opacity: 0.3; cursor: default; }
+  .bt-btn-next:not(:disabled):hover { opacity: 0.88; }
+  .bt-btn-next:not(:disabled):active { transform: scale(0.98); }
+  .bt-loc-banner { display: flex; align-items: flex-start; gap: 12px; background: #F5EBDD; border: 1px solid #D9B26A; border-radius: 12px; padding: 14px 16px; margin-bottom: 1.25rem; }
+  .bt-loc-banner-icon { font-size: 22px; flex-shrink: 0; margin-top: 1px; }
+  .bt-loc-banner-name { font-size: 15px; font-weight: 600; color: #5A1A2B; }
+  .bt-loc-banner-addr { font-size: 13px; color: #8a6a55; margin-top: 2px; }
+  .bt-results-header { text-align: center; margin-bottom: 2rem; }
+  .bt-results-title { font-size: 22px; font-weight: 600; color: #1a1a1a; margin-bottom: 6px; }
+  .bt-results-sub { font-size: 14px; color: #7a6a62; }
+  .bt-therapist-grid { display: grid; gap: 14px; }
+  .bt-therapist-card { background: #ffffff; border: 1px solid #e8d8c8; border-radius: 14px; padding: 1.25rem; display: flex; gap: 14px; align-items: flex-start; box-shadow: 0 1px 8px rgba(90,26,43,0.05); }
+  .bt-avatar { width: 50px; height: 50px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: #F5EBDD; background: #5A1A2B; }
+  .bt-therapist-info { flex: 1; min-width: 0; }
+  .bt-therapist-name { font-size: 16px; font-weight: 600; color: #1a1a1a; }
+  .bt-therapist-cred { font-size: 13px; color: #7a6a62; margin-top: 2px; }
+  .bt-therapist-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .bt-tag { font-size: 11px; padding: 3px 9px; border-radius: 99px; background: #F5EBDD; color: #5A1A2B; font-weight: 600; }
+  .bt-tag.gold { background: #fdf3dc; color: #8a6010; }
+  .bt-therapist-rate { font-size: 13px; color: #7a6a62; margin-top: 7px; }
+  .bt-therapist-btn { background: #5A1A2B; color: #F5EBDD; border: none; border-radius: 9px; padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; align-self: center; text-decoration: none; display: inline-block; transition: opacity 0.18s; }
+  .bt-therapist-btn:hover { opacity: 0.85; }
+  .bt-no-results { text-align: center; padding: 2.5rem; color: #7a6a62; font-size: 15px; background: #fff; border-radius: 14px; border: 1px solid #e8d8c8; }
+  .bt-restart { display: block; margin: 1.5rem auto 0; background: none; border: 1.5px solid #d0c0b0; border-radius: 10px; padding: 10px 24px; font-size: 14px; color: #7a6a62; cursor: pointer; transition: border-color 0.18s, color 0.18s; }
+  .bt-restart:hover { border-color: #5A1A2B; color: #5A1A2B; }
+  .bt-demo-note { max-width: 640px; margin: 1.25rem auto 0; text-align: center; font-size: 12px; color: #a08a78; }
+  .hidden { display: none !important; }
+  @media (max-width: 480px) {
+    .bt-card { padding: 1.5rem; }
+    .bt-question { font-size: 19px; }
+    .bt-therapist-card { flex-wrap: wrap; }
+    .bt-therapist-btn { width: 100%; text-align: center; margin-top: 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="bt-wrap">
+  <div class="bt-logo">
+    <div class="bt-logo-wordmark">Brighter Tomorrow</div>
+    <div class="bt-logo-sub">Therapy Collective</div>
+  </div>
+  <div id="loading-state" class="bt-loading">
+    Finding your therapists
+    <span class="bt-loading-dot"></span><span class="bt-loading-dot"></span><span class="bt-loading-dot"></span>
+  </div>
+  <div id="error-state" class="bt-error hidden">
+    <strong>Unable to load therapist data</strong>
+    Please check that your Google Sheet is published and the URL is correct, then refresh the page.<br><br>
+    <small id="error-detail"></small>
+  </div>
+  <div id="main-content" class="hidden">
+    <div class="bt-progress" id="progress"></div>
+    <div class="bt-card" id="quiz-card">
+      <div class="bt-eyebrow" id="step-eyebrow"></div>
+      <div class="bt-question" id="step-question"></div>
+      <div class="bt-sub" id="step-sub"></div>
+      <div class="bt-options" id="step-options"></div>
+      <div class="bt-nav">
+        <button class="bt-btn-back" id="btn-back" onclick="goBack()">&#8592; Back</button>
+        <button class="bt-btn-next" id="btn-next" onclick="goNext()" disabled>Continue</button>
+      </div>
+    </div>
+    <div class="hidden" id="results-section">
+      <div class="bt-results-header">
+        <div class="bt-results-title" id="results-title"></div>
+        <div class="bt-results-sub" id="results-sub"></div>
+      </div>
+      <div class="bt-therapist-grid" id="therapist-grid"></div>
+      <button class="bt-restart" onclick="restart()">&#8592; Start over</button>
+    </div>
+  </div>
+</div>
+<div id="demo-note" class="bt-demo-note hidden">Preview mode — showing built-in sample therapists. Paste your Google Sheet CSV URL into <code>SHEET_CSV_URL</code> to go live.</div>
+<script>
+/*==============================================================
+  CONFIGURATION
+  Ali: paste your Google Sheet CSV URL between the quotes below.
+  See the Setup Guide for step-by-step instructions.
+  NOTE: until a real URL is set, the page loads the built-in
+  DEMO_THERAPISTS list below so you can preview the experience.
+==============================================================*/
+var SHEET_CSV_URL = "PASTE_YOUR_GOOGLE_SHEET_CSV_URL_HERE";
+/*==============================================================*/
+
+/* Built-in sample data — used only when no live sheet URL is set. */
+var DEMO_THERAPISTS = [
+  { name:"Yvette Howard",  cred:"LCSW",         initials:"YH", types:["therapy","couples"], locations:["e-russell","n-durango"], telehealth:true,  specialties:["Anxiety","Trauma","EMDR"],                rate:"$160 / session", inNetwork:true  },
+  { name:"Marcus Bell",    cred:"LMFT",         initials:"MB", types:["therapy","couples"], locations:["e-russell"],             telehealth:true,  specialties:["Couples","Relationships","EFT"],          rate:"$145 / session", inNetwork:true  },
+  { name:"Priya Nair",     cred:"LCPC",         initials:"PN", types:["teen","child"],      locations:["n-durango"],             telehealth:true,  specialties:["Adolescents","ADHD","Family"],            rate:"$135 / session", inNetwork:true  },
+  { name:"Sofia Reyes",    cred:"LMSW",         initials:"SR", types:["child"],             locations:["e-russell","n-durango"], telehealth:false, specialties:["Play Therapy","Autism","Behavioral"],     rate:"$125 / session", inNetwork:false },
+  { name:"David Okafor",   cred:"LPCC",         initials:"DO", types:["therapy","teen"],    locations:["n-durango"],             telehealth:true,  specialties:["Depression","Anxiety","Mindfulness"],     rate:"$140 / session", inNetwork:true  },
+  { name:"Luna Castillo",  cred:"Reiki Master", initials:"LC", types:["reiki"],             locations:["e-russell"],             telehealth:false, specialties:["Energy Healing","Stress Relief","Holistic"], rate:"$95 / session",  inNetwork:false },
+  { name:"Hannah Cole",    cred:"LCSW",         initials:"HC", types:["therapy"],           locations:["e-russell","n-durango"], telehealth:true,  specialties:["Grief","Life Transitions","CBT"],         rate:"$150 / session", inNetwork:true  }
+];
+
+var therapists = [];
+var currentStep = 0;
+var answers = {};
+var selectedValue = null;
+var flow = [];
+
+var FLOW_BASE = [
+  {
+    id: "type",
+    question: "What type of support are you looking for?",
+    sub: "Choose the option that best fits your needs.",
+    opts: [
+      { v: "therapy",  l: "Therapy",             d: "Individual sessions for adults 18+",            i: "&#129504;" },
+      { v: "teen",     l: "Teen therapy",         d: "Support for ages 13\u201317",                   i: "&#127807;" },
+      { v: "child",    l: "Child therapy",        d: "Specialized care for ages 3\u201312",           i: "&#127912;" },
+      { v: "couples",  l: "Couples therapy",      d: "For partners navigating challenges together",   i: "&#128172;" },
+      { v: "reiki",    l: "Reiki energy healing", d: "Holistic mind-body wellness sessions",          i: "&#10024;"  }
+    ]
+  },
+  {
+    id: "modality",
+    question: "How would you like to meet with your therapist?",
+    sub: "Both options are available across Nevada.",
+    opts: [
+      { v: "telehealth", l: "Telehealth",          d: "Secure video sessions from anywhere in Nevada", i: "&#128187;" },
+      { v: "in-person",  l: "In person",           d: "Visit one of our two Las Vegas locations",      i: "&#127970;" },
+      { v: "either",     l: "Either works for me", d: "I\u2019m flexible on format",                   i: "&#128260;" }
+    ]
+  },
+  {
+    id: "location",
+    question: "Which location works best for you?",
+    sub: "Both locations offer the same high-quality care.",
+    inPersonOnly: true,
+    opts: [
+      { v: "e-russell",  l: "E Russell Rd",  d: "3430 E Russell Rd, Ste 315 \u2014 Las Vegas, NV 89120",    i: "&#128205;" },
+      { v: "n-durango",  l: "N Durango Dr",  d: "6955 N Durango Dr, Unit 1004 \u2014 Las Vegas, NV 89149",  i: "&#128205;" }
+    ]
+  },
+  {
+    id: "insurance",
+    question: "Do you have a preference on insurance?",
+    sub: "This helps us match you with the right clinician.",
+    opts: [
+      { v: "in-network",  l: "I want to use insurance",    d: "Most major plans accepted",         i: "&#127973;" },
+      { v: "private-pay", l: "I\u2019ll pay out of pocket", d: "Reduced rates available",          i: "&#128179;" },
+      { v: "no-pref",     l: "No preference",              d: "Show me all available therapists",  i: "&#128080;" }
+    ]
+  }
+];
+
+function buildFlow() {
+  flow = [];
+  FLOW_BASE.forEach(function(s) {
+    if (s.inPersonOnly) {
+      if (answers.modality === "in-person") flow.push(s);
+    } else {
+      flow.push(s);
+    }
+  });
+  flow.forEach(function(s, i) {
+    s.eyebrow = "Step " + (i + 1) + " of " + flow.length;
+  });
+}
+
+function parseCSV(text) {
+  var lines = text.trim().split("\n");
+  var headers = splitCSVLine(lines[0]);
+  var results = [];
+  for (var i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    var vals = splitCSVLine(lines[i]);
+    var row = {};
+    headers.forEach(function(h, idx) { row[h.trim()] = (vals[idx] || "").trim(); });
+    results.push(row);
+  }
+  return results;
+}
+
+function splitCSVLine(line) {
+  var result = [], cur = "", inQuotes = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line[i];
+    if (ch === '"') { inQuotes = !inQuotes; }
+    else if (ch === ',' && !inQuotes) { result.push(cur); cur = ""; }
+    else { cur += ch; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function rowToTherapist(row) {
+  var locs = row["Locations"] ? row["Locations"].replace(/"/g,"").split(",").map(function(l){ return l.trim().toLowerCase().replace(/\s+/g,"-"); }).filter(Boolean) : [];
+  var types = row["Types"] ? row["Types"].replace(/"/g,"").split(",").map(function(t){ return t.trim().toLowerCase(); }).filter(Boolean) : [];
+  var specialties = [];
+  ["Specialty1","Specialty2","Specialty3","Specialty4"].forEach(function(k){ if(row[k] && row[k].trim()) specialties.push(row[k].trim()); });
+  return {
+    name: row["Name"] || "",
+    cred: row["Credentials"] || "",
+    initials: row["Initials"] || "",
+    types: types,
+    locations: locs,
+    telehealth: (row["Telehealth"] || "").toUpperCase() === "TRUE",
+    specialties: specialties,
+    rate: row["Rate"] || "",
+    inNetwork: (row["InNetwork"] || "").toUpperCase() === "TRUE"
+  };
+}
+
+function startQuiz() {
+  document.getElementById("loading-state").classList.add("hidden");
+  document.getElementById("main-content").classList.remove("hidden");
+  buildFlow();
+  renderStep();
+}
+
+function loadTherapists() {
+  if (!SHEET_CSV_URL || SHEET_CSV_URL === "PASTE_YOUR_GOOGLE_SHEET_CSV_URL_HERE") {
+    // No live Google Sheet configured yet — fall back to built-in demo data so the UI previews.
+    therapists = DEMO_THERAPISTS.slice();
+    document.getElementById("demo-note").classList.remove("hidden");
+    startQuiz();
+    return;
+  }
+  fetch(SHEET_CSV_URL)
+    .then(function(r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+    .then(function(csv) {
+      therapists = parseCSV(csv).map(rowToTherapist).filter(function(t){ return t.name; });
+      startQuiz();
+    })
+    .catch(function(err) {
+      document.getElementById("error-detail").textContent = "Error: " + err.message + ". Make sure the sheet is published as CSV (File > Share > Publish to web > CSV).";
+      document.getElementById("loading-state").classList.add("hidden");
+      document.getElementById("error-state").classList.remove("hidden");
+    });
+}
+
+function checkSVG(isSelected) {
+  if (!isSelected) return "";
+  return '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><polyline points="2,6 5,9 10,3" stroke="#F5EBDD" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+
+function initProgress() {
+  var p = document.getElementById("progress");
+  p.innerHTML = "";
+  for (var i = 0; i < flow.length; i++) {
+    var d = document.createElement("div");
+    d.className = "bt-progress-dot" + (i < currentStep ? " done" : i === currentStep ? " active" : "");
+    p.appendChild(d);
+  }
+}
+
+function renderStep() {
+  buildFlow();
+  var st = flow[currentStep];
+  document.getElementById("step-eyebrow").textContent = st.eyebrow;
+  document.getElementById("step-question").textContent = st.question;
+  document.getElementById("step-sub").textContent = st.sub;
+  var container = document.getElementById("step-options");
+  container.innerHTML = "";
+  selectedValue = answers[st.id] || null;
+  st.opts.forEach(function(opt) {
+    var isSelected = selectedValue === opt.v;
+    var btn = document.createElement("button");
+    btn.className = "bt-option" + (isSelected ? " selected" : "");
+    btn.setAttribute("data-value", opt.v);
+    btn.innerHTML = '<div class="bt-option-icon">' + opt.i + '</div><div class="bt-option-text"><div class="bt-option-label">' + opt.l + '</div><div class="bt-option-desc">' + opt.d + '</div></div><div class="bt-check">' + checkSVG(isSelected) + '</div>';
+    btn.onclick = function() { selectOption(opt.v); };
+    container.appendChild(btn);
+  });
+  document.getElementById("btn-back").style.visibility = currentStep === 0 ? "hidden" : "visible";
+  document.getElementById("btn-next").disabled = !selectedValue;
+  initProgress();
+}
+
+function selectOption(value) {
+  selectedValue = value;
+  document.querySelectorAll(".bt-option").forEach(function(btn) {
+    var isSelected = btn.getAttribute("data-value") === value;
+    btn.className = "bt-option" + (isSelected ? " selected" : "");
+    btn.querySelector(".bt-check").innerHTML = checkSVG(isSelected);
+  });
+  document.getElementById("btn-next").disabled = false;
+}
+
+function goNext() {
+  if (!selectedValue) return;
+  var curId = flow[currentStep].id;
+  answers[curId] = selectedValue;
+  if (curId === "modality") { buildFlow(); }
+  if (currentStep < flow.length - 1) { currentStep++; renderStep(); }
+  else { showResults(); }
+}
+
+function goBack() {
+  if (currentStep > 0) { currentStep--; renderStep(); }
+}
+
+function locationLabel(locs) {
+  var hasE = locs.indexOf("e-russell") !== -1, hasN = locs.indexOf("n-durango") !== -1;
+  if (hasE && hasN) return "E Russell \u00b7 N Durango \u00b7 Telehealth";
+  if (hasE) return "E Russell \u00b7 Telehealth";
+  if (hasN) return "N Durango \u00b7 Telehealth";
+  return "Telehealth only";
+}
+
+function showResults() {
+  document.getElementById("quiz-card").classList.add("hidden");
+  document.getElementById("results-section").classList.remove("hidden");
+  document.getElementById("progress").classList.add("hidden");
+
+  var type = answers.type, mod = answers.modality, loc = answers.location, ins = answers.insurance;
+
+  var matched = therapists.filter(function(t) {
+    if (t.types.indexOf(type) === -1) return false;
+    if (mod === "telehealth" && !t.telehealth) return false;
+    if (mod === "in-person") {
+      if (t.locations.indexOf(loc) === -1) return false;
+    }
+    if (ins === "in-network" && !t.inNetwork) return false;
+    return true;
+  });
+
+  var typeLabels = { therapy: "individual therapy", teen: "teen therapy", child: "child therapy", couples: "couples therapy", reiki: "reiki" };
+  var locNames = { "e-russell": "E Russell Rd", "n-durango": "N Durango Dr" };
+  var locAddrs = { "e-russell": "3430 E Russell Rd, Ste 315 \u2014 Las Vegas, NV 89120", "n-durango": "6955 N Durango Dr, Unit 1004 \u2014 Las Vegas, NV 89149" };
+
+  document.getElementById("results-title").textContent = matched.length > 0
+    ? matched.length + " therapist" + (matched.length !== 1 ? "s" : "") + " matched for you"
+    : "No exact matches found";
+  document.getElementById("results-sub").textContent = matched.length > 0
+    ? (mod === "in-person" && loc ? "Available in person at " + locNames[loc] + " \u2014 all accepting new clients." : "Based on your interest in " + (typeLabels[type] || type) + " \u2014 all accepting new clients.")
+    : "Try adjusting your preferences to see more options.";
+
+  var grid = document.getElementById("therapist-grid");
+  grid.innerHTML = "";
+
+  if (mod === "in-person" && loc) {
+    var banner = document.createElement("div");
+    banner.className = "bt-loc-banner";
+    banner.innerHTML = '<div class="bt-loc-banner-icon">&#127970;</div><div><div class="bt-loc-banner-name">' + locNames[loc] + '</div><div class="bt-loc-banner-addr">' + locAddrs[loc] + '</div></div>';
+    grid.appendChild(banner);
+  }
+
+  if (matched.length === 0) {
+    var none = document.createElement("div");
+    none.className = "bt-no-results";
+    none.textContent = "No therapists are currently available at this location for this service. Try telehealth or the other location.";
+    grid.appendChild(none);
+    return;
+  }
+
+  matched.forEach(function(t) {
+    var card = document.createElement("div");
+    card.className = "bt-therapist-card";
+    var tags = t.specialties.map(function(s) { return '<span class="bt-tag">' + s + '</span>'; }).join("");
+    if (t.inNetwork) tags += '<span class="bt-tag gold">In-network</span>';
+    card.innerHTML = '<div class="bt-avatar">' + t.initials + '</div><div class="bt-therapist-info"><div class="bt-therapist-name">' + t.name + '</div><div class="bt-therapist-cred">' + t.cred + ' \u00b7 ' + locationLabel(t.locations) + '</div><div class="bt-therapist-tags">' + tags + '</div><div class="bt-therapist-rate">' + t.rate + '</div></div><a class="bt-therapist-btn" href="https://brightertomorrowtherapy.com/get-scheduled" target="_blank" rel="noopener">Book</a>';
+    grid.appendChild(card);
+  });
+}
+
+function restart() {
+  currentStep = 0; answers = {}; selectedValue = null;
+  document.getElementById("quiz-card").classList.remove("hidden");
+  document.getElementById("results-section").classList.add("hidden");
+  document.getElementById("progress").classList.remove("hidden");
+  buildFlow();
+  renderStep();
+}
+
+loadTherapists();
+</script>
+</body>
+</html>

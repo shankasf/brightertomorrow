@@ -3,6 +3,7 @@
 // or fetch logic anywhere else (DRY / SRP).
 
 import type {
+  Clinician,
   MatchAnswers,
   MatchConfig,
   MatchOptionsResponse,
@@ -92,6 +93,30 @@ export function summarizeAnswers(config: MatchConfig, answers: MatchAnswers): st
   if (answers.location) parts.push(`Location: ${labelFor(config, "location", answers.location)}`);
   if (answers.insurance) parts.push(`Insurance: ${labelFor(config, "insurance", answers.insurance)}`);
   return parts.join(" · ");
+}
+
+/**
+ * Resolve which booking link to send a visitor to after they pick a clinician.
+ *
+ * The admin manages two links per clinician (virtual / in-person). We pick by
+ * the visitor's chosen format, fall back to the clinician's other link if one
+ * is blank, and finally to the practice-wide Jane URL — so a provider with no
+ * links set (or who hasn't been mapped yet) still books cleanly, and a leaver's
+ * stale links simply vanish with their archived record.
+ *   - modality "telehealth"      → virtual, else in-person, else fallback
+ *   - modality "in-person"       → in-person, else virtual, else fallback
+ *   - "either" / unset           → in-person, else virtual, else fallback
+ */
+export function resolveBookingUrl(
+  clinician: Pick<Clinician, "booking_url_virtual" | "booking_url_in_person"> | null | undefined,
+  modality: string | undefined,
+  fallback: string,
+): string {
+  const virtual = clinician?.booking_url_virtual?.trim() || "";
+  const inPerson = clinician?.booking_url_in_person?.trim() || "";
+  if (modality === "telehealth") return virtual || inPerson || fallback;
+  // "in-person", "either", or unset all prefer the in-person link first.
+  return inPerson || virtual || fallback;
 }
 
 /** Prettify a location slug ("e-russell" → "E Russell") for card subtitles. */

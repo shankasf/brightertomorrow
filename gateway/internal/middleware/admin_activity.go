@@ -299,6 +299,7 @@ var staticActions = []actionEntry{
 	{method: "GET", pathSuffix: "/admin/api/clinicians", action: "view_clinicians_list", resourceType: "clinicians"},
 	{method: "POST", pathSuffix: "/admin/api/clinicians", action: "create_clinician", resourceType: "clinicians"},
 	{method: "PUT", pathPrefix: "/admin/api/clinicians/", action: "update_clinician", resourceType: "clinicians"},
+	{method: "POST", pathPrefix: "/admin/api/clinicians/", action: "upload_clinician_photo", resourceType: "clinicians"},
 	{method: "DELETE", pathPrefix: "/admin/api/clinicians/", action: "deactivate_clinician", resourceType: "clinicians"},
 
 	// Therapist matching — quiz config.

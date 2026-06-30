@@ -97,10 +97,75 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 
 // Compile-time interface checks.
 var (
-	_ ClinicianStore   = (*Store)(nil)
-	_ MatchConfigStore = (*Store)(nil)
-	_ MatchEventStore  = (*Store)(nil)
+	_ ClinicianStore      = (*Store)(nil)
+	_ ClinicianPhotoStore = (*Store)(nil)
+	_ MatchConfigStore    = (*Store)(nil)
+	_ MatchEventStore     = (*Store)(nil)
 )
+
+// ─── Clinician photo (separate item: SK=PHOTO#<slug>) ──────────────────────
+
+func clinicianPhotoSK(slug string) string { return "PHOTO#" + slug }
+
+// PutClinicianPhoto stores an uploaded avatar's bytes. Kept in its own item so
+// the image never rides along in ListClinicians/match responses (those query
+// begins_with(SK, "CLINICIAN#")).
+func (s *Store) PutClinicianPhoto(ctx context.Context, slug string, p ClinicianPhoto) error {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	item := map[string]ddbtypes.AttributeValue{
+		"PK":          &ddbtypes.AttributeValueMemberS{Value: clinicianPKValue},
+		"SK":          &ddbtypes.AttributeValueMemberS{Value: clinicianPhotoSK(slug)},
+		"contentType": &ddbtypes.AttributeValueMemberS{Value: p.ContentType},
+		"data":        &ddbtypes.AttributeValueMemberB{Value: p.Data},
+		"updatedAt":   &ddbtypes.AttributeValueMemberS{Value: p.UpdatedAt.UTC().Format(time.RFC3339Nano)},
+	}
+	if _, err := s.ddb.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(s.tableName),
+		Item:      item,
+	}); err != nil {
+		return fmt.Errorf("match: put clinician photo %q: %w", slug, err)
+	}
+	return nil
+}
+
+// GetClinicianPhoto fetches a stored avatar. Returns ErrNotFound if absent.
+func (s *Store) GetClinicianPhoto(ctx context.Context, slug string) (*ClinicianPhoto, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	out, err := s.ddb.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]ddbtypes.AttributeValue{
+			"PK": &ddbtypes.AttributeValueMemberS{Value: clinicianPKValue},
+			"SK": &ddbtypes.AttributeValueMemberS{Value: clinicianPhotoSK(slug)},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("match: get clinician photo %q: %w", slug, err)
+	}
+	if len(out.Item) == 0 {
+		return nil, ErrNotFound
+	}
+
+	p := &ClinicianPhoto{}
+	if v, ok := out.Item["contentType"].(*ddbtypes.AttributeValueMemberS); ok {
+		p.ContentType = v.Value
+	}
+	if v, ok := out.Item["data"].(*ddbtypes.AttributeValueMemberB); ok {
+		p.Data = v.Value
+	}
+	if v, ok := out.Item["updatedAt"].(*ddbtypes.AttributeValueMemberS); ok {
+		if t, perr := time.Parse(time.RFC3339Nano, v.Value); perr == nil {
+			p.UpdatedAt = t
+		}
+	}
+	if len(p.Data) == 0 {
+		return nil, ErrNotFound
+	}
+	return p, nil
+}
 
 // ─── Clinician ─────────────────────────────────────────────────────────────
 

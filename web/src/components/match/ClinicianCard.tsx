@@ -43,13 +43,17 @@ export default function ClinicianCard({
       } flex-col sm:flex-row sm:items-start`}
       style={{ borderRadius: "16px 0 16px 16px" }}
     >
-      {/* Avatar */}
+      {/* Avatar — uploaded photos are served from /v1/clinicians/.../photo,
+          which the in-container Next image optimizer cannot reach (only the
+          ingress routes it). Static /team/*.jpg can be optimized; uploaded
+          serve URLs must bypass the optimizer via `unoptimized`. */}
       {clinician.photo_url ? (
         <Image
           src={clinician.photo_url}
           alt={clinician.name}
           width={56}
           height={56}
+          unoptimized={!clinician.photo_url.startsWith("/team")}
           className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 rounded-full object-cover"
         />
       ) : (

@@ -1,11 +1,12 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { adminFetch } from '@/components/admin/useAdminAuth';
 import {
   PageHeader, PageWrap, Card, Button, Input, Textarea, Field, Checkbox,
   Pill, EmptyState, ErrorBanner, TableCard, THead, TH, TD, SkeletonRows,
+  InlineSpinner,
 } from '@/components/admin/ui';
 import { LuUsers } from 'react-icons/lu';
 import type {
@@ -67,8 +68,219 @@ type ClinicianForm = Omit<Clinician, 'created_at' | 'updated_at'>;
 const emptyClinician: ClinicianForm = {
   slug: '', name: '', credentials: '', initials: '', types: [], locations: [],
   telehealth: true, specialties: [], rate: '', in_network: true, staff_id: 0,
-  photo_url: '', active: true, sort_order: 0,
+  photo_url: '', booking_url_virtual: '', booking_url_in_person: '',
+  active: true, sort_order: 0,
 };
+
+const WINE = '#66202A';
+
+function locationLabel(c: Clinician): string {
+  return (
+    [...(c.locations ?? []), c.telehealth ? 'telehealth' : null].filter(Boolean).join(', ') || '—'
+  );
+}
+
+// Small round avatar shared by the desktop table and the mobile cards.
+// Uses a plain <img> because uploaded photos are served from
+// /v1/clinicians/<slug>/photo, which the in-container Next image optimizer
+// can't reach (it's only routed at the ingress). Same-origin <img> just works.
+function ClinicianAvatar({
+  photoUrl,
+  initials,
+  name,
+  size,
+}: {
+  photoUrl: string;
+  initials: string;
+  name: string;
+  size: number;
+}) {
+  return (
+    <span
+      className="relative inline-flex shrink-0 overflow-hidden rounded-full ring-1 ring-inset ring-[#E5E5E5]"
+      style={{ width: size, height: size }}
+    >
+      {photoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={photoUrl} alt={name} className="h-full w-full object-cover" />
+      ) : (
+        <span
+          className="grid h-full w-full place-items-center text-[11px] font-bold text-white"
+          style={{ backgroundColor: WINE }}
+          aria-hidden
+        >
+          {initials || '—'}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function BookingPills({ c }: { c: Clinician }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <Pill tone={c.booking_url_virtual?.trim() ? 'green' : 'slate'}>
+        Virtual {c.booking_url_virtual?.trim() ? '✓' : '—'}
+      </Pill>
+      <Pill tone={c.booking_url_in_person?.trim() ? 'green' : 'slate'}>
+        In-person {c.booking_url_in_person?.trim() ? '✓' : '—'}
+      </Pill>
+    </div>
+  );
+}
+
+// Labelled key/value row used inside the mobile clinician cards.
+function CardRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex gap-3">
+      <dt className="w-20 shrink-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink/55">
+        {label}
+      </dt>
+      <dd className="min-w-0 flex-1 text-ink-soft">{children}</dd>
+    </div>
+  );
+}
+
+// Resize/compress client-side: the upload endpoint hard-limits 350 KB and only
+// accepts jpeg/png/webp, so we draw onto a canvas capped at 512px on the
+// longest side and re-encode as JPEG q=0.85.
+function resizeImageToBlob(file: File, maxSide = 512): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new window.Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('canvas-unsupported'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('encode-failed'))),
+        'image/jpeg',
+        0.85,
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('decode-failed'));
+    };
+    img.src = url;
+  });
+}
+
+// Image preview + upload/replace control. Replaces the old raw Photo URL box.
+// The photo is keyed by slug server-side, so a slug is required before upload.
+function PhotoField({
+  slug,
+  photoUrl,
+  initials,
+  onUploaded,
+}: {
+  slug: string;
+  photoUrl: string;
+  initials: string;
+  onUploaded: (photoUrl: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState('');
+  const disabled = !slug.trim();
+
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErr('Please choose an image file (JPEG, PNG, or WebP).');
+      return;
+    }
+    setErr('');
+    setUploading(true);
+    try {
+      const blob = await resizeImageToBlob(file, 512);
+      // Upload RAW image bytes — override adminFetch's default JSON header.
+      const r = await adminFetch(`/admin/api/clinicians/${slug}/photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': blob.type },
+        body: blob,
+      });
+      if (!r.ok) throw new Error(`${r.status}`);
+      const data = (await r.json()) as { ok: boolean; photo_url: string };
+      onUploaded(data.photo_url); // ?v=<ms> busts the cache so the preview refreshes
+    } catch {
+      setErr('Upload failed. Please try a smaller or different image.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Field
+      label="Photo"
+      hint={disabled ? 'Enter a slug first, then upload' : 'JPEG, PNG, or WebP — resized automatically'}
+    >
+      <div className="flex items-center gap-4">
+        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl ring-1 ring-inset ring-[#E5E5E5]">
+          {photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={photoUrl}
+              alt={initials ? `${initials} photo` : 'Clinician photo'}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span
+              className="grid h-full w-full place-items-center text-lg font-bold text-white"
+              style={{ backgroundColor: WINE }}
+              aria-hidden
+            >
+              {initials || '—'}
+            </span>
+          )}
+          {uploading && (
+            <span className="absolute inset-0 grid place-items-center bg-white/70" aria-hidden>
+              <InlineSpinner />
+            </span>
+          )}
+        </div>
+        <div className="min-w-0">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            tabIndex={-1}
+            onChange={onPick}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => inputRef.current?.click()}
+            disabled={disabled || uploading}
+            loading={uploading}
+            aria-busy={uploading}
+          >
+            {uploading ? 'Uploading…' : photoUrl ? 'Replace photo' : 'Upload photo'}
+          </Button>
+          {err && (
+            <p role="alert" className="mt-1.5 text-xs text-rose-600">
+              {err}
+            </p>
+          )}
+        </div>
+      </div>
+    </Field>
+  );
+}
 
 function CliniciansTab() {
   const [items, setItems] = useState<Clinician[] | null>(null);
@@ -79,6 +291,7 @@ function CliniciansTab() {
   const [specialtiesText, setSpecialtiesText] = useState('');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [viewing, setViewing] = useState<Clinician | null>(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -118,7 +331,10 @@ function CliniciansTab() {
       slug: c.slug, name: c.name, credentials: c.credentials, initials: c.initials,
       types: c.types ?? [], locations: c.locations ?? [], telehealth: c.telehealth,
       specialties: c.specialties ?? [], rate: c.rate, in_network: c.in_network,
-      staff_id: c.staff_id, photo_url: c.photo_url, active: c.active, sort_order: c.sort_order,
+      staff_id: c.staff_id, photo_url: c.photo_url,
+      booking_url_virtual: c.booking_url_virtual ?? '',
+      booking_url_in_person: c.booking_url_in_person ?? '',
+      active: c.active, sort_order: c.sort_order,
     });
     setSpecialtiesText((c.specialties ?? []).join(', '));
     setOpen(true);
@@ -178,17 +394,28 @@ function CliniciansTab() {
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -6, height: 0 }}
-            animate={{ opacity: 1, y: 0, height: 'auto' }}
-            exit={{ opacity: 0, y: -6, height: 0 }}
-            transition={{ duration: 0.22 }}
-            className="mb-6 overflow-hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-4 backdrop-blur-sm sm:items-center"
+            onClick={close}
           >
-            <Card className="border-brand-200/70 bg-gradient-to-br from-brand-50/40 via-white to-white">
-              <h2 className="mb-4 text-sm font-semibold text-ink">
-                {editing ? `Edit ${editing.name}` : 'New clinician'}
-              </h2>
-              <div className="space-y-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.97, y: 8 }}
+              transition={{ duration: 0.18 }}
+              onClick={(e) => e.stopPropagation()}
+              className="my-8 w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-[#E5E5E5]"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-[#EFEFEF] bg-gradient-to-br from-brand-50/40 via-white to-white p-5">
+                <h2 className="text-base font-semibold text-ink">
+                  {editing ? `Edit ${editing.name}` : 'New clinician'}
+                </h2>
+                <button onClick={close} className="shrink-0 rounded-lg p-1.5 text-ink-soft transition hover:bg-cream hover:text-ink" aria-label="Close">✕</button>
+              </div>
+              <div className="space-y-4 p-5">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Field label="Slug" hint={editing ? 'Cannot be changed' : 'Unique, e.g. elisia-danley'}>
                     <Input
@@ -210,9 +437,6 @@ function CliniciansTab() {
                   <Field label="Rate">
                     <Input value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} placeholder="$125 / session" />
                   </Field>
-                  <Field label="Photo URL">
-                    <Input value={form.photo_url} onChange={(e) => setForm({ ...form, photo_url: e.target.value })} placeholder="/team/elisia-danley.jpg" />
-                  </Field>
                   <Field label="Jane staff ID" hint="0 if not bookable">
                     <Input type="number" value={form.staff_id} onChange={(e) => setForm({ ...form, staff_id: +e.target.value })} />
                   </Field>
@@ -220,6 +444,13 @@ function CliniciansTab() {
                     <Input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: +e.target.value })} />
                   </Field>
                 </div>
+
+                <PhotoField
+                  slug={form.slug}
+                  photoUrl={form.photo_url}
+                  initials={form.initials}
+                  onUploaded={(url) => setForm((f) => ({ ...f, photo_url: url }))}
+                />
 
                 <Field label="Support types" hint="Which quiz 'type' answers this clinician matches">
                   <div className="flex flex-wrap gap-3 pt-1">
@@ -253,25 +484,54 @@ function CliniciansTab() {
                   <Input value={specialtiesText} onChange={(e) => setSpecialtiesText(e.target.value)} placeholder="Anxiety, Trauma, Family" />
                 </Field>
 
+                <div className="rounded-lg border border-[#E5E5E5] bg-cream/40 p-3.5">
+                  <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.1em] text-ink/70">
+                    Booking links
+                  </div>
+                  <p className="mb-3 text-xs text-ink-soft">
+                    Where Get Scheduled sends a visitor who picks this clinician. The form uses the
+                    virtual link for telehealth and the in-person link for in-person. Leave a box
+                    blank to fall back to the other link, then to the main Jane booking page.
+                  </p>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Virtual / telehealth link" hint="Provider's video-visit booking URL">
+                      <Input
+                        type="url"
+                        value={form.booking_url_virtual ?? ''}
+                        onChange={(e) => setForm({ ...form, booking_url_virtual: e.target.value })}
+                        placeholder="https://brightertomorrow.janeapp.com/#/staff_member/47"
+                      />
+                    </Field>
+                    <Field label="In-person link" hint="Provider's in-office booking URL">
+                      <Input
+                        type="url"
+                        value={form.booking_url_in_person ?? ''}
+                        onChange={(e) => setForm({ ...form, booking_url_in_person: e.target.value })}
+                        placeholder="https://brightertomorrow.janeapp.com/#/staff_member/47"
+                      />
+                    </Field>
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap items-center gap-5 pt-1">
                   <Checkbox label="Offers telehealth" checked={form.telehealth} onChange={(e) => setForm({ ...form, telehealth: e.target.checked })} />
                   <Checkbox label="In-network" checked={form.in_network} onChange={(e) => setForm({ ...form, in_network: e.target.checked })} />
                   <Checkbox label="Active" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
                 </div>
               </div>
-              <div className="mt-5 flex items-center gap-2">
+              <div className="flex items-center gap-2 border-t border-[#EFEFEF] bg-cream/40 p-4">
                 <Button onClick={save} loading={saving} disabled={!form.slug.trim() || !form.name.trim()}>
                   {saving ? 'Saving…' : 'Save'}
                 </Button>
-                <Button variant="secondary" onClick={close}>Cancel</Button>
+                <Button variant="secondary" onClick={close} className="ml-auto">Cancel</Button>
               </div>
-            </Card>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {!items ? (
-        <SkeletonRows rows={6} cols={7} />
+        <SkeletonRows rows={6} cols={9} />
       ) : items.length === 0 ? (
         <EmptyState
           title="No clinicians yet"
@@ -280,51 +540,183 @@ function CliniciansTab() {
           icon={<LuUsers width={22} height={22} strokeWidth={1.8} />}
         />
       ) : (
-        <TableCard scrollX>
-          <THead>
-            <tr>
-              <TH>Name</TH>
-              <TH>Types</TH>
-              <TH>Locations</TH>
-              <TH>Specialties</TH>
-              <TH>Rate</TH>
-              <TH>Network</TH>
-              <TH>Status</TH>
-              <TH>Order</TH>
-              <TH>Actions</TH>
-            </tr>
-          </THead>
-          <tbody>
+        <>
+          {/* Desktop: a real table from lg up. */}
+          <div className="hidden lg:block">
+            <TableCard>
+              <THead>
+                <tr>
+                  <TH>Name</TH>
+                  <TH>Types</TH>
+                  <TH>Locations</TH>
+                  <TH>Specialties</TH>
+                  <TH>Rate</TH>
+                  <TH>Booking links</TH>
+                  <TH>Network</TH>
+                  <TH>Status</TH>
+                  <TH>Order</TH>
+                  <TH>Actions</TH>
+                </tr>
+              </THead>
+              <tbody>
+                {items.map((c) => (
+                  <tr
+                    key={c.slug}
+                    onClick={() => setViewing(c)}
+                    className={`cursor-pointer transition-colors hover:bg-cream/50 ${c.active ? '' : 'opacity-60'}`}
+                  >
+                    <TD className="whitespace-nowrap">
+                      <div className="flex items-center gap-2.5">
+                        <ClinicianAvatar photoUrl={c.photo_url} initials={c.initials} name={c.name} size={36} />
+                        <div>
+                          <div className="font-medium text-ink">{c.name}</div>
+                          <div className="text-[12px] text-ink-soft">{c.credentials}</div>
+                        </div>
+                      </div>
+                    </TD>
+                    <TD className="text-[12.5px] text-ink-soft">{(c.types ?? []).join(', ') || '—'}</TD>
+                    <TD className="text-[12.5px] text-ink-soft">{locationLabel(c)}</TD>
+                    <TD className="text-[12.5px] text-ink-soft max-w-[14rem]">{(c.specialties ?? []).join(', ') || '—'}</TD>
+                    <TD className="whitespace-nowrap text-[12.5px]">{c.rate || '—'}</TD>
+                    <TD className="whitespace-nowrap"><BookingPills c={c} /></TD>
+                    <TD>{c.in_network ? <Pill tone="green">In-network</Pill> : <Pill tone="slate">Out-of-network</Pill>}</TD>
+                    <TD>{c.active ? <Pill tone="green" dot>Active</Pill> : <Pill tone="slate">Archived</Pill>}</TD>
+                    <TD className="tabular-nums">{c.sort_order}</TD>
+                    <TD className="whitespace-nowrap">
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); startEdit(c); }}>Edit</Button>
+                        {c.active && (
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); archive(c); }} className="!text-rose-600 hover:!bg-rose-50">
+                            Archive
+                          </Button>
+                        )}
+                      </div>
+                    </TD>
+                  </tr>
+                ))}
+              </tbody>
+            </TableCard>
+          </div>
+
+          {/* Below lg: stacked cards — no horizontal scroll down to 320px. */}
+          <div className="space-y-3 lg:hidden">
             {items.map((c) => (
-              <tr key={c.slug} className={c.active ? undefined : 'opacity-60'}>
-                <TD className="whitespace-nowrap">
-                  <div className="font-medium text-ink">{c.name}</div>
-                  <div className="text-[12px] text-ink-soft">{c.credentials}</div>
-                </TD>
-                <TD className="text-[12.5px] text-ink-soft">{(c.types ?? []).join(', ') || '—'}</TD>
-                <TD className="text-[12.5px] text-ink-soft">
-                  {[...(c.locations ?? []), c.telehealth ? 'telehealth' : null].filter(Boolean).join(', ') || '—'}
-                </TD>
-                <TD className="text-[12.5px] text-ink-soft max-w-[14rem]">{(c.specialties ?? []).join(', ') || '—'}</TD>
-                <TD className="whitespace-nowrap text-[12.5px]">{c.rate || '—'}</TD>
-                <TD>{c.in_network ? <Pill tone="green">In-network</Pill> : <Pill tone="slate">Out-of-network</Pill>}</TD>
-                <TD>{c.active ? <Pill tone="green" dot>Active</Pill> : <Pill tone="slate">Archived</Pill>}</TD>
-                <TD className="tabular-nums">{c.sort_order}</TD>
-                <TD className="whitespace-nowrap">
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => startEdit(c)}>Edit</Button>
-                    {c.active && (
-                      <Button variant="ghost" size="sm" onClick={() => archive(c)} className="!text-rose-600 hover:!bg-rose-50">
-                        Archive
-                      </Button>
-                    )}
+              <Card
+                key={c.slug}
+                onClick={() => setViewing(c)}
+                className={`cursor-pointer ${c.active ? '' : 'opacity-60'}`}
+              >
+                <div className="flex items-start gap-3">
+                  <ClinicianAvatar photoUrl={c.photo_url} initials={c.initials} name={c.name} size={44} />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-ink">{c.name}</div>
+                    <div className="text-[12.5px] text-ink-soft">{c.credentials}</div>
                   </div>
-                </TD>
-              </tr>
+                  <div className="shrink-0">
+                    {c.active ? <Pill tone="green" dot>Active</Pill> : <Pill tone="slate">Archived</Pill>}
+                  </div>
+                </div>
+
+                <dl className="mt-3.5 space-y-2.5 text-[12.5px]">
+                  <CardRow label="Types">{(c.types ?? []).join(', ') || '—'}</CardRow>
+                  <CardRow label="Locations">{locationLabel(c)}</CardRow>
+                  <CardRow label="Specialties">{(c.specialties ?? []).join(', ') || '—'}</CardRow>
+                  <CardRow label="Rate">{c.rate || '—'}</CardRow>
+                  <CardRow label="Booking"><BookingPills c={c} /></CardRow>
+                  <CardRow label="Network">
+                    {c.in_network ? <Pill tone="green">In-network</Pill> : <Pill tone="slate">Out-of-network</Pill>}
+                  </CardRow>
+                  <CardRow label="Order"><span className="tabular-nums">{c.sort_order}</span></CardRow>
+                </dl>
+
+                <div className="mt-3.5 flex gap-1 border-t border-[#EFEFEF] pt-3">
+                  <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); startEdit(c); }}>Edit</Button>
+                  {c.active && (
+                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); archive(c); }} className="!text-rose-600 hover:!bg-rose-50">
+                      Archive
+                    </Button>
+                  )}
+                </div>
+              </Card>
             ))}
-          </tbody>
-        </TableCard>
+          </div>
+        </>
       )}
+
+      <AnimatePresence>
+        {viewing && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 p-4 backdrop-blur-sm sm:items-center"
+            onClick={() => setViewing(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.97, y: 8 }}
+              transition={{ duration: 0.18 }}
+              onClick={(e) => e.stopPropagation()}
+              className="my-8 w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-[#E5E5E5]"
+            >
+              <div className="flex items-start gap-4 border-b border-[#EFEFEF] bg-gradient-to-br from-brand-50/40 via-white to-white p-5">
+                <ClinicianAvatar photoUrl={viewing.photo_url} initials={viewing.initials} name={viewing.name} size={64} />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-base font-semibold text-ink">{viewing.name}</h2>
+                  {viewing.credentials && <p className="text-sm text-ink-soft">{viewing.credentials}</p>}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {viewing.active ? <Pill tone="green" dot>Active</Pill> : <Pill tone="slate">Archived</Pill>}
+                    {viewing.in_network ? <Pill tone="green">In-network</Pill> : <Pill tone="slate">Out-of-network</Pill>}
+                  </div>
+                </div>
+                <button onClick={() => setViewing(null)} className="shrink-0 rounded-lg p-1.5 text-ink-soft transition hover:bg-cream hover:text-ink" aria-label="Close">✕</button>
+              </div>
+
+              <div className="space-y-3.5 p-5">
+                <DetailRow label="Slug" value={viewing.slug} />
+                <DetailRow label="Support types" value={(viewing.types ?? []).join(', ') || null} />
+                <DetailRow label="Locations" value={locationLabel(viewing)} />
+                <DetailRow label="Telehealth" value={viewing.telehealth ? 'Yes' : 'No'} />
+                <DetailRow label="Specialties" value={(viewing.specialties ?? []).join(', ') || null} />
+                <DetailRow label="Rate" value={viewing.rate || null} />
+                <DetailRow label="Jane staff ID" value={viewing.staff_id ? String(viewing.staff_id) : null} />
+                <DetailRow label="Virtual link" value={viewing.booking_url_virtual || null} link />
+                <DetailRow label="In-person link" value={viewing.booking_url_in_person || null} link />
+                <DetailRow label="Sort order" value={String(viewing.sort_order)} />
+              </div>
+
+              <div className="flex items-center gap-2 border-t border-[#EFEFEF] bg-cream/40 p-4">
+                <Button onClick={() => { const c = viewing; setViewing(null); startEdit(c); }}>Edit</Button>
+                {viewing.active && (
+                  <Button variant="danger" onClick={() => { const c = viewing; setViewing(null); archive(c); }}>Archive</Button>
+                )}
+                <Button variant="secondary" onClick={() => setViewing(null)} className="ml-auto">Close</Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, link }: { label: string; value: string | null; link?: boolean }) {
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      <dt className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink/55">{label}</dt>
+      <dd className="col-span-2 break-words text-sm text-ink-soft">
+        {value ? (
+          link ? (
+            <a href={value} target="_blank" rel="noopener noreferrer" className="text-brand-700 underline decoration-brand-200 underline-offset-2 hover:text-brand">{value}</a>
+          ) : (
+            value
+          )
+        ) : (
+          <span className="text-ink/30">—</span>
+        )}
+      </dd>
     </div>
   );
 }
@@ -464,7 +856,7 @@ function QuestionsTab() {
             <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.1em] text-ink/70">Options</div>
             <div className="space-y-2">
               {q.options.map((o, oi) => (
-                <div key={oi} className="grid grid-cols-1 items-end gap-2 rounded-lg border border-[#E5E5E5] bg-cream/40 p-2.5 sm:grid-cols-[4.5rem_minmax(8rem,1fr)_minmax(10rem,1.3fr)_minmax(14rem,2fr)_auto]">
+                <div key={oi} className="grid grid-cols-1 items-end gap-2 rounded-lg border border-[#E5E5E5] bg-cream/40 p-2.5 lg:grid-cols-[4.5rem_minmax(8rem,1fr)_minmax(10rem,1.3fr)_minmax(14rem,2fr)_auto]">
                   <OptField label="Icon"><Input placeholder="🧠" value={o.icon ?? ''} onChange={(e) => patchOption(qi, oi, { icon: e.target.value })} /></OptField>
                   <OptField label="Value"><Input placeholder="therapy" value={o.value} onChange={(e) => patchOption(qi, oi, { value: e.target.value })} /></OptField>
                   <OptField label="Label"><Input placeholder="Therapy" value={o.label} onChange={(e) => patchOption(qi, oi, { label: e.target.value })} /></OptField>

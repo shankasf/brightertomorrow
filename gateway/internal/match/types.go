@@ -27,22 +27,28 @@ import (
 //	GSI1PK = "CLINICIAN_ACTIVE"    GSI1SK = "<zero-padded-6 sort_order>#<slug>"
 //	(GSI1 keys only present when active=true)
 type Clinician struct {
-	Slug        string    `dynamodbav:"slug"        json:"slug"`
-	Name        string    `dynamodbav:"name"        json:"name"`
-	Credentials string    `dynamodbav:"credentials" json:"credentials"`
-	Initials    string    `dynamodbav:"initials"    json:"initials"`
-	Types       []string  `dynamodbav:"types"       json:"types"`
-	Locations   []string  `dynamodbav:"locations"   json:"locations"`
-	Telehealth  bool      `dynamodbav:"telehealth"  json:"telehealth"`
-	Specialties []string  `dynamodbav:"specialties" json:"specialties"`
-	Rate        string    `dynamodbav:"rate"        json:"rate"`
-	InNetwork   bool      `dynamodbav:"inNetwork"   json:"in_network"`
-	StaffID     int       `dynamodbav:"staffId"     json:"staff_id"`
-	PhotoURL    string    `dynamodbav:"photoUrl"    json:"photo_url"`
-	Active      bool      `dynamodbav:"active"      json:"active"`
-	SortOrder   int       `dynamodbav:"sortOrder"   json:"sort_order"`
-	CreatedAt   time.Time `dynamodbav:"createdAt"   json:"created_at"`
-	UpdatedAt   time.Time `dynamodbav:"updatedAt"   json:"updated_at"`
+	Slug        string   `dynamodbav:"slug"        json:"slug"`
+	Name        string   `dynamodbav:"name"        json:"name"`
+	Credentials string   `dynamodbav:"credentials" json:"credentials"`
+	Initials    string   `dynamodbav:"initials"    json:"initials"`
+	Types       []string `dynamodbav:"types"       json:"types"`
+	Locations   []string `dynamodbav:"locations"   json:"locations"`
+	Telehealth  bool     `dynamodbav:"telehealth"  json:"telehealth"`
+	Specialties []string `dynamodbav:"specialties" json:"specialties"`
+	Rate        string   `dynamodbav:"rate"        json:"rate"`
+	InNetwork   bool     `dynamodbav:"inNetwork"   json:"in_network"`
+	StaffID     int      `dynamodbav:"staffId"     json:"staff_id"`
+	PhotoURL    string   `dynamodbav:"photoUrl"    json:"photo_url"`
+	// Per-clinician booking redirect links. When a visitor picks this
+	// clinician on /get-scheduled, the booking handoff goes to the link that
+	// matches the chosen format. Either may be empty — callers fall back to the
+	// other link, then to the practice-wide Jane URL.
+	BookingURLVirtual  string    `dynamodbav:"bookingUrlVirtual"  json:"booking_url_virtual"`
+	BookingURLInPerson string    `dynamodbav:"bookingUrlInPerson" json:"booking_url_in_person"`
+	Active             bool      `dynamodbav:"active"             json:"active"`
+	SortOrder          int       `dynamodbav:"sortOrder"          json:"sort_order"`
+	CreatedAt          time.Time `dynamodbav:"createdAt"          json:"created_at"`
+	UpdatedAt          time.Time `dynamodbav:"updatedAt"          json:"updated_at"`
 }
 
 // normalizeClinician ensures slice fields are never nil in returned Clinicians.
@@ -138,6 +144,21 @@ type ClinicianStore interface {
 	ListClinicians(ctx context.Context, activeOnly bool) ([]Clinician, error)
 	GetClinician(ctx context.Context, slug string) (*Clinician, error)
 	PutClinician(ctx context.Context, c Clinician) error
+}
+
+// ClinicianPhoto is an uploaded clinician avatar, stored as bytes in its own
+// item (SK=PHOTO#<slug>) so the image payload never bloats roster/match list
+// responses. Non-PHI public image.
+type ClinicianPhoto struct {
+	ContentType string
+	Data        []byte
+	UpdatedAt   time.Time
+}
+
+// ClinicianPhotoStore is the storage abstraction for uploaded clinician photos.
+type ClinicianPhotoStore interface {
+	PutClinicianPhoto(ctx context.Context, slug string, p ClinicianPhoto) error
+	GetClinicianPhoto(ctx context.Context, slug string) (*ClinicianPhoto, error)
 }
 
 // MatchConfigStore is the storage abstraction for the quiz configuration.

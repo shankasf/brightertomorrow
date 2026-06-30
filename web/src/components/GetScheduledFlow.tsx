@@ -20,12 +20,13 @@ import {
 import MatchQuiz from "@/components/match/MatchQuiz";
 import ClinicianCard from "@/components/match/ClinicianCard";
 import { useMatchOptions } from "@/components/match/useMatchOptions";
-import { postMatchPicked, postMatchTherapists } from "@/components/match/api";
+import { postMatchPicked, postMatchTherapists, resolveBookingUrl } from "@/components/match/api";
 import type { MatchAnswers, MatchResult, MatchTherapistsResponse } from "@/components/match/types";
 
-// After verification (or skip), we hand off to Jane's booking system. Its first
-// screen is the "Select a Location | Brighter Tomorrow Counseling Services"
-// page, which is exactly the final step of this flow.
+// Practice-wide fallback booking destination — Jane's "Select a Location"
+// screen. Used when the picked clinician has no per-clinician booking link set
+// (or when the visitor skips the match step entirely). When a clinician IS
+// picked and the admin has set their link, we redirect there instead.
 const JANE_URL = "https://brightertomorrow.janeapp.com/";
 
 type Payer = {
@@ -97,11 +98,6 @@ type InsPhase =
   | { kind: "result"; payer: Payer; data: CheckResponse }
   | { kind: "error"; payer: Payer };
 
-/** Full-page handoff to Jane's "Select a Location" booking screen. */
-function goToLocationSelect() {
-  window.location.href = JANE_URL;
-}
-
 export default function GetScheduledFlow() {
   const { config, loading: optionsLoading } = useMatchOptions();
   const [phase, setPhase] = useState<FlowPhase>("quiz");
@@ -112,6 +108,10 @@ export default function GetScheduledFlow() {
 
   // Map the top-level phase to the 3-step left-rail progress.
   const stepIndex = phase === "insurance" ? 1 : 0;
+
+  // Booking destination: the picked clinician's admin-managed link for the
+  // chosen format, falling back to the practice-wide Jane URL.
+  const bookingUrl = resolveBookingUrl(picked, answers.modality, JANE_URL);
 
   async function runMatch(a: MatchAnswers) {
     setAnswers(a);
@@ -310,6 +310,7 @@ export default function GetScheduledFlow() {
                   >
                     <InsurancePhase
                       picked={picked}
+                      bookingUrl={bookingUrl}
                       prefillSelfPay={answers.insurance === "private-pay"}
                       onBackToResults={match ? () => setPhase("results") : undefined}
                     />
@@ -416,10 +417,12 @@ function QuizLoading({ label = "Loading the questions…" }: { label?: string })
 // ── Insurance phase (the EXISTING flow, lifted into a sub-component) ─────────
 function InsurancePhase({
   picked,
+  bookingUrl,
   prefillSelfPay,
   onBackToResults,
 }: {
   picked: MatchResult | null;
+  bookingUrl: string;
   prefillSelfPay: boolean;
   onBackToResults?: () => void;
 }) {
@@ -427,6 +430,12 @@ function InsurancePhase({
     prefillSelfPay ? { kind: "self-pay-info", payer: SELF_PAY_PAYER } : { kind: "pick-payer" },
   );
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+
+  // Full-page handoff to the booking destination resolved for the picked
+  // clinician (their per-format link, or the practice-wide fallback).
+  const goToBooking = () => {
+    window.location.href = bookingUrl;
+  };
 
   function pickPayer(p: Payer) {
     if (p.special === "self-pay" || p.special === "other") {
@@ -509,7 +518,7 @@ function InsurancePhase({
           transition={{ duration: 0.22 }}
         >
           {phase.kind === "pick-payer" && (
-            <PickPayer onPick={pickPayer} onSkip={goToLocationSelect} />
+            <PickPayer onPick={pickPayer} onSkip={goToBooking} />
           )}
 
           {phase.kind === "fill-form" && (
@@ -520,7 +529,7 @@ function InsurancePhase({
               canSubmit={canSubmit}
               onBack={() => setPhase({ kind: "pick-payer" })}
               onSubmit={() => submit(phase.payer)}
-              onSkip={goToLocationSelect}
+              onSkip={goToBooking}
             />
           )}
 
@@ -530,7 +539,7 @@ function InsurancePhase({
             <SelfPayPanel
               payer={phase.payer}
               onBack={backToPick}
-              onContinue={goToLocationSelect}
+              onContinue={goToBooking}
             />
           )}
 
@@ -539,7 +548,7 @@ function InsurancePhase({
               payer={phase.payer}
               data={phase.data}
               onBack={() => setPhase({ kind: "pick-payer" })}
-              onContinue={goToLocationSelect}
+              onContinue={goToBooking}
             />
           )}
 
@@ -547,7 +556,7 @@ function InsurancePhase({
             <ErrorPanel
               onRetry={() => submit(phase.payer)}
               onBack={() => setPhase({ kind: "fill-form", payer: phase.payer })}
-              onContinue={goToLocationSelect}
+              onContinue={goToBooking}
             />
           )}
         </motion.div>

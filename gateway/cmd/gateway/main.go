@@ -264,6 +264,11 @@ func main() {
 		Events:     matchStore,
 		PHI:        phiStore,
 	}
+	clinicianPhotoH := &handlers.ClinicianPhotoHandler{
+		Photos:     matchStore,
+		Clinicians: matchStore,
+		PHI:        phiStore,
+	}
 
 	readyzH := &handlers.ReadyzHandler{Pool: pool, PHI: phiStore}
 
@@ -307,6 +312,9 @@ func main() {
 		r.With(httprate.LimitByIP(30, time.Minute)).Get("/match/options", matchTherapistH.Options)
 		r.With(httprate.LimitByIP(20, time.Minute)).Post("/match/therapists", matchTherapistH.Therapists)
 		r.With(httprate.LimitByIP(30, time.Minute)).Post("/match/picked", matchTherapistH.Picked)
+
+		// Public clinician avatar image (non-PHI). Served from DDB-stored bytes.
+		r.With(httprate.LimitByIP(120, time.Minute)).Get("/clinicians/{slug}/photo", clinicianPhotoH.Serve)
 
 		// Twilio Voice — phone callers reach the same realtime agent graph.
 		// Both endpoints are signature-gated (X-Twilio-Signature) inside
@@ -426,6 +434,7 @@ func main() {
 			r.Post("/clinicians", adminMatchH.CreateClinician)
 			r.Put("/clinicians/{slug}", adminMatchH.UpdateClinician)
 			r.Delete("/clinicians/{slug}", adminMatchH.DeleteClinician)
+			r.Post("/clinicians/{slug}/photo", clinicianPhotoH.Upload)
 			r.Get("/match-config", adminMatchH.GetMatchConfig)
 			r.Put("/match-config", adminMatchH.PutMatchConfig)
 			r.Get("/match-stats", adminMatchH.GetMatchStats)

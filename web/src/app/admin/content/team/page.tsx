@@ -37,6 +37,7 @@ export default function TeamPage() {
   const [form, setForm] = useState<MemberForm>(emptyMember);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [viewing, setViewing] = useState<Member | null>(null);
 
   // Local text state for comma-separated specialties input
   const [specialtiesText, setSpecialtiesText] = useState('');
@@ -122,15 +123,26 @@ export default function TeamPage() {
         <AnimatePresence>
           {open && (
             <motion.div
-              initial={{ opacity: 0, y: -6, height: 0 }}
-              animate={{ opacity: 1, y: 0, height: 'auto' }}
-              exit={{ opacity: 0, y: -6, height: 0 }}
-              transition={{ duration: 0.22 }}
-              className="mb-6 overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 backdrop-blur-sm sm:items-center"
+              onClick={close}
             >
-              <Card className="border-indigo-200/70 bg-gradient-to-br from-indigo-50/40 via-white to-white">
-                <h2 className="mb-4 text-sm font-semibold text-slate-900">{editing ? 'Edit member' : 'New member'}</h2>
-                <div className="space-y-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: 8 }}
+                transition={{ duration: 0.18 }}
+                onClick={(e) => e.stopPropagation()}
+                className="my-8 w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200"
+              >
+                <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-gradient-to-br from-indigo-50/50 via-white to-white p-5">
+                  <h2 className="text-base font-semibold text-slate-900">{editing ? 'Edit member' : 'New member'}</h2>
+                  <button onClick={close} className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Close">✕</button>
+                </div>
+                <div className="space-y-4 p-5">
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <Field label="Full name">
                       <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
@@ -208,11 +220,11 @@ export default function TeamPage() {
                     </div>
                   </div>
                 </div>
-                <div className="mt-5 flex items-center gap-2">
+                <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/60 p-4">
                   <Button onClick={save} loading={saving}>{saving ? "Saving…" : "Save"}</Button>
-                  <Button variant="secondary" onClick={close}>Cancel</Button>
+                  <Button variant="secondary" onClick={close} className="ml-auto">Cancel</Button>
                 </div>
-              </Card>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -231,7 +243,8 @@ export default function TeamPage() {
                 key={m.id}
                 variants={{ initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 } }}
                 whileHover={{ y: -2 }}
-                className="group flex items-start gap-3 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_8px_20px_rgba(15,23,42,0.06)]"
+                onClick={() => setViewing(m)}
+                className="group flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_8px_20px_rgba(15,23,42,0.06)]"
               >
                 {m.photo_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -247,9 +260,9 @@ export default function TeamPage() {
                       <p className="truncate text-sm font-semibold text-slate-900">{m.full_name}</p>
                       {m.credentials && <span className="text-xs text-slate-500">{m.credentials}</span>}
                     </div>
-                    <div className="flex shrink-0 gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                      <Button variant="ghost" size="sm" onClick={() => startEdit(m)}>Edit</Button>
-                      <Button variant="ghost" size="sm" onClick={() => del(m.id)} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
+                    <div className="flex shrink-0 gap-1">
+                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); startEdit(m); }}>Edit</Button>
+                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); del(m.id); }} className="!text-rose-600 hover:!bg-rose-50">Delete</Button>
                     </div>
                   </div>
                   <p className="mt-0.5 text-xs text-slate-500">{m.role ?? '—'} · {groupName(m.group_id)}</p>
@@ -265,6 +278,75 @@ export default function TeamPage() {
             ))}
           </motion.div>
         )}
+
+        <AnimatePresence>
+          {viewing && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 backdrop-blur-sm sm:items-center"
+              onClick={() => setViewing(null)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: 8 }}
+                transition={{ duration: 0.18 }}
+                onClick={(e) => e.stopPropagation()}
+                className="my-8 w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200"
+              >
+                <div className="flex items-start gap-4 border-b border-slate-100 bg-gradient-to-br from-indigo-50/50 via-white to-white p-5">
+                  {viewing.photo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={viewing.photo_url} alt="" className="h-16 w-16 shrink-0 rounded-full object-cover ring-2 ring-white ring-offset-2 ring-offset-slate-100" />
+                  ) : (
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-cyan-500 text-lg font-semibold text-white">
+                      {viewing.full_name[0]?.toUpperCase() ?? '?'}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-base font-semibold text-slate-900">{viewing.full_name}</h2>
+                    {viewing.credentials && <p className="text-sm text-slate-500">{viewing.credentials}</p>}
+                    <p className="mt-0.5 text-xs text-slate-500">{viewing.role ?? '—'} · {groupName(viewing.group_id)}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {!viewing.published && <Pill tone="slate">Draft</Pill>}
+                      {viewing.accepts_new ? <Pill tone="green" dot>Accepting</Pill> : <Pill tone="amber">Waitlist</Pill>}
+                    </div>
+                  </div>
+                  <button onClick={() => setViewing(null)} className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Close">✕</button>
+                </div>
+
+                <div className="space-y-4 p-5">
+                  <DetailRow label="Email" value={viewing.email} />
+                  <DetailRow label="Bio" value={viewing.bio} />
+                  <DetailRow label="Office locations" value={(viewing.office_locations ?? []).join(', ') || null} />
+                  <DetailRow label="Pricing tier" value={viewing.pricing_tier} />
+                  <DetailRow label="Network status" value={viewing.network_status} />
+                  <DetailRow label="Specialties" value={(viewing.specialties ?? []).join(', ') || null} />
+                  <DetailRow label="Photo URL" value={viewing.photo_url} />
+                  <DetailRow label="Position" value={String(viewing.position)} />
+                </div>
+
+                <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/60 p-4">
+                  <Button onClick={() => { const m = viewing; setViewing(null); startEdit(m); }}>Edit</Button>
+                  <Button variant="danger" onClick={() => { const id = viewing.id; setViewing(null); del(id); }}>Delete</Button>
+                  <Button variant="secondary" onClick={() => setViewing(null)} className="ml-auto">Close</Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </PageWrap>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</dt>
+      <dd className="col-span-2 whitespace-pre-wrap break-words text-sm text-slate-700">{value || <span className="text-slate-300">—</span>}</dd>
+    </div>
   );
 }
