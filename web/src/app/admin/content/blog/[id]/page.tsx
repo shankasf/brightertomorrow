@@ -42,8 +42,10 @@ function CoverPreview({ url }: { url: string }) {
   );
 }
 
-type PostForm = { slug: string; title: string; excerpt: string; body_md: string; cover_url: string; author: string; published: boolean };
-const empty: PostForm = { slug: '', title: '', excerpt: '', body_md: '', cover_url: '', author: '', published: false };
+type PostForm = { slug: string; title: string; excerpt: string; body_md: string; cover_url: string; author_member_id: number | null; published: boolean };
+const empty: PostForm = { slug: '', title: '', excerpt: '', body_md: '', cover_url: '', author_member_id: null, published: false };
+
+type TeamOption = { id: number; full_name: string; credentials: string | null };
 
 export default function BlogEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -51,10 +53,18 @@ export default function BlogEditPage() {
   const isNew = id === 'new';
 
   const [form, setForm] = useState<PostForm>(empty);
+  const [members, setMembers] = useState<TeamOption[]>([]);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    adminFetch('/admin/content/team/members')
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => setMembers(d.members ?? []))
+      .catch(() => {/* non-fatal: author picker just shows no options */});
+  }, []);
 
   useEffect(() => {
     if (isNew) { setLoading(false); return; }
@@ -63,7 +73,7 @@ export default function BlogEditPage() {
       .then((d) => setForm({
         slug: d.slug, title: d.title, excerpt: d.excerpt ?? '',
         body_md: d.body_md ?? '', cover_url: d.cover_url ?? '',
-        author: d.author ?? '', published: d.published,
+        author_member_id: d.author_member_id ?? null, published: d.published,
       }))
       .catch(() => setError('Not found or access denied'))
       .finally(() => setLoading(false));
@@ -77,7 +87,8 @@ export default function BlogEditPage() {
       excerpt: form.excerpt || null,
       body_md: form.body_md || null,
       cover_url: form.cover_url || null,
-      author: form.author || null,
+      // author text is derived server-side from the linked therapist.
+      author: null,
     };
     try {
       const r = isNew
@@ -145,7 +156,18 @@ export default function BlogEditPage() {
                 <CoverPreview url={form.cover_url} />
               </Field>
               <Field label="Author">
-                <Input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} />
+                <select
+                  value={form.author_member_id ?? ''}
+                  onChange={(e) => setForm({ ...form, author_member_id: e.target.value ? Number(e.target.value) : null })}
+                  className="w-full rounded-lg border border-[#E5E5E5] bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                >
+                  <option value="">— Select therapist —</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.credentials ? `${m.full_name}, ${m.credentials}` : m.full_name}
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Checkbox label="Published" checked={form.published} onChange={(e) => setForm({ ...form, published: e.target.checked })} />
             </div>

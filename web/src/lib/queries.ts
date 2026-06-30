@@ -58,6 +58,7 @@ export type Stat = { id: number; label: string; value: string; suffix: string | 
 export type BlogPost = {
   id: number; slug: string; title: string; excerpt: string | null;
   body_md: string | null; cover_url: string | null; author: string | null;
+  author_credentials: string | null; author_photo_url: string | null;
   published_at: string;
 };
 
@@ -152,17 +153,23 @@ export async function getStats(): Promise<Stat[]> {
 
 export async function getBlogPosts(limit?: number): Promise<BlogPost[]> {
   const { rows } = await q<BlogPost>(
-    `SELECT id, slug, title, excerpt, body_md, cover_url, author,
-            to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
-     FROM bt.blog_posts WHERE published ORDER BY published_at DESC
+    `SELECT b.id, b.slug, b.title, b.excerpt, b.body_md, b.cover_url, b.author,
+            tm.credentials AS author_credentials, tm.photo_url AS author_photo_url,
+            to_char(b.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
+     FROM bt.blog_posts b
+     LEFT JOIN bt.team_members tm ON tm.id = b.author_member_id
+     WHERE b.published ORDER BY b.published_at DESC
      ${limit ? "LIMIT $1" : ""}`, limit ? [limit] : undefined);
   return rows;
 }
 export async function getBlogBySlug(slug: string): Promise<BlogPost | null> {
   const { rows } = await q<BlogPost>(
-    `SELECT id, slug, title, excerpt, body_md, cover_url, author,
-            to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
-     FROM bt.blog_posts WHERE slug = $1 AND published`, [slug]);
+    `SELECT b.id, b.slug, b.title, b.excerpt, b.body_md, b.cover_url, b.author,
+            tm.credentials AS author_credentials, tm.photo_url AS author_photo_url,
+            to_char(b.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS published_at
+     FROM bt.blog_posts b
+     LEFT JOIN bt.team_members tm ON tm.id = b.author_member_id
+     WHERE b.slug = $1 AND b.published`, [slug]);
   return rows[0] ?? null;
 }
 

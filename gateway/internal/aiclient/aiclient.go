@@ -81,6 +81,39 @@ func (c *Client) TriggerFAQEmbed(log func(msg string, args ...any)) {
 	}
 }
 
+// TriggerBlogEmbed asks the AI service to embed a single blog post by id.
+// It is fire-and-forget: the gateway calls it in a goroutine after blog writes
+// so the post joins the semantic-dedup corpus without blocking the admin response.
+// Failures are logged but not propagated.
+func (c *Client) TriggerBlogEmbed(id int64, log func(msg string, args ...any)) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	body, err := json.Marshal(map[string]int64{"id": id})
+	if err != nil {
+		log("aiclient: marshal embed-blog request", "err", err)
+		return
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/embed-blog", bytes.NewReader(body))
+	if err != nil {
+		log("aiclient: build embed-blog request", "err", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		log("aiclient: trigger embed-blog", "err", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log("aiclient: embed-blog unexpected status", "status", resp.StatusCode)
+	}
+}
+
 // Chat sends a message to the AI service and returns its reply.
 func (c *Client) Chat(ctx context.Context, sessionID, message string) (string, error) {
 	reqBody, err := json.Marshal(chatRequest{SessionID: sessionID, Message: message})

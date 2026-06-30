@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -120,16 +121,50 @@ func (h *AdminContentHandler) DeleteFAQ(w http.ResponseWriter, r *http.Request) 
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// triggerBlogEmbed fires a non-blocking embed of a single blog post.
+// Call after any blog create / update so its title vector (used for semantic
+// dedup of new posts) stays current — even for admin-UI writes.
+func (h *AdminContentHandler) triggerBlogEmbed(id int64) {
+	if h.AIClient == nil {
+		return
+	}
+	go h.AIClient.TriggerBlogEmbed(id, func(msg string, args ...any) {
+		slog.Warn(msg, args...)
+	})
+}
+
 // ─── Blog Posts ───────────────────────────────────────────────────────────────
 
 type blogBody struct {
-	Slug      string  `json:"slug"`
-	Title     string  `json:"title"`
-	Excerpt   *string `json:"excerpt"`
-	BodyMD    *string `json:"body_md"`
-	CoverURL  *string `json:"cover_url"`
-	Author    *string `json:"author"`
-	Published bool    `json:"published"`
+	Slug           string  `json:"slug"`
+	Title          string  `json:"title"`
+	Excerpt        *string `json:"excerpt"`
+	BodyMD         *string `json:"body_md"`
+	CoverURL       *string `json:"cover_url"`
+	Author         *string `json:"author"`
+	AuthorMemberID *int64  `json:"author_member_id"`
+	Published      bool    `json:"published"`
+}
+
+// resolveAuthor derives the display author text from a team member when an
+// author_member_id is supplied, so the legacy `author` column (used by the
+// public site + SEO) always matches the linked therapist. Falls back to the
+// caller-provided author text when no member is linked.
+func (h *AdminContentHandler) resolveAuthor(ctx context.Context, memberID *int64, fallback *string) *string {
+	if memberID == nil {
+		return fallback
+	}
+	var name string
+	var cred *string
+	if err := h.Pool.QueryRow(ctx,
+		`SELECT full_name, credentials FROM bt.team_members WHERE id=$1`, *memberID,
+	).Scan(&name, &cred); err != nil {
+		return fallback
+	}
+	if cred != nil && *cred != "" {
+		name = name + ", " + *cred
+	}
+	return &name
 }
 
 func (h *AdminContentHandler) ListBlogPosts(w http.ResponseWriter, r *http.Request) {
@@ -170,22 +205,23 @@ func (h *AdminContentHandler) ListBlogPosts(w http.ResponseWriter, r *http.Reque
 func (h *AdminContentHandler) GetBlogPost(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	type postDetail struct {
-		ID          int64   `json:"id"`
-		Slug        string  `json:"slug"`
-		Title       string  `json:"title"`
-		Excerpt     *string `json:"excerpt"`
-		BodyMD      *string `json:"body_md"`
-		CoverURL    *string `json:"cover_url"`
-		Author      *string `json:"author"`
-		Published   bool    `json:"published"`
-		PublishedAt string  `json:"published_at"`
+		ID             int64   `json:"id"`
+		Slug           string  `json:"slug"`
+		Title          string  `json:"title"`
+		Excerpt        *string `json:"excerpt"`
+		BodyMD         *string `json:"body_md"`
+		CoverURL       *string `json:"cover_url"`
+		Author         *string `json:"author"`
+		AuthorMemberID *int64  `json:"author_member_id"`
+		Published      bool    `json:"published"`
+		PublishedAt    string  `json:"published_at"`
 	}
 	var p postDetail
 	err := h.Pool.QueryRow(r.Context(),
-		`SELECT id, slug, title, excerpt, body_md, cover_url, author, published,
+		`SELECT id, slug, title, excerpt, body_md, cover_url, author, author_member_id, published,
 		        to_char(published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		 FROM bt.blog_posts WHERE id=$1`, id,
-	).Scan(&p.ID, &p.Slug, &p.Title, &p.Excerpt, &p.BodyMD, &p.CoverURL, &p.Author, &p.Published, &p.PublishedAt)
+	).Scan(&p.ID, &p.Slug, &p.Title, &p.Excerpt, &p.BodyMD, &p.CoverURL, &p.Author, &p.AuthorMemberID, &p.Published, &p.PublishedAt)
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "not found")
 		return
@@ -199,17 +235,19 @@ func (h *AdminContentHandler) CreateBlogPost(w http.ResponseWriter, r *http.Requ
 		httpx.WriteValidationError(w, "invalid JSON")
 		return
 	}
+	author := h.resolveAuthor(r.Context(), b.AuthorMemberID, b.Author)
 	var id int64
 	err := h.Pool.QueryRow(r.Context(),
-		`INSERT INTO bt.blog_posts (slug, title, excerpt, body_md, cover_url, author, published)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		b.Slug, b.Title, b.Excerpt, b.BodyMD, b.CoverURL, b.Author, b.Published,
+		`INSERT INTO bt.blog_posts (slug, title, excerpt, body_md, cover_url, author, author_member_id, published)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+		b.Slug, b.Title, b.Excerpt, b.BodyMD, b.CoverURL, author, b.AuthorMemberID, b.Published,
 	).Scan(&id)
 	if err != nil {
 		slog.Error("admin blog create", "err", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	h.triggerBlogEmbed(id)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -220,14 +258,16 @@ func (h *AdminContentHandler) UpdateBlogPost(w http.ResponseWriter, r *http.Requ
 		httpx.WriteValidationError(w, "invalid JSON")
 		return
 	}
+	author := h.resolveAuthor(r.Context(), b.AuthorMemberID, b.Author)
 	tag, err := h.Pool.Exec(r.Context(),
 		`UPDATE bt.blog_posts SET slug=$1, title=$2, excerpt=$3, body_md=$4,
-		        cover_url=$5, author=$6, published=$7 WHERE id=$8`,
-		b.Slug, b.Title, b.Excerpt, b.BodyMD, b.CoverURL, b.Author, b.Published, id)
+		        cover_url=$5, author=$6, author_member_id=$7, published=$8 WHERE id=$9`,
+		b.Slug, b.Title, b.Excerpt, b.BodyMD, b.CoverURL, author, b.AuthorMemberID, b.Published, id)
 	if err != nil || tag.RowsAffected() == 0 {
 		httpx.WriteError(w, http.StatusNotFound, "not found")
 		return
 	}
+	h.triggerBlogEmbed(id)
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

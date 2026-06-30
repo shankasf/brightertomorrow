@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Reveal from "@/components/Reveal";
@@ -129,9 +130,20 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
               <path d="M2 5 Q 50 0 100 4 T 198 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
             <div className="mt-7 inline-flex items-center gap-3 text-sm text-ink-muted">
-              <span className="w-9 h-9 rounded-full bg-sage-100 text-sage-700 grid place-items-center font-display font-semibold text-sm">
-                {(post.author ?? "BT").split(/\s+/).map((s) => s[0]).join("").slice(0, 2).toUpperCase()}
-              </span>
+              {post.author_photo_url ? (
+                <Image
+                  src={post.author_photo_url}
+                  alt={post.author ?? "Author"}
+                  width={36}
+                  height={36}
+                  unoptimized={!post.author_photo_url.startsWith("/team")}
+                  className="w-9 h-9 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <span className="w-9 h-9 rounded-full bg-sage-100 text-sage-700 grid place-items-center font-display font-semibold text-sm">
+                  {(post.author ?? "BT").split(/\s+/).map((s) => s[0]).join("").slice(0, 2).toUpperCase()}
+                </span>
+              )}
               <span className="font-display text-base text-ink">{post.author}</span>
             </div>
             <div className="mt-8 flex justify-center">

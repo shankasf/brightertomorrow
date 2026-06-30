@@ -26,6 +26,7 @@ from .data.payers import resolve_payer_id
 from .data.identifiers import normalize_member_id
 from .core.db import conn
 from .ingestion.embed_faqs import embed_all_faqs
+from .ingestion.embed_blogs import embed_blog
 from .caching.info_cache import detect_intent, get_cached_reply, cache_stats
 from .integrations.tools import _ELIGIBLE_STATES, _validate_dob
 
@@ -631,6 +632,34 @@ async def internal_embed_faqs() -> dict[str, Any]:
     except Exception as exc:
         latency_ms = (time.perf_counter() - t0) * 1000
         logger.exception("embed_faqs_error latency_ms=%.1f error=%s", latency_ms, exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/internal/embed-blog")
+async def internal_embed_blog(request: Request) -> dict[str, Any]:
+    """Embed a single blog post by id. Called by the Go gateway after any blog
+    create/update so the post joins the semantic-dedup corpus immediately.
+
+    Cluster-internal only — not exposed through Traefik (/internal/* has no ingress rule).
+    Body: {"id": <int>}.
+    """
+    import asyncio
+
+    try:
+        body = await request.json()
+        post_id = int(body.get("id"))
+    except Exception:
+        return {"ok": False, "error": "id (int) required"}
+
+    t0 = time.perf_counter()
+    try:
+        ok = await asyncio.get_running_loop().run_in_executor(None, embed_blog, post_id)
+        latency_ms = (time.perf_counter() - t0) * 1000
+        logger.info("embed_blog_ok id=%d updated=%s latency_ms=%.1f", post_id, ok, latency_ms)
+        return {"ok": ok, "id": post_id}
+    except Exception as exc:
+        latency_ms = (time.perf_counter() - t0) * 1000
+        logger.exception("embed_blog_error id=%d latency_ms=%.1f error=%s", post_id, latency_ms, exc)
         return {"ok": False, "error": str(exc)}
 
 
